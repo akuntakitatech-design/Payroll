@@ -1,0 +1,192 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        /* Surfaces — putih / off-white netral, tanpa warna dekoratif */
+        --background: 210 20% 98%;
+        --foreground: 215 25% 17%;
+        --card: 0 0% 100%;
+        --card-foreground: 215 25% 17%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 215 25% 17%;
+
+        /* Identitas utama tetap teal, dipakai terbatas */
+        --primary: 173 80% 26%;
+        --primary-foreground: 0 0% 100%;
+        --primary-soft: 173 42% 95%;
+        --primary-border: 173 30% 80%;
+
+        --secondary: 210 16% 96%;
+        --secondary-foreground: 215 22% 24%;
+        --muted: 210 16% 96%;
+        --muted-foreground: 215 12% 45%;
+        --accent: 210 16% 95%;
+        --accent-foreground: 215 22% 22%;
+
+        --destructive: 0 65% 46%;
+        --destructive-foreground: 0 0% 100%;
+
+        --border: 214 16% 89%;
+        --border-strong: 214 14% 82%;
+        --input: 214 16% 87%;
+        --ring: 173 80% 30%;
+
+        --radius: 0.5rem;
+
+        /* Warna status terkendali */
+        --success: 158 58% 30%;
+        --success-soft: 158 45% 95%;
+        --success-border: 158 30% 78%;
+        --warning: 33 82% 36%;
+        --warning-soft: 40 85% 95%;
+        --warning-border: 38 55% 78%;
+        --danger: 0 65% 44%;
+        --danger-soft: 0 70% 97%;
+        --danger-border: 0 45% 85%;
+        --info: 208 68% 36%;
+        --info-soft: 208 70% 96%;
+        --info-border: 208 40% 80%;
+
+        /* Alias lama agar komponen eksisting tidak rusak */
+        --severity-critical: var(--danger);
+        --severity-warning: var(--warning);
+        --severity-info: var(--info);
+        --severity-success: var(--success);
+
+        --chart-1: 173 80% 26%;
+        --chart-2: 208 68% 36%;
+        --chart-3: 33 82% 44%;
+        --chart-4: 158 45% 34%;
+        --chart-5: 0 60% 48%;
+
+        --font-sans: 'Plus Jakarta Sans', ui-sans-serif, sans-serif;
+        --font-display: 'Plus Jakarta Sans', ui-sans-serif, sans-serif;
+
+        /* Shadow sangat halus — struktur dibawa oleh border */
+        --shadow-sm: 0 1px 1px rgba(16, 24, 40, 0.03);
+        --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.06);
+        --shadow-overlay: 0 12px 32px rgba(16, 24, 40, 0.1);
+
+        --z-dropdown: 100;
+        --z-modal: 200;
+        --z-toast: 300;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    html,
+    body {
+        margin: 0;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    body {
+        @apply bg-background text-foreground;
+        font-family: var(--font-sans);
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    /* Skala tipografi operasional */
+    h1 {
+        font-size: 1.5rem; /* 24px */
+        font-weight: 600;
+        line-height: 1.3;
+        letter-spacing: -0.015em;
+    }
+    h2 {
+        font-size: 1rem; /* 16px */
+        font-weight: 600;
+        line-height: 1.4;
+    }
+    h3 {
+        font-size: 0.9375rem; /* 15px */
+        font-weight: 600;
+        line-height: 1.4;
+    }
+    h4,
+    h5,
+    h6 {
+        font-size: 0.875rem;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+    label {
+        font-size: 0.8125rem; /* 13px */
+        font-weight: 500;
+    }
+
+    /* Angka selalu rapi & sejajar */
+    [data-numeric='true'],
+    .num,
+    table td,
+    table th,
+    input[type='number'] {
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: 'tnum' 1;
+    }
+
+    ::selection {
+        background: hsl(var(--primary-soft));
+        color: hsl(var(--primary));
+    }
+}
+
+@layer utilities {
+    .font-display {
+        font-family: var(--font-display);
+        letter-spacing: -0.01em;
+    }
+    .text-page-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        line-height: 1.3;
+        letter-spacing: -0.015em;
+    }
+    .text-section-title {
+        font-size: 1rem;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+    .text-meta {
+        font-size: 0.75rem;
+        line-height: 1.5;
+        color: hsl(var(--muted-foreground));
+    }
+    .num {
+        font-variant-numeric: tabular-nums;
+    }
+    .shadow-card {
+        box-shadow: var(--shadow-sm);
+    }
+    .shadow-float {
+        box-shadow: var(--shadow-md);
+    }
+    .shadow-overlay {
+        box-shadow: var(--shadow-overlay);
+    }
+    .scrollbar-thin {
+        scrollbar-width: thin;
+    }
+    .scrollbar-thin::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+        background: hsl(var(--border-strong));
+        border-radius: 999px;
+    }
+}
+
+@layer base {
+    [data-debug-wrapper='true'] {
+        display: contents !important;
+    }
+}

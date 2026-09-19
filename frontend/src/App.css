@@ -1,0 +1,31 @@
+/* Application-level helpers. Base tokens live in index.css. */
+.app-surface {
+    background-color: hsl(var(--background));
+}
+
+/* Satu-satunya gradient besar di aplikasi: panel brand pada halaman masuk. */
+.login-accent {
+    background: linear-gradient(
+        165deg,
+        hsl(173 80% 20%) 0%,
+        hsl(174 55% 26%) 100%
+    );
+}
+
+/* Garis aksen tipis pengganti strip gradient dekoratif. */
+.dashboard-strip {
+    background-color: hsl(var(--border));
+}
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+/* Header tabel menempel saat daftar panjang discroll. */
+.table-sticky thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: hsl(var(--muted));
+    box-shadow: inset 0 -1px 0 hsl(var(--border));
+}
