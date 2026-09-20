@@ -19,6 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from .db import NO_ID, get_db
 from .rbac import WILDCARD, resource_module
 from .security import decode_token
+from .tenancy import TenantDatabase, get_tenant_db
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -40,6 +41,25 @@ class AuthContext:
     @property
     def company_id(self) -> Optional[str]:
         return self.company["id"] if self.company else None
+
+    @property
+    def tdb(self) -> TenantDatabase:
+        """Accessor database yang terikat pada perusahaan aktif.
+
+        Dipakai sebagai pengganti ``get_db()`` di dalam endpoint tenant.
+        Setiap query ke tabel tenant otomatis ter-filter ``company_id``,
+        setiap insert otomatis memperoleh ``company_id`` yang benar, dan
+        update/delete tidak dapat menyentuh record perusahaan lain.
+
+        Tabel global (users, companies, roles, permissions, modules, ...)
+        tetap dilayani tanpa scope sehingga autentikasi, RBAC, dan alur
+        super admin berjalan persis seperti sebelumnya.
+
+        Bersifat *fail-safe*: bila tidak ada perusahaan aktif pada konteks,
+        mengakses property ini akan menolak request (HTTP 400) — bukan
+        mengembalikan database tanpa filter.
+        """
+        return get_tenant_db(self.company_id)
 
     def has_permission(self, resource: str, action: str) -> bool:
         if WILDCARD in self.permissions:

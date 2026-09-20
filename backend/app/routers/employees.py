@@ -11,11 +11,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from ..core.db import ASCENDING, ReturnDocument
 
 from ..core.audit import log_action
-from ..core.db import NO_ID, get_db, serialize, serialize_list
+from ..core.db import NO_ID, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.expiry import expiry_state
 from ..core.policy import resolve_config
 from ..core.repo import TenantRepository
+from ..core.tenancy import get_tenant_db
 from ..schemas import (
     EmployeeCreate,
     EmployeeImportCommit,
@@ -68,7 +69,7 @@ SEARCH_FIELDS = ["full_name", "employee_number", "nik", "email", "phone", "job_t
 
 
 async def _validate_refs(company_id: str, data: Dict[str, Any]) -> None:
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     for field, (collection, label) in REF_FIELDS.items():
         value = data.get(field)
         if not value:
@@ -84,7 +85,7 @@ async def _validate_refs(company_id: str, data: Dict[str, Any]) -> None:
 
 
 async def _next_employee_number(company_id: str, code: Optional[str]) -> str:
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     doc = await db.company_settings.find_one_and_update(
         {"company_id": company_id},
         {"$inc": {"employee_id_next_number": 1}},
@@ -104,7 +105,7 @@ async def _next_employee_number(company_id: str, code: Optional[str]) -> str:
 
 
 async def _label_maps(company_id: str, items: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     maps: Dict[str, Dict[str, str]] = {}
     for field, (collection, _label) in REF_FIELDS.items():
         ids = {i.get(field) for i in items if i.get(field)}
@@ -121,7 +122,7 @@ async def _label_maps(company_id: str, items: List[Dict[str, Any]]) -> Dict[str,
 async def _enrich(company_id: str, items: List[Dict[str, Any]], horizon_days: int) -> List[Dict[str, Any]]:
     if not items:
         return items
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     maps = await _label_maps(company_id, items)
     employee_ids = [i["id"] for i in items]
     contracts = serialize_list(
@@ -170,7 +171,7 @@ async def _enrich(company_id: str, items: List[Dict[str, Any]], horizon_days: in
 @router.get("/catalog")
 async def catalog(ctx: AuthContext = Depends(require_permission("employee", "view"))):
     """Semua pilihan dropdown yang dibutuhkan form karyawan - satu panggilan saja."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     out: Dict[str, Any] = {
         "genders": GENDERS,
         "marital_statuses": MARITAL_STATUSES,
@@ -203,7 +204,7 @@ async def catalog(ctx: AuthContext = Depends(require_permission("employee", "vie
 
 @router.get("/stats")
 async def stats(ctx: AuthContext = Depends(require_permission("employee", "view"))):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     reminder = await resolve_config(cid, "contract.expiry_reminder_days")
     horizon = int(reminder.get("value") or 30)
@@ -313,7 +314,7 @@ async def create_employee(
 async def get_employee(
     employee_id: str, ctx: AuthContext = Depends(require_permission("employee", "view"))
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     repo = TenantRepository("employees", cid)
     employee = await repo.get(employee_id)
@@ -427,7 +428,7 @@ async def change_status(
 async def delete_employee(
     employee_id: str, ctx: AuthContext = Depends(require_permission("employee", "delete"))
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     repo = TenantRepository("employees", ctx.company_id)
     employee = await repo.get(employee_id)
     contracts = await db.employee_contracts.count_documents(
@@ -459,7 +460,7 @@ MAX_IMPORT_ROWS = 500
 
 
 async def _import_masters(company_id: str) -> Dict[str, List[Dict[str, Any]]]:
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     out: Dict[str, List[Dict[str, Any]]] = {}
     for coll in IMPORT_MASTER_COLLECTIONS:
         out[coll] = await db[coll].find(
@@ -543,7 +544,7 @@ async def import_validate(
             f"Maksimal {MAX_IMPORT_ROWS} baris per impor, file Anda berisi {len(rows)} baris.",
         )
 
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     existing = await db.employees.find(
         {"company_id": cid, "status": {"$ne": "deleted"}},
@@ -566,7 +567,7 @@ async def import_commit(
     ctx: AuthContext = Depends(require_permission("employee", "create")),
 ):
     """Simpan baris yang sudah lolos validasi. Baris invalid diabaikan."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     company = await db.companies.find_one({"id": cid}, NO_ID) or {}
     repo = TenantRepository("employees", cid)
