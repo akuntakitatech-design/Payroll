@@ -392,7 +392,7 @@ MAX_UPLOAD_MB=15
 R2_ACCOUNT_ID=<cloudflare account id>
 R2_ACCESS_KEY_ID=<r2 access key>
 R2_SECRET_ACCESS_KEY=<r2 secret>
-R2_BUCKET_NAME=<nama bucket>
+R2_BUCKET_NAME=media-akunkita
 R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 R2_PUBLIC_BASE_URL=https://pub-xxxx.r2.dev   # opsional, URL publik bucket
 ```
