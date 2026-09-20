@@ -738,6 +738,36 @@ def _apply_projection(doc: Dict[str, Any], projection: Optional[Dict[str, Any]])
 # --------------------------------------------------------------------------
 # Result objects (subset of pymongo's)
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# READ-ONLY guard (lindungi database produksi dari perubahan)
+# --------------------------------------------------------------------------
+class ReadOnlyError(HTTPException):
+    def __init__(self, table: str, op: str):
+        super().__init__(
+            status_code=423,
+            detail=(
+                f"Mode HANYA-BACA aktif: operasi '{op}' pada data '{table}' diblokir. "
+                "Live preview ini terhubung langsung ke database PRODUKSI, "
+                "sehingga semua perubahan data dinonaktifkan untuk melindungi data asli Anda."
+            ),
+        )
+
+
+def read_only_enabled() -> bool:
+    return bool(getattr(settings, "READ_ONLY", False))
+
+
+def _guard_write(table_name: str, op: str) -> bool:
+    """Return True bila operasi tulis harus di-no-op (silent), raise bila harus diblokir."""
+    if not read_only_enabled():
+        return False
+    if table_name in getattr(settings, "READ_ONLY_SILENT_TABLES", set()):
+        logger.debug("READ-ONLY: %s pada '%s' di-abaikan (silent no-op).", op, table_name)
+        return True
+    raise ReadOnlyError(table_name, op)
+
+
 class InsertOneResult:
     def __init__(self, inserted_id):
         self.inserted_id = inserted_id
@@ -1009,6 +1039,8 @@ class Collection:
     async def insert_one(self, doc: Dict[str, Any]) -> InsertOneResult:
         if "id" not in doc or not doc["id"]:
             doc["id"] = new_id()
+        if _guard_write(self.name, "insert_one"):
+            return InsertOneResult(doc["id"])
         row = _doc_to_row(self.table, doc)
         try:
             async with get_engine().begin() as conn:
@@ -1021,6 +1053,11 @@ class Collection:
         docs = list(docs)
         if not docs:
             return InsertManyResult([])
+        for _d in docs:
+            if not _d.get("id"):
+                _d["id"] = new_id()
+        if _guard_write(self.name, "insert_many"):
+            return InsertManyResult([d["id"] for d in docs])
         rows = []
         for d in docs:
             if not d.get("id"):
@@ -1035,6 +1072,8 @@ class Collection:
 
     async def _update(self, flt, update, upsert: bool, many: bool) -> UpdateResult:
         table = self.table
+        if _guard_write(self.name, "update_many" if many else "update_one"):
+            return UpdateResult(0, 0, None)
         try:
             async with get_engine().begin() as conn:
                 ids = await self._find_ids(conn, flt, None if many else 1, for_update=True)
@@ -1070,6 +1109,8 @@ class Collection:
 
     async def replace_one(self, flt, replacement: Dict[str, Any], upsert: bool = False) -> UpdateResult:
         table = self.table
+        if _guard_write(self.name, "replace_one"):
+            return UpdateResult(0, 0, None)
         try:
             async with get_engine().begin() as conn:
                 ids = await self._find_ids(conn, flt, 1, for_update=True)
@@ -1099,6 +1140,8 @@ class Collection:
         **kwargs,
     ) -> Optional[Dict[str, Any]]:
         table = self.table
+        if _guard_write(self.name, "find_one_and_update"):
+            return await self.find_one(flt, projection)
         try:
             async with get_engine().begin() as conn:
                 ids = await self._find_ids(conn, flt, 1, for_update=True)
@@ -1123,6 +1166,8 @@ class Collection:
 
     async def delete_one(self, flt) -> DeleteResult:
         table = self.table
+        if _guard_write(self.name, "delete_one"):
+            return DeleteResult(0)
         async with get_engine().begin() as conn:
             ids = await self._find_ids(conn, flt, 1)
             if not ids:
@@ -1131,6 +1176,8 @@ class Collection:
             return DeleteResult(1)
 
     async def delete_many(self, flt) -> DeleteResult:
+        if _guard_write(self.name, "delete_many"):
+            return DeleteResult(0)
         async with get_engine().begin() as conn:
             res = await conn.execute(sa.delete(self.table).where(self._where(flt)))
             return DeleteResult(res.rowcount or 0)
@@ -1157,6 +1204,8 @@ class Database:
         return {"ok": 1}
 
     async def execute(self, sql: str, params: Optional[Dict[str, Any]] = None):
+        if read_only_enabled() and not sql.lstrip().lower().startswith(("select", "show", "describe", "explain")):
+            raise ReadOnlyError("database", "execute")
         async with get_engine().begin() as conn:
             return await conn.execute(text(sql), params or {})
 
@@ -1197,6 +1246,9 @@ def _sync_schema(sync_conn) -> None:
 
 async def ensure_indexes() -> None:
     """Create tables / indexes (SQL equivalent of the former Mongo index bootstrap)."""
+    if read_only_enabled():
+        logger.warning("READ-ONLY aktif: sinkronisasi skema/DDL dilewati (skema produksi tidak disentuh).")
+        return
     async with get_engine().begin() as conn:
         await conn.run_sync(_sync_schema)
 

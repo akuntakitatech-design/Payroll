@@ -43,6 +43,14 @@ class Settings:
 
     CORS_ORIGINS: str = os.environ.get("CORS_ORIGINS", "*")
 
+    # ===== Mode hanya-baca (READ-ONLY) =====
+    # Dipakai saat aplikasi ditunjuk ke DATABASE PRODUKSI dari lingkungan preview.
+    # Semua operasi tulis (INSERT/UPDATE/DELETE) ke tabel bisnis diblokir,
+    # dan upload/hapus objek di Cloudflare R2 juga diblokir.
+    READ_ONLY: bool = (os.environ.get("READ_ONLY", "false") or "").strip().lower() in ("1", "true", "yes", "y", "ya")
+    # Tabel yang tulisannya di-no-op (tidak error) agar alur login & audit tetap jalan.
+    READ_ONLY_SILENT_TABLES: set = {"users", "audit_logs", "reminder_logs", "payslip_email_logs"}
+
     JWT_SECRET: str = os.environ.get("JWT_SECRET", "change-me-in-production-hris-secret")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))

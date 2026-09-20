@@ -52,11 +52,28 @@ async def root_plain():
     return {"service": "HRIS & Payroll SaaS API", "status": "ok", "docs": "/docs", "health": "/api/health"}
 
 
+@api.get("/system/mode")
+async def system_mode():
+    """Info mode operasi + status koneksi eksternal (dipakai banner di UI)."""
+    from app.core.storage import storage_configured
+
+    return {
+        "read_only": bool(settings.READ_ONLY),
+        "database": "mariadb",
+        "storage": "cloudflare-r2" if storage_configured() else "not-configured",
+        "auto_seed": os.environ.get("AUTO_SEED", "true").lower() == "true",
+        "message": (
+            "Terhubung ke database & storage PRODUKSI dalam mode HANYA-BACA. "
+            "Data yang tampil adalah data asli; semua perubahan dinonaktifkan."
+        ) if settings.READ_ONLY else "Mode baca-tulis penuh.",
+    }
+
+
 @api.get("/health")
 async def health():
     try:
         await get_db().command("ping")
-        return {"status": "healthy", "database": "mariadb:connected"}
+        return {"status": "healthy", "database": "mariadb:connected", "read_only": bool(settings.READ_ONLY)}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -152,14 +169,20 @@ async def on_startup():
     except Exception as exc:  # noqa: BLE001
         logger.warning("Object storage belum siap: %s", exc)
 
-    try:
-        from app.core.scheduler import start_scheduler
+    if settings.READ_ONLY:
+        logger.warning(
+            "=== MODE HANYA-BACA AKTIF === Database & R2 PRODUKSI terhubung. "
+            "Seed data, penjadwal pengingat, dan semua operasi tulis dinonaktifkan."
+        )
+    else:
+        try:
+            from app.core.scheduler import start_scheduler
 
-        start_scheduler()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Penjadwal pengingat belum siap: %s", exc)
+            start_scheduler()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Penjadwal pengingat belum siap: %s", exc)
 
-    if os.environ.get("AUTO_SEED", "true").lower() == "true":
+    if not settings.READ_ONLY and os.environ.get("AUTO_SEED", "true").lower() == "true":
         try:
             from app.seed import run_seed
 
