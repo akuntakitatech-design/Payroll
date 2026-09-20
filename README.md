@@ -1,4 +1,4 @@
-# HRIS & Payroll Suite
+# HRIS & Payroll Dashboard Dashboard Dashboard JAYA123
 
 Platform **HRIS (Human Resource Information System) & Payroll multi-perusahaan** berbasis web. Satu instalasi dapat melayani banyak perusahaan (tenant) dengan data yang terisolasi penuh, hak akses berbasis peran (RBAC), alur persetujuan yang dapat dikonfigurasi, serta modul payroll yang mengikuti aturan perpajakan Indonesia (PPh 21 metode TER).
 
@@ -6,7 +6,7 @@ Platform **HRIS (Human Resource Information System) & Payroll multi-perusahaan**
 
 ## 1. Overview Project
 
-HRIS & Payroll Suite membantu tim HR dan Finance mengelola siklus hidup karyawan dari satu tempat:
+HRIS & Payroll Dashboard Dashboard Dashboard JAYA123 membantu tim HR dan Finance mengelola siklus hidup karyawan dari satu tempat:
 
 | Area | Fitur Utama |
 |------|-------------|

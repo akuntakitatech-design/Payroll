@@ -97,7 +97,16 @@ def guess_mime(ext: Optional[str], fallback: Optional[str] = None) -> str:
     return MIME_TYPES.get((ext or "").lower(), "application/octet-stream")
 
 
+def _guard_storage_write(op: str) -> None:
+    if getattr(settings, "READ_ONLY", False):
+        raise StorageError(
+            f"Mode HANYA-BACA aktif: operasi '{op}' ke Cloudflare R2 diblokir. "
+            "Preview ini terhubung ke bucket PRODUKSI, jadi upload/hapus berkas dinonaktifkan."
+        )
+
+
 def put_object(path: str, data: bytes, content_type: str) -> dict:
+    _guard_storage_write("upload")
     client = init_storage()
     try:
         client.put_object(
@@ -125,6 +134,9 @@ def get_object(path: str) -> Tuple[bytes, str]:
 
 
 def delete_object(path: str) -> None:
+    if getattr(settings, "READ_ONLY", False):
+        logger.warning("READ-ONLY aktif: hapus objek R2 dilewati (%s).", path)
+        return
     client = init_storage()
     try:
         client.delete_object(Bucket=settings.R2_BUCKET_NAME, Key=path)
