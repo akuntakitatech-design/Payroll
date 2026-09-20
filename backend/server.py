@@ -46,6 +46,12 @@ async def root():
     return {"service": "HRIS & Payroll SaaS", "status": "ok", "version": "1.0.0"}
 
 
+@app.get("/", include_in_schema=False)
+async def root_plain():
+    """Root 200 untuk health check default platform (Coolify/Traefik)."""
+    return {"service": "HRIS & Payroll SaaS API", "status": "ok", "docs": "/docs", "health": "/api/health"}
+
+
 @api.get("/health")
 async def health():
     try:
@@ -106,8 +112,36 @@ async def http_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
+async def _wait_for_database() -> None:
+    """Tunggu MariaDB siap (container DB biasanya start lebih lambat dari backend)."""
+    import asyncio
+    from urllib.parse import urlsplit
+
+    attempts = int(os.environ.get("DB_CONNECT_RETRIES", "30"))
+    delay = float(os.environ.get("DB_CONNECT_RETRY_DELAY", "2"))
+    parts = urlsplit(settings.DATABASE_URL)
+    target = f"{parts.hostname}:{parts.port or 3306}{parts.path}"
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            await get_db().command("ping")
+            logger.info("Terhubung ke MariaDB %s", target)
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            logger.warning(
+                "MariaDB %s belum siap (percobaan %s/%s): %s", target, attempt, attempts, str(exc)[:200]
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError(
+        f"Tidak dapat terhubung ke MariaDB {target} setelah {attempts} percobaan. "
+        "Periksa DATABASE_URL / DB_HOST dan pastikan backend berada di network yang sama dengan database."
+    ) from last_exc
+
+
 @app.on_event("startup")
 async def on_startup():
+    await _wait_for_database()
     await ensure_indexes()
     logger.info("Skema MariaDB & indeks siap.")
     try:
