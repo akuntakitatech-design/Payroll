@@ -74,6 +74,52 @@
         --z-dropdown: 100;
         --z-modal: 200;
         --z-toast: 300;
+
+        /* ================================================================
+         * Token redesign dashboard (tambahan, TIDAK mengubah token lama)
+         * ================================================================ */
+
+        /* Aksen mint & soft blue — hanya untuk chip/hover/highlight, bukan teks utama */
+        --accent-mint: 168 55% 92%;
+        --accent-mint-foreground: 173 80% 18%;
+        --accent-mint-border: 170 28% 78%;
+
+        --accent-sky: 205 70% 92%;
+        --accent-sky-foreground: 208 68% 26%;
+        --accent-sky-border: 208 35% 78%;
+
+        /* Tangga permukaan */
+        --surface-0: 0 0% 100%;
+        --surface-1: 210 20% 98%;
+        --surface-2: 210 18% 96%;
+
+        /* Tangga warna teks */
+        --ink-1: 215 25% 17%;
+        --ink-2: 215 16% 32%;
+        --ink-3: 215 12% 45%;
+
+        /* Varian interaksi warna utama */
+        --primary-strong: 173 85% 20%;
+        --primary-hover: 173 80% 24%;
+        --primary-active: 173 85% 18%;
+
+        --focus-ring: 173 80% 30%;
+        --focus-ring-offset: 0 0% 100%;
+
+        /* Tangga shadow premium (shadow-sm/md/overlay lama tetap dipakai) */
+        --shadow-xs: 0 1px 0 rgba(16, 24, 40, 0.04);
+        --shadow-float-lg: 0 14px 40px rgba(16, 24, 40, 0.12);
+
+        /* Radius lembut untuk kartu dashboard */
+        --radius-card: 0.75rem;
+        --radius-panel: 1rem;
+
+        /* KPI keadaan terkunci / data belum tersedia */
+        --kpi-locked: 215 10% 55%;
+        --kpi-locked-soft: 210 16% 96%;
+        --kpi-locked-border: 214 16% 86%;
+
+        --noise-opacity: 0.035;
     }
 }
 
@@ -171,6 +217,51 @@
     }
     .shadow-overlay {
         box-shadow: var(--shadow-overlay);
+    }
+
+    /* ---- Utility redesign dashboard ---- */
+    .shadow-xs {
+        box-shadow: var(--shadow-xs);
+    }
+    .shadow-premium {
+        box-shadow: var(--shadow-float-lg);
+    }
+
+    /* Gradient halus, dipakai HANYA pada header dashboard (< 20% viewport) */
+    .dashboard-hero {
+        background-image: linear-gradient(
+            135deg,
+            hsl(var(--primary-soft)) 0%,
+            hsl(var(--accent-mint)) 45%,
+            hsl(var(--accent-sky)) 100%
+        );
+    }
+
+    /* Tekstur titik sangat halus — pembeda "premium" tanpa berisik */
+    .surface-noise::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image: radial-gradient(
+            rgba(16, 24, 40, var(--noise-opacity)) 1px,
+            transparent 1px
+        );
+        background-size: 18px 18px;
+    }
+
+    .focus-ring {
+        outline: none;
+    }
+    .focus-ring:focus-visible {
+        box-shadow:
+            0 0 0 2px hsl(var(--focus-ring-offset)),
+            0 0 0 4px hsl(var(--focus-ring));
+    }
+
+    /* Batang chart: sudut lembut + transisi warna saat hover */
+    .chart-bar-cell {
+        transition: fill 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
     .scrollbar-thin {
         scrollbar-width: thin;

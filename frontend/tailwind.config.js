@@ -22,14 +22,18 @@ module.exports = {
         md: 'calc(var(--radius) - 2px)',
         lg: 'var(--radius)',
         xl: 'var(--radius)',
-        '2xl': 'calc(var(--radius) + 2px)'
+        '2xl': 'calc(var(--radius) + 2px)',
+        card: 'var(--radius-card)',
+        panel: 'var(--radius-panel)'
       },
       boxShadow: {
         sm: 'var(--shadow-sm)',
         DEFAULT: 'var(--shadow-sm)',
         md: 'var(--shadow-md)',
         lg: 'var(--shadow-md)',
-        xl: 'var(--shadow-overlay)'
+        xl: 'var(--shadow-overlay)',
+        xs: 'var(--shadow-xs)',
+        premium: 'var(--shadow-float-lg)'
       },
       colors: {
         background: 'hsl(var(--background))',
@@ -46,7 +50,35 @@ module.exports = {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
           soft: 'hsl(var(--primary-soft))',
-          border: 'hsl(var(--primary-border))'
+          border: 'hsl(var(--primary-border))',
+          strong: 'hsl(var(--primary-strong))',
+          hover: 'hsl(var(--primary-hover))',
+          active: 'hsl(var(--primary-active))'
+        },
+        mint: {
+          DEFAULT: 'hsl(var(--accent-mint))',
+          foreground: 'hsl(var(--accent-mint-foreground))',
+          border: 'hsl(var(--accent-mint-border))'
+        },
+        sky: {
+          DEFAULT: 'hsl(var(--accent-sky))',
+          foreground: 'hsl(var(--accent-sky-foreground))',
+          border: 'hsl(var(--accent-sky-border))'
+        },
+        surface: {
+          0: 'hsl(var(--surface-0))',
+          1: 'hsl(var(--surface-1))',
+          2: 'hsl(var(--surface-2))'
+        },
+        ink: {
+          1: 'hsl(var(--ink-1))',
+          2: 'hsl(var(--ink-2))',
+          3: 'hsl(var(--ink-3))'
+        },
+        locked: {
+          DEFAULT: 'hsl(var(--kpi-locked))',
+          soft: 'hsl(var(--kpi-locked-soft))',
+          border: 'hsl(var(--kpi-locked-border))'
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary))',
@@ -114,11 +146,31 @@ module.exports = {
           to: {
             height: '0'
           }
+        },
+        rise: {
+          from: {
+            opacity: '0',
+            transform: 'translateY(6px)'
+          },
+          to: {
+            opacity: '1',
+            transform: 'translateY(0)'
+          }
+        },
+        'pulse-soft': {
+          '0%, 100%': {
+            opacity: '1'
+          },
+          '50%': {
+            opacity: '0.45'
+          }
         }
       },
       animation: {
         'accordion-down': 'accordion-down 0.18s ease-out',
-        'accordion-up': 'accordion-up 0.18s ease-out'
+        'accordion-up': 'accordion-up 0.18s ease-out',
+        rise: 'rise 0.32s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'pulse-soft': 'pulse-soft 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite'
       }
     }
   },

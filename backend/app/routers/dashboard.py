@@ -2,19 +2,44 @@
 
 Rule followed here: only REAL data is shown. Modules that are not implemented yet
 return a `placeholder` state instead of invented numbers.
+
+Catatan kinerja
+---------------
+Database produksi diakses lewat jaringan publik dengan latensi ~240 ms per
+perjalanan. Versi lama menjalankan ~25 query secara BERURUTAN sehingga satu
+permintaan dashboard bisa memakan 25-30 detik. Seluruh query yang tidak saling
+bergantung kini dijalankan BERSAMAAN memakai ``asyncio.gather``, sehingga
+totalnya mendekati satu kali latensi, bukan penjumlahan semuanya.
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
-from ..core.db import ASCENDING, DESCENDING
 
-from ..core.db import NO_ID, get_db, serialize_list
+from ..core.db import ASCENDING, DESCENDING, NO_ID, get_db, serialize_list
 from ..core.deps import AuthContext, get_auth
 from ..core.policy import resolve_config
 from ..core.rbac import MODULES
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+
+# Master data yang dihitung dengan filter status aktif yang sama.
+ACTIVE_COUNT_COLLECTIONS = [
+    "branches",
+    "work_locations",
+    "departments",
+    "divisions",
+    "positions",
+    "job_grades",
+    "cost_centers",
+    "projects",
+    "document_types",
+    "employment_statuses",
+    "contract_types",
+    "certification_types",
+    "approval_workflows",
+]
 
 
 def _parse_date(value: Any) -> Optional[datetime]:
@@ -39,44 +64,115 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
     horizon_days = int(reminder.get("value") or 30)
     horizon = today + timedelta(days=horizon_days)
 
-    counts: Dict[str, int] = {}
-    for coll, key in [
-        ("branches", "branches"),
-        ("work_locations", "work_locations"),
-        ("departments", "departments"),
-        ("divisions", "divisions"),
-        ("positions", "positions"),
-        ("job_grades", "job_grades"),
-        ("cost_centers", "cost_centers"),
-        ("projects", "projects"),
-        ("document_types", "document_types"),
-        ("employment_statuses", "employment_statuses"),
-        ("contract_types", "contract_types"),
-        ("certification_types", "certification_types"),
-        ("approval_workflows", "approval_workflows"),
-    ]:
-        counts[key] = await db[coll].count_documents({"company_id": cid, "status": "active"})
+    # ------------------------------------------------------------------
+    # Gelombang 1: seluruh query yang tidak saling bergantung, dijalankan
+    # bersamaan agar latensi jaringan tidak berakumulasi.
+    # ------------------------------------------------------------------
+    active_count_tasks = [
+        db[coll].count_documents({"company_id": cid, "status": "active"})
+        for coll in ACTIVE_COUNT_COLLECTIONS
+    ]
 
-    counts["documents"] = await db.documents.count_documents(
-        {"company_id": cid, "is_deleted": {"$ne": True}}
-    )
-    counts["employees"] = await db.employees.count_documents({"company_id": cid, "status": "active"})
-    counts["contracts"] = await db.employee_contracts.count_documents(
-        {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}
-    )
-    counts["certifications"] = await db.employee_certifications.count_documents(
-        {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}
-    )
-    member_rows = await db.user_company_roles.find(
-        {"company_id": cid, "status": "active"}, NO_ID
-    ).to_list(5000)
+    other_tasks = [
+        db.documents.count_documents({"company_id": cid, "is_deleted": {"$ne": True}}),
+        db.employees.count_documents({"company_id": cid, "status": "active"}),
+        db.employee_contracts.count_documents(
+            {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}
+        ),
+        db.employee_certifications.count_documents(
+            {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}
+        ),
+        db.company_modules.count_documents({"company_id": cid, "is_active": True}),
+        db.config_overrides.count_documents({"company_id": cid, "status": "active"}),
+        db.user_company_roles.find({"company_id": cid, "status": "active"}, NO_ID).to_list(5000),
+        db.documents.find(
+            {"company_id": cid, "is_deleted": {"$ne": True}, "expiry_date": {"$nin": [None, ""]}},
+            NO_ID,
+        ).to_list(2000),
+        db.employee_contracts.find(
+            {
+                "company_id": cid,
+                "status": {"$nin": ["deleted", "archived"]},
+                "end_date": {"$nin": [None, ""]},
+            },
+            NO_ID,
+        ).to_list(5000),
+        db.employee_certifications.find(
+            {
+                "company_id": cid,
+                "status": {"$nin": ["deleted", "archived"]},
+                "expiry_date": {"$nin": [None, ""]},
+            },
+            NO_ID,
+        ).to_list(5000),
+        db.projects.find(
+            {"company_id": cid, "status": "active", "end_date": {"$nin": [None, ""]}}, NO_ID
+        ).to_list(1000),
+        db.company_modules.find({"company_id": cid}, NO_ID).to_list(200),
+        db.modules.find({}, NO_ID).sort("sort_order", ASCENDING).to_list(200),
+        db.audit_logs.find({"company_id": cid}, NO_ID)
+        .sort("created_at", DESCENDING)
+        .limit(8)
+        .to_list(8),
+        db.employees.find({"company_id": cid, "status": "active"}, NO_ID).to_list(10000),
+        db.departments.find({"company_id": cid, "status": "active"}, NO_ID)
+        .sort("name", ASCENDING)
+        .to_list(500),
+    ]
+
+    gathered = await asyncio.gather(*active_count_tasks, *other_tasks)
+
+    counts: Dict[str, int] = {}
+    for idx, coll in enumerate(ACTIVE_COUNT_COLLECTIONS):
+        counts[coll] = gathered[idx]
+
+    offset = len(ACTIVE_COUNT_COLLECTIONS)
+    (
+        documents_count,
+        employees_count,
+        contracts_count,
+        certifications_count,
+        active_modules,
+        policy_overrides,
+        member_rows,
+        doc_rows,
+        contract_rows_raw,
+        cert_rows_raw,
+        project_rows_raw,
+        module_rows,
+        catalog_raw,
+        recent_raw,
+        employee_rows_raw,
+        dept_rows_raw,
+    ) = gathered[offset:]
+
+    counts["documents"] = documents_count
+    counts["employees"] = employees_count
+    counts["contracts"] = contracts_count
+    counts["certifications"] = certifications_count
     counts["users"] = len({m["user_id"] for m in member_rows})
-    active_modules = await db.company_modules.count_documents({"company_id": cid, "is_active": True})
     counts["active_modules"] = active_modules
     counts["available_modules"] = len(MODULES)
-    counts["policy_overrides"] = await db.config_overrides.count_documents(
-        {"company_id": cid, "status": "active"}
-    )
+    counts["policy_overrides"] = policy_overrides
+
+    docs = serialize_list(doc_rows)
+    contract_rows = serialize_list(contract_rows_raw)
+    cert_rows = serialize_list(cert_rows_raw)
+    projects = serialize_list(project_rows_raw)
+    catalog = serialize_list(catalog_raw)
+    recent = serialize_list(recent_raw)
+    employee_rows = serialize_list(employee_rows_raw)
+    dept_rows = serialize_list(dept_rows_raw)
+
+    # ------------------------------------------------------------------
+    # Gelombang 2: query yang bergantung pada hasil gelombang 1.
+    # ------------------------------------------------------------------
+    user_ids = list({m["user_id"] for m in member_rows})
+    inactive_users = 0
+    if user_ids:
+        inactive_users = await db.users.count_documents(
+            {"id": {"$in": user_ids}, "status": {"$ne": "active"}}
+        )
 
     # ---------------- Perlu Tindakan (real, actionable, no fake data) ----------
     attention: List[Dict[str, Any]] = []
@@ -115,11 +211,6 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             }
         )
 
-    docs = serialize_list(
-        await db.documents.find(
-            {"company_id": cid, "is_deleted": {"$ne": True}, "expiry_date": {"$nin": [None, ""]}}, NO_ID
-        ).to_list(2000)
-    )
     expired, expiring = [], []
     for d in docs:
         exp = _parse_date(d.get("expiry_date"))
@@ -155,16 +246,6 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
         )
 
     # ---- Kontrak kerja & sertifikasi karyawan (modul employee_core) ---------
-    contract_rows = serialize_list(
-        await db.employee_contracts.find(
-            {
-                "company_id": cid,
-                "status": {"$nin": ["deleted", "archived"]},
-                "end_date": {"$nin": [None, ""]},
-            },
-            NO_ID,
-        ).to_list(5000)
-    )
     contracts_expired = [c for c in contract_rows if (_parse_date(c.get("end_date")) or horizon) < today]
     contracts_expiring = [
         c
@@ -196,16 +277,6 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             }
         )
 
-    cert_rows = serialize_list(
-        await db.employee_certifications.find(
-            {
-                "company_id": cid,
-                "status": {"$nin": ["deleted", "archived"]},
-                "expiry_date": {"$nin": [None, ""]},
-            },
-            NO_ID,
-        ).to_list(5000)
-    )
     certs_attention = [
         c
         for c in cert_rows
@@ -224,11 +295,6 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             }
         )
 
-    projects = serialize_list(
-        await db.projects.find(
-            {"company_id": cid, "status": "active", "end_date": {"$nin": [None, ""]}}, NO_ID
-        ).to_list(1000)
-    )
     ending_projects = []
     for p in projects:
         end = _parse_date(p.get("end_date"))
@@ -249,10 +315,6 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             }
         )
 
-    users_no_role = [m["user_id"] for m in member_rows]
-    inactive_users = await db.users.count_documents(
-        {"id": {"$in": list(set(users_no_role))}, "status": {"$ne": "active"}}
-    )
     if inactive_users:
         attention.append(
             {
@@ -267,9 +329,7 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
         )
 
     # ---------------- Module cards ------------------------------------------
-    module_rows = await db.company_modules.find({"company_id": cid}, NO_ID).to_list(200)
     active_keys = {m["module_key"] for m in module_rows if m.get("is_active")} | {"hr_core"}
-    catalog = serialize_list(await db.modules.find({}, NO_ID).sort("sort_order", ASCENDING).to_list(200))
 
     PLACEHOLDER_COPY = {
         "recruitment": "Pelamar masuk, tahapan seleksi dan persetujuan penawaran kerja.",
@@ -319,12 +379,142 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             }
         )
 
-    recent = serialize_list(
-        await db.audit_logs.find({"company_id": cid}, NO_ID)
-        .sort("created_at", DESCENDING)
-        .limit(8)
-        .to_list(8)
-    )
+    # ---------------- Distribusi karyawan per departemen (data nyata) -------
+    dept_index = {d["id"]: d for d in dept_rows}
+    dist_map: Dict[str, int] = {}
+    unassigned = 0
+    for emp in employee_rows:
+        did = emp.get("department_id")
+        if did and did in dept_index:
+            dist_map[did] = dist_map.get(did, 0) + 1
+        else:
+            unassigned += 1
+
+    department_distribution = [
+        {
+            "id": d["id"],
+            "name": d.get("name"),
+            "code": d.get("code"),
+            "count": dist_map.get(d["id"], 0),
+        }
+        for d in dept_rows
+    ]
+    department_distribution.sort(key=lambda x: (-x["count"], str(x.get("name") or "")))
+    if unassigned:
+        department_distribution.append(
+            {"id": None, "name": "Tanpa departemen", "code": None, "count": unassigned}
+        )
+
+    # Karyawan baru bergabung dalam 30 hari terakhir
+    joined_last_30d = 0
+    for emp in employee_rows:
+        joined = _parse_date(emp.get("join_date"))
+        if joined and 0 <= (today - joined).days <= 30:
+            joined_last_30d += 1
+
+    # ---------------- KPI utama ---------------------------------------------
+    # Catatan kejujuran data: modul Absensi belum memiliki tabel/transaksi,
+    # sehingga "Hadir Hari Ini" dikembalikan sebagai unavailable, BUKAN angka karangan.
+    attendance_active = "attendance" in active_keys
+    kpi = {
+        "employees_active": {
+            "available": True,
+            "value": counts["employees"],
+            "meta": f"{len(dept_rows)} departemen · {counts['branches']} cabang",
+            "link": "/employees",
+            "extra": {"joined_last_30d": joined_last_30d},
+        },
+        "attendance_today": {
+            "available": False,
+            "value": None,
+            "module_key": "attendance",
+            "module_active": attendance_active,
+            "reason": (
+                "Modul Absensi belum memiliki data kehadiran. Fungsi absensi harian "
+                "akan tersedia pada tahap pengembangan berikutnya."
+            ),
+            "meta": "Modul aktif, data kehadiran belum tersedia"
+            if attendance_active
+            else "Modul Absensi belum aktif",
+            "action_label": "Lihat Aktivasi Modul",
+            "link": "/setup/modules",
+        },
+        "contracts_ending": {
+            "available": True,
+            "value": len(contracts_expiring),
+            "expired": len(contracts_expired),
+            "horizon_days": horizon_days,
+            "meta": (
+                f"{len(contracts_expired)} sudah berakhir"
+                if contracts_expired
+                else f"Dalam {horizon_days} hari ke depan"
+            ),
+            "severity": "critical" if contracts_expired else ("warning" if contracts_expiring else "normal"),
+            "link": "/reminders?kind=contract",
+        },
+        "modules_active": {
+            "available": True,
+            "value": active_modules,
+            "total": counts["available_modules"],
+            "meta": f"dari {counts['available_modules']} modul tersedia",
+            "link": "/setup/modules",
+        },
+    }
+
+    # ---------------- Ringkasan SDM Hari Ini (data nyata) -------------------
+    hr_today = {
+        "as_of": today.isoformat(),
+        "rows": [
+            {
+                "key": "employees_active",
+                "label": "Karyawan aktif",
+                "value": counts["employees"],
+                "meta": f"{joined_last_30d} bergabung 30 hari terakhir",
+                "tone": "normal",
+                "link": "/employees",
+            },
+            {
+                "key": "contracts_total",
+                "label": "Kontrak kerja tercatat",
+                "value": counts["contracts"],
+                "meta": f"{len(contracts_expiring)} berakhir ≤{horizon_days} hari",
+                "tone": "warning" if contracts_expiring else "normal",
+                "link": "/contracts",
+            },
+            {
+                "key": "contracts_expired",
+                "label": "Kontrak sudah berakhir",
+                "value": len(contracts_expired),
+                "meta": "Perlu diperbarui atau diarsipkan" if contracts_expired else "Semua kontrak masih berlaku",
+                "tone": "critical" if contracts_expired else "success",
+                "link": "/reminders?kind=contract&state=expired",
+            },
+            {
+                "key": "certifications_attention",
+                "label": "Sertifikasi perlu perhatian",
+                "value": len(certs_attention),
+                "meta": f"Dari {counts['certifications']} sertifikasi tercatat",
+                "tone": "warning" if certs_attention else "success",
+                "link": "/reminders?kind=certification",
+            },
+            {
+                "key": "documents",
+                "label": "Dokumen aktif",
+                "value": counts["documents"],
+                "meta": f"{len(expiring)} menjelang berakhir · {len(expired)} kedaluwarsa",
+                "tone": "critical" if expired else ("warning" if expiring else "normal"),
+                "link": "/documents",
+            },
+            {
+                "key": "users",
+                "label": "Pengguna sistem",
+                "value": counts["users"],
+                "meta": f"{counts['policy_overrides']} kebijakan khusus aktif",
+                "tone": "normal",
+                "link": "/users",
+            },
+        ],
+    }
 
     setup_steps = [
         {"key": "company", "label": "Profil perusahaan", "done": bool(ctx.company.get("address")), "link": "/company"},
@@ -367,6 +557,9 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             for d in sorted(expiring + expired, key=lambda x: str(x.get("expiry_date")))[:6]
         ],
         "ending_projects": ending_projects[:6],
+        "kpi": kpi,
+        "department_distribution": department_distribution,
+        "hr_today": hr_today,
         "pending_approvals": {
             "state": "placeholder",
             "count": 0,

@@ -16,6 +16,7 @@ Conventions enforced across every table:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -409,9 +410,13 @@ def json_dumps(value: Any) -> str:
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
+        # pool_pre_ping menambah satu perjalanan jaringan pada SETIAP pengambilan
+        # koneksi. Untuk database yang jauh (latensi ~240 ms) biayanya besar,
+        # sehingga dapat dimatikan lewat DB_POOL_PRE_PING=false. Koneksi basi
+        # tetap ditangani oleh pool_recycle.
         _engine = create_async_engine(
             settings.DATABASE_URL,
-            pool_pre_ping=True,
+            pool_pre_ping=settings.DB_POOL_PRE_PING,
             pool_recycle=1800,
             pool_size=settings.DB_POOL_SIZE,
             max_overflow=settings.DB_MAX_OVERFLOW,
@@ -427,6 +432,34 @@ async def close_db() -> None:
     if _engine is not None:
         await _engine.dispose()
     _engine = None
+
+
+async def warm_pool(size: Optional[int] = None) -> int:
+    """Buka sejumlah koneksi sekaligus lalu kembalikan ke pool.
+
+    Membuka koneksi baru ke MariaDB yang jauh memakan ~1,5 detik (TCP +
+    handshake autentikasi = beberapa perjalanan jaringan), sedangkan query
+    pada koneksi yang sudah ada hanya ~250 ms. Tanpa pemanasan, permintaan
+    pertama yang menjalankan banyak query bersamaan harus membuat puluhan
+    koneksi sekaligus dan terasa sangat lambat.
+
+    Koneksi dibuat BERSAMAAN sehingga pemanasan hanya memakan waktu selama
+    satu kali pembuatan koneksi, lalu dipakai ulang oleh seluruh permintaan.
+    """
+    target = int(size or settings.DB_POOL_SIZE)
+    engine = get_engine()
+
+    async def _open():
+        conn = await engine.connect()
+        await conn.execute(text("SELECT 1"))
+        return conn
+
+    conns = await asyncio.gather(*[_open() for _ in range(target)], return_exceptions=True)
+    ready = [c for c in conns if not isinstance(c, BaseException)]
+    # close() mengembalikan koneksi ke pool (bukan memutus koneksi fisik).
+    await asyncio.gather(*[c.close() for c in ready], return_exceptions=True)
+    logger.info("Kolam koneksi MariaDB dipanaskan: %s/%s koneksi siap.", len(ready), target)
+    return len(ready)
 
 
 # --------------------------------------------------------------------------
