@@ -42,5 +42,15 @@ export const errorMessage = (error, fallback = "Terjadi kesalahan. Silakan coba 
   if (error?.message === "Network Error") {
     return "Tidak dapat menghubungi server. Periksa koneksi internet Anda.";
   }
+  if (error?.code === "ECONNABORTED") {
+    return "Server terlalu lama merespons. Coba lagi beberapa saat.";
+  }
+  const status = error?.response?.status;
+  if (status === 502 || status === 503 || status === 504) {
+    return `Server aplikasi belum siap atau sedang dimulai ulang (HTTP ${status}). Coba lagi dalam beberapa saat.`;
+  }
+  if (status >= 500) {
+    return `Terjadi gangguan pada server (HTTP ${status}). Silakan coba lagi.`;
+  }
   return fallback;
 };
