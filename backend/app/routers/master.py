@@ -4,9 +4,10 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 
 from ..core.audit import log_action
-from ..core.db import NO_ID, get_db
+from ..core.db import NO_ID
 from ..core.deps import AuthContext, get_auth
 from ..core.repo import TenantRepository, reference_count
+from ..core.tenancy import get_tenant_db
 from ..masters import BOOLEAN_FIELDS, MASTERS, NUMERIC_FIELDS
 
 router = APIRouter(prefix="/master", tags=["Master Data"])
@@ -63,7 +64,7 @@ def _coerce(cfg: Dict[str, Any], payload: Dict[str, Any], partial: bool) -> Dict
 
 async def _validate_relations(cfg: Dict[str, Any], company_id: str, data: Dict[str, Any], record_id: Optional[str] = None) -> None:
     relations = cfg.get("relations", {})
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     for field, target in relations.items():
         value = data.get(field)
         if not value:
@@ -88,7 +89,7 @@ async def _enrich(cfg: Dict[str, Any], company_id: str, items):
     relations = cfg.get("relations", {})
     if not relations or not items:
         return items
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     caches: Dict[str, Dict[str, str]] = {}
     for field, target in relations.items():
         ids = {i.get(field) for i in items if i.get(field)}

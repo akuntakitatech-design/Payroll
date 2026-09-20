@@ -15,7 +15,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from ..core.audit import log_action
-from ..core.db import NO_ID, get_db, new_id, now, serialize, serialize_list
+from ..core.db import NO_ID, new_id, now, serialize, serialize_list
+from ..core.tenancy import get_tenant_db
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.payroll import (
     JKK_RISK_CLASSES,
@@ -178,7 +179,7 @@ async def delete_component(
     component_id: str,
     ctx: AuthContext = Depends(require_permission("payroll_component", "delete")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     repo = TenantRepository("payroll_components", ctx.company_id)
     component = await repo.get(component_id)
     used = await db.employee_salaries.count_documents(
@@ -201,7 +202,7 @@ async def delete_component(
 # Struktur gaji karyawan
 # ==========================================================================
 async def _employee_or_404(company_id: str, employee_id: str) -> Dict[str, Any]:
-    db = get_db()
+    db = get_tenant_db(company_id)  # tenant-scoped
     emp = await db.employees.find_one(
         {"company_id": company_id, "id": employee_id, "status": {"$ne": "deleted"}}, NO_ID
     )
@@ -218,7 +219,7 @@ async def list_salaries(
     ctx: AuthContext = Depends(require_permission("employee_salary", "view")),
 ):
     """Daftar karyawan + status kelengkapan struktur gaji."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     query: Dict[str, Any] = {"company_id": cid, "status": {"$ne": "deleted"}}
     if q:
@@ -276,7 +277,7 @@ async def get_salary(
     ctx: AuthContext = Depends(require_permission("employee_salary", "view")),
 ):
     emp = await _employee_or_404(ctx.company_id, employee_id)
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     sal = await db.employee_salaries.find_one(
         {"company_id": ctx.company_id, "employee_id": employee_id, "status": {"$ne": "deleted"}},
         NO_ID,
@@ -331,7 +332,7 @@ async def upsert_salary(
     ctx: AuthContext = Depends(require_permission("employee_salary", "edit")),
 ):
     emp = await _employee_or_404(ctx.company_id, employee_id)
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
 
     data = payload.model_dump(exclude_unset=True)
@@ -395,7 +396,7 @@ async def upsert_salary(
 # ==========================================================================
 async def _calculate_run(run: Dict[str, Any], ctx: AuthContext) -> Dict[str, Any]:
     """Hitung/hitung-ulang seluruh slip gaji dalam satu run."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = run["company_id"]
     cfg = await get_statutory_config(cid)
     catalog_map = await load_components(cid)
@@ -487,7 +488,7 @@ async def list_runs(
     run_status: Optional[str] = Query(None),
     ctx: AuthContext = Depends(require_permission("payroll", "view")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     query: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}
     if year:
         query["year"] = year
@@ -507,7 +508,7 @@ async def create_run(
     payload: PayrollRunCreate,
     ctx: AuthContext = Depends(require_permission("payroll", "create")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     if not 1 <= payload.month <= 12:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Bulan harus antara 1 dan 12.")
@@ -563,7 +564,7 @@ async def get_run(
     run_id: str,
     ctx: AuthContext = Depends(require_permission("payroll", "view")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_or_404(ctx.company_id, run_id)
     items = await db.payroll_items.find(
         {"company_id": ctx.company_id, "run_id": run_id}, NO_ID
@@ -617,7 +618,7 @@ async def update_adjustments(
     ctx: AuthContext = Depends(require_permission("payroll", "edit")),
 ):
     """Ubah lembur/absen/tambahan-potongan satu karyawan lalu hitung ulang slipnya."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     run = await _run_or_404(cid, run_id)
     if run.get("run_status") not in EDITABLE_STATUSES:
@@ -690,7 +691,7 @@ async def update_adjustments(
 async def _transition(
     ctx: AuthContext, run_id: str, new_status: str, action: str, note: Optional[str] = None
 ) -> Dict[str, Any]:
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     run = await _run_or_404(cid, run_id)
     entry = {
@@ -727,7 +728,7 @@ async def submit_run(
     payload: Optional[PayrollRunDecision] = None,
     ctx: AuthContext = Depends(require_permission("payroll", "edit")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_or_404(ctx.company_id, run_id)
     if run.get("run_status") not in EDITABLE_STATUSES:
         raise HTTPException(
@@ -768,7 +769,7 @@ async def approve_run(
                                (payload.note if payload else None))
     # Kirim slip gaji otomatis bila diaktifkan pada pengaturan email.
     try:
-        smtp = await get_db().smtp_settings.find_one({"company_id": ctx.company_id}, NO_ID) or {}
+        smtp = await ctx.tdb.smtp_settings.find_one({"company_id": ctx.company_id}, NO_ID) or {}
         if smtp.get("auto_send_payslip") and smtp.get("host"):
             asyncio.create_task(_send_payslips(ctx.company_id, run_id, None, ctx.user_id, "otomatis"))
             result["payslip_email"] = "Pengiriman slip gaji via email dijalankan di latar belakang."
@@ -813,7 +814,7 @@ async def delete_run(
     run_id: str,
     ctx: AuthContext = Depends(require_permission("payroll", "delete")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_or_404(ctx.company_id, run_id)
     if run.get("run_status") in ("approved", "paid"):
         raise HTTPException(
@@ -833,7 +834,7 @@ async def delete_run(
 # Slip gaji PDF & ekspor
 # ==========================================================================
 async def _payslip_pdf_response(cid: str, item: Dict[str, Any]) -> Response:
-    db = get_db()
+    db = get_tenant_db(cid)  # tenant-scoped
     company = await db.companies.find_one({"id": cid}, NO_ID) or {}
     generated = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
     pdf = build_payslip_pdf(item, company, generated_at=generated)
@@ -855,7 +856,7 @@ async def download_payslip(
     item_id: str,
     ctx: AuthContext = Depends(require_permission("payroll", "view")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     await _run_or_404(ctx.company_id, run_id)
     item = await db.payroll_items.find_one(
         {"company_id": ctx.company_id, "run_id": run_id, "id": item_id}, NO_ID
@@ -883,7 +884,7 @@ async def _run_ready_for_disbursement(cid: str, run_id: str) -> Dict[str, Any]:
 
 
 async def _company_payer(cid: str) -> Dict[str, Any]:
-    db = get_db()
+    db = get_tenant_db(cid)  # tenant-scoped
     settings = await db.company_settings.find_one({"company_id": cid}, NO_ID) or {}
     company = await db.companies.find_one({"id": cid}, NO_ID) or {}
     return {
@@ -901,7 +902,7 @@ async def bank_file_preview(
     ctx: AuthContext = Depends(require_permission("payroll", "export")),
 ):
     """Ringkasan sebelum Finance mengunduh file transfer bank."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_ready_for_disbursement(ctx.company_id, run_id)
     items = await db.payroll_items.find(
         {"company_id": ctx.company_id, "run_id": run_id}, NO_ID
@@ -940,7 +941,7 @@ async def download_bank_file(
     ctx: AuthContext = Depends(require_permission("payroll", "export")),
 ):
     """File transfer massal (CSV koma / TXT pipa) siap diunggah ke internet banking."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_ready_for_disbursement(ctx.company_id, run_id)
     items = await db.payroll_items.find(
         {"company_id": ctx.company_id, "run_id": run_id}, NO_ID
@@ -1056,7 +1057,7 @@ async def statutory_report(
     ctx: AuthContext = Depends(require_permission("payroll", "view")),
 ):
     """Rekap iuran BPJS dan PPh 21 per karyawan untuk pelaporan bulanan."""
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_or_404(ctx.company_id, run_id)
     items = await db.payroll_items.find(
         {"company_id": ctx.company_id, "run_id": run_id}, NO_ID
@@ -1083,7 +1084,7 @@ async def export_statutory_report(
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
 
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_or_404(ctx.company_id, run_id)
     items = await db.payroll_items.find(
         {"company_id": ctx.company_id, "run_id": run_id}, NO_ID
@@ -1176,7 +1177,7 @@ async def _send_payslips(
     trigger: str,
 ) -> Dict[str, Any]:
     """Kirim slip gaji PDF ke email masing-masing karyawan."""
-    db = get_db()
+    db = get_tenant_db(cid)  # tenant-scoped
     run = await db.payroll_runs.find_one({"company_id": cid, "id": run_id}, NO_ID)
     if not run:
         return {"sent": 0, "failed": 0, "skipped": 0, "message": "Payroll tidak ditemukan."}
@@ -1284,7 +1285,7 @@ async def payslip_email_logs(
     run_id: str,
     ctx: AuthContext = Depends(require_permission("payroll", "view")),
 ):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     await _run_or_404(ctx.company_id, run_id)
     logs = await db.payslip_email_logs.find(
         {"company_id": ctx.company_id, "run_id": run_id}, NO_ID
@@ -1301,7 +1302,7 @@ async def export_run(
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
 
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     run = await _run_or_404(ctx.company_id, run_id)
     items = await db.payroll_items.find(
         {"company_id": ctx.company_id, "run_id": run_id}, NO_ID
@@ -1372,7 +1373,7 @@ async def my_payslips(ctx: AuthContext = Depends(get_auth)):
             status.HTTP_403_FORBIDDEN,
             "Modul Payroll belum diaktifkan untuk perusahaan ini.",
         )
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     emp = await resolve_own_employee(cid, ctx.user)
     if not emp:
@@ -1425,7 +1426,7 @@ async def my_payslip_pdf(item_id: str, ctx: AuthContext = Depends(get_auth)):
     if not ctx.has_module("payroll"):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Modul Payroll belum diaktifkan untuk perusahaan ini.")
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     emp = await resolve_own_employee(cid, ctx.user)
     if not emp:
@@ -1453,7 +1454,7 @@ async def my_payslip_pdf(item_id: str, ctx: AuthContext = Depends(get_auth)):
 # ==========================================================================
 @router.get("/summary")
 async def summary(ctx: AuthContext = Depends(require_permission("payroll", "view"))):
-    db = get_db()
+    db = ctx.tdb  # tenant-scoped
     cid = ctx.company_id
     latest = await db.payroll_runs.find(
         {"company_id": cid, "status": {"$ne": "deleted"}}, NO_ID
