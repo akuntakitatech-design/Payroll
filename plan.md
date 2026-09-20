@@ -17,14 +17,31 @@
 
 > Status fitur aplikasi: bundle fitur (Payroll Run + Renewal Kontrak + Email Reminder + Import Excel) **sudah terimplementasi** dan sebelumnya **agent-tested** pada environment Emergent.
 
-**Objective baru (governing request): Productionization untuk Coolify**
-- Migrasi stack menjadi **1 repo** (root) dengan base directory `./backend` dan `./frontend`.
-- Deploy di Coolify memakai **Docker build strategy** (bukan Emergent supervisor).
-- **Database FULL MariaDB** menggantikan MongoDB (Motor) sepenuhnya.
-- Tambahkan **phpMyAdmin** sebagai GUI service.
-- Storage file/dokumen pindah dari Emergent object storage ke **Cloudflare R2 (S3-compatible)** via boto3.
-- Target domain aplikasi: **`hris.akuntakita.com`**.
-- Seed/demo data tetap dipertahankan (via `AUTO_SEED`).
+**Objective baru (governing request saat ini): Foundation Penguatan Tenant Isolation (Tahap 1 SaaS) — WAJIB**
+- Menghilangkan ketergantungan pada developer menulis filter manual `{"company_id": ctx.company_id}` untuk setiap query.
+- Membuat **tenant-aware enforcement** di data access layer agar semua operasi ke tabel tenant otomatis terikat ke `active company` dari authenticated context.
+- Prinsip:
+  - **Tidak** mengganti adapter Mongo-style existing.
+  - **Tidak** mengganti SQLAlchemy Core / menambah ORM baru.
+  - **Tidak** menambah Alembic.
+  - **Tidak** mengubah struktur 31 tabel tenant existing.
+  - **Tidak** mengubah bentuk JWT, auth, role, semantics `company_id`.
+  - Tetap kompatibel dengan pola Mongo-style (`find`, `find_one`, `update_one`, `$or`, `$regex`, dsb).
+  - **Fail-safe**: akses tenant-scoped tanpa company context harus ditolak.
+  - Platform bypass hanya lewat mekanisme internal eksplisit yang tidak bisa dipakai role tenant biasa.
+
+**Larangan eksplisit (untuk tahap ini)**
+- Jangan membuat/menambah: `tenant_subscriptions`, `subscription_history`, `platform_settings`, `platform_audit_logs`, `tenant_profiles`.
+- Jangan membuat: role `PLATFORM_OWNER`, Platform Console, subscription/trial.
+- Jangan mengubah domain/deployment/env/UI.
+
+**Catatan status terbaru (berdasarkan sesi ini)**
+- Preview Emergent: backend/frontend berjalan, `/api/health` mengembalikan `mariadb:connected` dan `read_only: true`.
+- GitHub:
+  - PR #1–#5: **merged**.
+  - PR #6 (redesign dashboard premium): **merged**.
+  - **PR #7 (Tenant Isolation Foundation / Tahap 1 SaaS): OPEN, mergeable clean (6 file, +949/-43).**
+- Audit SaaS readiness telah selesai (dokumen lokal `/app/AUDIT_SAAS_READINESS.md`, belum di-commit).
 
 ---
 
@@ -55,270 +72,156 @@
 ---
 
 ### Phase 2 — Backend V1 (build around proven core) ✅ **Completed (agent-tested)**
-**User stories**
-1. Sebagai HR, saya ingin menjalankan payroll per periode (bulan/tahun) agar gaji bisa diproses massal.
-2. Sebagai HR, saya ingin mengubah lembur/absen/adjustment per karyawan agar hasil payroll sesuai kondisi aktual.
-3. Sebagai Approver, saya ingin menyetujui payroll run via workflow yang sama dengan modul lain.
-4. Sebagai Karyawan, saya ingin melihat dan mengunduh **slip gaji saya sendiri**.
-5. Sebagai Admin, saya ingin mengatur SMTP + jadwal reminder per perusahaan dan menguji kirim email.
-
-**Core modules (new/updated)**
-- `app/core/ter.py`: bracket tables (A/B/C) + resolver kategori dari PTKP.
-- `app/core/payroll.py`: engine murni (proration, overtime, BPJS caps, TER bulanan, Pasal 17 annual/Dec, non-NPWP toggle default OFF).
-- `app/core/pdf.py`: renderer slip gaji PDF (reportlab).
-- `app/core/excel.py`: template + parse + validate employee rows (openpyxl).
-- `app/core/mailer.py`: SMTP client (TLS/SSL/none), password write-only, never logged.
-- `app/core/scheduler.py`: APScheduler AsyncIOScheduler on startup; schedule WIB + idempotency via reminder_logs.
-
-**DB collections (tenant-scoped via `TenantRepository`)**
-- `payroll_components`, `employee_salaries`, `employee_salary_history`, `payroll_runs`, `payroll_items`, `smtp_settings`, `reminder_settings`, `reminder_logs`.
-
-**Routers**
-- `app/routers/payroll.py`:
-  - payroll catalog/config, komponen gaji CRUD, struktur gaji karyawan, payroll run lifecycle (create/recalculate/submit/approve/reject/mark-paid/delete), export excel, payslip pdf.
-  - self-service: `/api/payroll/my/payslips` + `/api/payroll/my/payslips/{item_id}/payslip`.
-- `app/routers/contracts.py`:
-  - `GET /contracts/{id}/renew-preview`, `POST /contracts/{id}/renew`.
-- `app/routers/employees.py`:
-  - `GET /employees/import/template`, `GET /employees/import/columns`, `POST /employees/import/validate`, `POST /employees/import/commit`.
-- `app/routers/settings_mail.py`:
-  - SMTP settings, test email, reminder settings, preview, send-now, logs.
-
-**RBAC / Modules / Seed**
-- Permissions payroll/payroll_component/employee_salary + employee own payslip access.
-- Seed top-up mekanisme agar role lama mendapat permission baru tanpa reset.
-
-**Deps**
-- `reportlab`, `openpyxl`, `apscheduler`, `aiosmtpd`.
-
-**Phase exit**
-- Backend smoke: `/app/backend/smoke_api.py` green.
-
-**Result**
-- `smoke_api.py`: **137/137** lulus.
-- UI-level backend testing (testing agent): **109/111** lulus.
+(**Tetap, tidak ada perubahan untuk Tahap 1 SaaS**)
 
 ---
 
-### Phase 3 — Frontend V1 (UI parity + UX) ✅ **Completed (agent-tested via compile + preview screenshots)**
-**User stories**
-1. Sebagai HR, saya ingin melihat daftar payroll run per periode dan statusnya.
-2. Sebagai HR, saya ingin membuka detail payroll run dan mengedit adjustment per karyawan lalu recalculation.
-3. Sebagai Approver, saya ingin approve/reject payroll dari halaman detail dengan feedback.
-4. Sebagai Karyawan, saya ingin halaman “Slip Gaji Saya” untuk download PDF.
-5. Sebagai Admin, saya ingin UI setting SMTP + reminder windows + jadwal + log agar pengingat dapat diaudit.
-6. Sebagai HR, saya ingin perpanjang kontrak dari kalender masa berlaku tanpa input berulang.
-7. Sebagai HR Admin, saya ingin impor karyawan dari Excel dengan validasi baris yang jelas.
-
-**Pages/UX (reuse tokens + shared components)**
-- Routing + nav:
-  - Update `frontend/src/App.js` menambahkan routes:
-    - `/payroll/runs`, `/payroll/runs/:runId`, `/payroll/components`, `/payroll/salaries`, `/payroll/config`, `/payroll/my-payslips`, `/employees/import`, `/settings/mail`.
-  - Update `frontend/src/lib/nav.js`:
-    - Grup baru **“Payroll & Pajak”**.
-    - Item **“Slip Gaji Saya”** ditampilkan tanpa permission (resource `null`), dan `filterNav` mendukung `resource=null`.
-    - Entry placeholder modul payroll disembunyikan.
-
-- Payroll:
-  - `PayrollRunsPage` (list + create period dialog) ✅
-  - `PayrollRunDetailPage` ✅
-  - `PayrollComponentsPage` (CRUD) ✅
-  - `EmployeeSalariesPage` + `SalaryEditorDialog` ✅
-  - `PayrollConfigPage` ✅
-
-- Employee self-service:
-  - `MyPayslipsPage` ✅
-
-- Contract renewal:
-  - `ContractRenewDialog` ✅
-  - Integrasi tombol **Perpanjang** pada `ExpiryCalendarPage` ✅
-  - Integrasi aksi **Perpanjang kontrak** pada dropdown aksi kontrak di `EmployeeDetailPage` ✅
-
-- Excel import:
-  - `EmployeeImportPage` ✅
-  - `EmployeesPage` tombol “Impor Excel” ✅
-
-- SMTP & reminders:
-  - `MailSettingsPage` ✅
-
-- Utilities:
-  - `frontend/src/lib/download.js` ✅
-
-**Quality gates (done)**
-- Compile check: `esbuild` bundle test clean.
-- Visual check: screenshot preview.
+### Phase 3 — Frontend V1 (UI parity + UX) ✅ **Completed (agent-tested)**
+(**Tetap, tidak ada perubahan untuk Tahap 1 SaaS**)
 
 ---
 
-### Phase 4 — Harden · Regression · Security ✅ **Completed (E2E + fix loop + cleanup)**
-**User stories**
-1. Sebagai admin multi-perusahaan, saya ingin tenant isolation payroll/reminder/import tetap aman.
-2. Sebagai auditor, saya ingin setiap perubahan payroll/salary/reminder/renewal terekam audit log.
-3. Sebagai HR, saya ingin histori reminder terlihat agar bisa membuktikan email terkirim.
-4. Sebagai pengguna, saya ingin error message jelas (Bahasa) saat validasi Excel gagal.
-5. Sebagai karyawan, saya ingin dijamin tidak bisa mengakses slip gaji orang lain.
-6. Sebagai user, saya ingin UX rapi: loading/empty/error state konsisten.
-
-**E2E coverage**
-- Payroll lifecycle lengkap, self-service, import excel, contract renewal, mail settings, tenant isolation.
-
-**Bugs found & fixed (all resolved)**
-- PayrollConfigPage crash → response normalization.
-- MailSettingsPage crash → flatten preview items.
-- Logout tertutup toaster → pindah posisi.
-- Hydration warning → perapihan markup.
-- Enrich komponen gaji → backend enrich.
-- Silent reload untuk stability.
-
-**Cleanup & demo data state (restored)**
-- Dataset demo dipulihkan.
+### Phase 4 — Harden · Regression · Security ✅ **Completed (E2E)**
+(**Tetap, tidak ada perubahan untuk Tahap 1 SaaS**)
 
 ---
 
-### Phase 5 — Coolify Productionization (Docker + MariaDB + phpMyAdmin + R2) 🟨 **In Progress (new)**
-**Tujuan fase**
-1. Aplikasi dapat di-build dan di-deploy di Coolify dengan **Docker build strategy** dalam **1 project**.
-2. Backend memakai **MariaDB** (bukan MongoDB) untuk semua modul.
-3. `phpMyAdmin` tersedia sebagai service GUI.
-4. Upload/download dokumen memakai **Cloudflare R2** (S3-compatible) dan tidak bergantung pada Emergent.
-5. Tetap mempertahankan seed/demo data (`AUTO_SEED=true`).
+### Phase 4B — Preview Produksi Aman (READ_ONLY) ✅ **Completed (merged via PR #4)**
+(**Tetap. Ini menjadi constraint untuk pengujian: tes tulis tidak boleh menyentuh DB produksi.**)
 
-#### Phase 5A — Repo layout & Docker build baseline
-- Root repo tetap 1, dengan:
-  - `./backend` untuk FastAPI
-  - `./frontend` untuk React (craco)
-- Tambahkan file:
-  - `docker-compose.yml` di root (4 services: `mariadb`, `phpmyadmin`, `backend`, `frontend`)
-  - `backend/Dockerfile` (Python 3.11, install deps, run uvicorn)
-  - `frontend/Dockerfile` (multi-stage: Node build → Nginx static)
-  - `frontend/nginx.conf` (serve React + reverse-proxy `/api` → `backend:8001`)
-  - `.dockerignore` (root, backend, frontend) untuk build cepat & aman
-- Frontend:
-  - Pastikan build output CRA ada di `/frontend/build`.
-  - Nginx fallback `try_files $uri /index.html`.
+---
 
-#### Phase 5B — Database migration: MongoDB (Motor) → MariaDB (FULL)
-**Keputusan yang dikunci**: FULL MariaDB menggantikan MongoDB.
+### Phase 4C — Aturan Kerja Repo (Manusia + AI) ✅ **Completed (merged via PR #5)**
+(**Tetap. Semua perubahan Tahap 1 SaaS harus melalui PR.**)
 
-**Langkah implementasi**
-- Ubah `app/core/config.py`:
-  - Ganti `MONGO_URL` menjadi `DATABASE_URL` atau komponen `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`.
-- Ganti `app/core/db.py`:
-  - Implementasi adapter async berbasis SQLAlchemy Core + asyncmy, namun **menyediakan API kompatibel** dengan pemakaian existing code:
-    - `get_db()` mengembalikan object `DB` yang mendukung `db.<collection>` / `db[collection]`.
-    - Collection API: `find/find_one/insert_one/insert_many/update_one/update_many/delete_one/delete_many/count_documents/distinct/find_one_and_update/replace_one`.
-    - Cursor API: `sort/skip/limit/to_list`.
-  - Dukungan filter ops yang dipakai codebase:
-    - `$ne,$in,$nin,$regex/$options,$or,$gt,$gte,$lt,$lte,$exists`
-    - khusus: dotted key `components.component_id` (query JSON)
-  - Dukungan update ops yang dipakai:
-    - `$set,$inc,$push,$setOnInsert`, `upsert=True`
-  - Ekspor konstanta kompatibilitas:
-    - `ASCENDING=1`, `DESCENDING=-1`
-    - `ReturnDocument` (enum minimal: BEFORE/AFTER)
-    - `NO_ID` (ignored, tapi diterima untuk kompat)
-  - Datetime disimpan `DATETIME(6)` UTC naive (mimic behavior sebelumnya).
-- Skema MariaDB:
-  - Buat tabel per collection (≈38), minimal kolom:
-    - `id CHAR(36) PK`, `company_id CHAR(36)`, `status VARCHAR`, `created_at`, `updated_at`, `created_by`, `updated_by`
-  - Kolom spesifik per collection dibuat sesuai field yang sudah diekstrak dari code.
-  - Field kompleks disimpan sebagai JSON:
-    - `payroll_items` (earnings/deductions/bpjs/tax/totals/adjustments/attendance/period)
-    - `payroll_runs` (totals/history/skipped/statutory_snapshot)
-    - `employee_salaries.components`, `audit_logs.before_value/after_value/changed_fields`, `config_overrides.value`
-  - Index/unique constraints disesuaikan dari `ensure_indexes()` (migrasi menjadi DDL index MariaDB).
-- Perubahan router yang mengimpor pymongo:
-  - `employees.py` (ReturnDocument), `dashboard.py` (ASC/DESC), `audit_logs.py`.
-  - Ganti import dari `pymongo` menjadi import dari `app.core.db`.
-- Update `server.py`:
-  - `health` ping ke MariaDB.
-  - `ensure_indexes()` menjadi `ensure_schema()` / `ensure_indexes_sql()`.
+---
 
-**Validation**
-- Jalankan backend lokal menggunakan MariaDB (compose) dan pastikan:
-  - login, list master, employees, payroll run list/detail, import validate/commit, reminder preview/log.
-  - seed sukses tanpa duplikasi.
+### Phase 4D — Redesign Dashboard Premium (Desktop) ✅ **Completed (merged via PR #6)**
+(**Di luar scope Tahap 1 SaaS; sudah selesai dan merged.**)
 
-#### Phase 5C — Storage migration: Emergent → Cloudflare R2
-- Ganti `app/core/storage.py`:
-  - Implementasi R2 via boto3:
-    - `put_object(path, data, content_type)`: upload ke bucket
-    - `get_object(path)`: download bytes + content-type
-    - (opsional) `delete_object(path)` untuk hard delete (tetap boleh soft delete di DB)
-  - Env placeholders (Coolify env):
-    - `R2_ACCOUNT_ID`
-    - `R2_ACCESS_KEY_ID`
-    - `R2_SECRET_ACCESS_KEY`
-    - `R2_BUCKET_NAME` (**perlu nilai final dari user**)
-    - `R2_ENDPOINT_URL` (atau derive dari account id)
-    - `R2_PUBLIC_BASE_URL` (opsional bila butuh direct URL; default tetap streaming via API)
-  - Tetap gunakan namespace path eksisting: `hris-payroll/companies/{company_id}/documents/{file_id}.{ext}`.
+---
 
-**Catatan**
-- Kredensial dari `CredProduction.txt` tidak boleh di-commit atau di-print ke log.
-- Token/key yang terlanjur dishare via chat sebaiknya direvoke/rotate setelah deploy stabil.
+### Phase 5 — SaaS Tahap 1: Tenant Isolation Foundation ✅ **IMPLEMENTED — PR #7 OPEN (menunggu review/merge)**
 
-#### Phase 5D — Coolify networking: single domain + reverse-proxy
-- Service `frontend` (Nginx) menjadi entrypoint HTTP.
-- Nginx config:
-  - `/` → React static
-  - `/api` → proxy_pass ke `http://backend:8001` (tanpa mengubah prefix `/api`)
-- CORS:
-  - Untuk production single domain, `CORS_ORIGINS` bisa diset `*` atau domain tunggal.
-  - Backend tetap support list origins (comma-separated) untuk fleksibilitas.
+#### 5.1 Latar masalah
+Saat ini isolasi tenant terjadi karena developer menambahkan filter manual:
+```json
+{"company_id": ctx.company_id}
+```
+Risiko: 1 query lupa filter ⇒ data lintas perusahaan dapat terbaca/terubah.
 
-#### Phase 5E — Seed preservation
-- Pastikan `AUTO_SEED=true` tetap bekerja di MariaDB.
-- Porting seed:
-  - Port fungsi `_upsert` dan semua insert demo agar menggunakan adapter SQL.
-  - Pastikan behavior `upsert` dan uniqueness (roles/permissions/modules, company_settings unique per company, dsb).
+#### 5.2 Temuan analisis (Step A) ✅
+- **Choke point tunggal terbaik** ada di `Collection._where()` (`backend/app/core/db.py:891`) karena dipakai oleh:
+  - `find/find_one` via `_select`
+  - `count_documents`
+  - `distinct`
+  - `_find_ids` → dipakai oleh `update_one/update_many/replace_one/find_one_and_update/delete_one`
+  - `delete_many`
+  ⇒ Mengikat `_where()` berarti mengikat seluruh read + matching update/delete.
+- `compile_filter()` menggabungkan top-level key dengan `and_()`, sehingga injeksi filter `company_id` pada top-level aman meskipun query memiliki `$or/$and/$nor`.
+- Jalur insert tidak melewati `_where()` ⇒ perlu enforcement khusus untuk insert/upsert.
+- Koreksi audit: sudah ada `TenantRepository` (`backend/app/core/repo.py`) yang melakukan scoping untuk sebagian master data, namun banyak router masih memakai `db = get_db()` langsung. Gap utama ada pada akses DB yang tidak melalui repository.
 
-#### Phase 5F — Documentation update (README)
-- Tambahkan section Deploy to Coolify:
-  - Arsitektur 4 service
-  - Env vars backend/frontend
-  - Setup domain `hris.akuntakita.com`
-  - phpMyAdmin access
-  - R2 config
+#### 5.3 Desain solusi (Step B) ✅ **Dibuat (additive, minimal)**
+**Tujuan desain:** menambah lapisan tenant-aware tanpa merombak `core/db.py`.
 
-#### Phase 5G — Final verification
-- Smoke test endpoints (curl) dan UI flows utama.
-- Minimal acceptance:
-  - `/api/health` healthy
-  - login berhasil
-  - daftar payroll runs muncul
-  - create payroll run + recalc tidak error
-  - dokumen upload/download bekerja via R2
-  - reminder preview & send-now tidak crash
+**Deliverables yang sudah dibuat (PR #7):**
+1. **File baru** `backend/app/core/tenancy.py` (303 baris)
+   - `TenantContextMissing(HTTPException 400)` — fail-safe jika tabel tenant diakses tanpa company context.
+   - `CrossTenantDenied(HTTPException 403)` — jika client mencoba memaksa/override company_id atau mengakses record tenant lain.
+   - `TenantCollection(Collection)`:
+     - override `_where()` untuk menyuntik filter `company_id` sebagai enforcement tunggal.
+     - defense-in-depth: bila filter sudah memuat `company_id` dan nilainya berbeda dari context ⇒ **403**.
+     - override `insert_one/insert_many/_upsert_doc/replace_one` untuk memaksa `doc["company_id"]` dari context.
+     - update/delete cross-tenant terblok karena `_find_ids` selalu ter-scope.
+   - `TenantDatabase`:
+     - mengembalikan `TenantCollection` untuk tabel tenant dan `Collection` biasa untuk `GLOBAL_COLLECTIONS`.
+     - **Fail-closed:** nama tabel yang tidak dikenal diperlakukan sebagai tenant (tetap ter-scope).
+     - `unscoped_db(reason)` sebagai satu-satunya bypass eksplisit + logging (tidak terjangkau dari request).
+
+2. **Perubahan additive** di `backend/app/core/deps.py`
+   - Property baru pada `AuthContext`: `ctx.tdb` (tenant db accessor) yang memanggil `get_tenant_db(ctx.company_id)`.
+
+**Catatan penting:** `backend/app/core/db.py` **TIDAK DIUBAH SAMA SEKALI** (hanya diturunkan/subclass).
+
+#### 5.4 Migrasi bertahap (Step C + D) ✅ **POC selesai, defense-in-depth dipertahankan**
+**Scope POC migrasi (sudah diterapkan, PR #7):**
+1. **Employees** (`backend/app/routers/employees.py`)
+   - 6 endpoint + 5 helper: `db = ctx.tdb` atau `db = get_tenant_db(company_id)`.
+2. **Payroll** (`backend/app/routers/payroll.py`)
+   - 22 endpoint + 4 helper + 1 pemanggilan khusus: `db = ctx.tdb` atau `db = get_tenant_db(cid)`.
+3. **Master data** (`backend/app/routers/master.py`)
+   - 2 helper yang dipakai untuk seluruh entitas master: `db = get_tenant_db(company_id)`.
+
+**Defense-in-depth:** filter manual `{"company_id": ctx.company_id}` yang sudah ada **tidak dihapus**.
+
+#### 5.5 Automated tests (Step E) ✅
+Constraint: preview terhubung ke MariaDB produksi dengan `READ_ONLY=true`, sehingga tes tulis **tidak boleh** dilakukan ke produksi.
+
+**Test baru (PR #7):** `backend/tests/test_tenant_isolation.py`
+- Berjalan di **SQLite + aiosqlite** pada file DB temporer.
+- Tidak menambah dependency baru (menggunakan `asyncio.run`, bukan `pytest-asyncio`).
+- **Hasil:** 12/12 lulus.
+
+**Cakupan test utama:**
+1. Tenant A bisa membaca data sendiri.
+2. Tenant A tidak bisa membaca data Tenant B.
+3. Tenant A tidak bisa update data Tenant B.
+4. Tenant A tidak bisa delete data Tenant B.
+5. Insert/upsert tenant otomatis mendapat company_id yang benar.
+6. Akses tenant-scoped tanpa company context ditolak (HTTP 400).
+7. GLOBAL_COLLECTIONS tetap bekerja seperti existing.
+8. switch-company (simulasi scope A ↔ B) tetap bekerja.
+9. super_admin existing tidak rusak (semantik `company_id = NULL` tetap utuh) + bypass eksplisit `unscoped_db(reason)`.
+10. payroll flow minimal tetap bekerja.
+11. Regression keamanan: `company_id` dari klien tidak boleh mengalahkan context (ditolak 403).
+12. SQL selalu memuat batasan company_id pada tabel tenant dan TIDAK memuat batasan pada tabel global.
+
+#### 5.6 Validation & verification ✅
+- Backend compile OK.
+- Aplikasi preview tetap sehat (`/api/health` OK; `read_only: true`).
+- **Wajib testing agent**: sudah dipenuhi.
+  - testing_agent report: **20/20 regresi lulus** (auth login/me/switch-company; employees; payroll; master; dashboard; global tables; UI load + company switcher).
+  - Tidak ada kebocoran data lintas tenant terdeteksi.
+  - Data produksi tidak berubah.
+
+#### 5.7 Deliverables tahap ini ✅
+- **PR #7 (OPEN)**: tenant isolation enforcement foundation.
+- Ringkasan implementasi, test, dan hasil verifikasi ada pada deskripsi PR.
+
+**Stop condition:** berhenti setelah Tahap 1 selesai dan menunggu review/merge PR #7. **Tidak lanjut ke Tahap SaaS lain**.
 
 ---
 
 ## 3) Next Actions (immediate)
-1. **Implement Phase 5A–5C** (Docker + MariaDB adapter + R2 storage) di repo `akuntakitatech-design/Payroll`.
-2. Setelah perubahan jalur backend selesai dan Docker build sudah green, user mengisi final env di Coolify:
-   - MariaDB credentials (Coolify service vars)
-   - R2 env vars (bucket name belum diinformasikan)
-3. UAT:
-   - SMTP nyata (menu Pengaturan → Email & Pengingat)
-   - Upload dokumen (verifikasi R2)
+1. **User review PR #7**: https://github.com/akuntakitatech-design/Payroll/pull/7
+2. Jika disetujui, **merge PR #7** ke `main`.
+3. Setelah merge, berhenti (sesuai instruksi). Tahap berikutnya (migrasi router lain, subscription/trial/platform console/platform owner/domain) hanya dilakukan bila ada persetujuan eksplisit dan dalam PR terpisah.
 
 ---
 
 ## 4) Success Criteria
-**Fitur aplikasi (sudah ada)**
-- `python backend/test_core.py` passes (**186/186**).
-- Backend smoke `python backend/smoke_api.py` passes (**137/137**).
-- Payroll run lifecycle lengkap; slip PDF & rekap Excel dapat diunduh (agent-tested).
-- Employee hanya dapat mengakses slip gaji sendiri; tenant isolation enforced (agent-tested).
-- Contract renewal 1-klik dan Excel import berjalan (agent-tested).
 
-**Productionization (baru, harus dicapai di Phase 5)**
-- `docker compose build` sukses (backend + frontend).
-- Coolify deploy 1 project sukses dengan 4 services: `mariadb`, `phpmyadmin`, `backend`, `frontend`.
-- Backend menggunakan MariaDB (tidak ada dependency MongoDB yang diperlukan saat runtime).
-- phpMyAdmin dapat diakses (domain/subdomain sesuai Coolify).
-- Upload/download dokumen bekerja via Cloudflare R2.
-- Seed/demo data berhasil di MariaDB saat `AUTO_SEED=true`.
+### 4.1 Tenant Isolation Foundation (Tahap 1 SaaS) — wajib ✅
+- Semua operasi tenant-scoped secara default terikat `ctx.company_id`.
+- Akses tenant-scoped tanpa company context ditolak (fail-safe).
+- Insert/upsert tenant selalu memaksa `company_id` dari context.
+- Update/delete tidak dapat menyentuh record tenant lain.
+- GLOBAL_COLLECTIONS tetap berfungsi seperti existing.
+- `switch-company` tetap bekerja.
+- `super_admin` existing tidak rusak.
+- Payroll existing tidak rusak.
+- Tidak ada perubahan contract response endpoint.
+- Regression test mencakup upaya override company_id dari client (ditolak).
+- **Verified oleh testing_agent** (wajib) — 20/20 lulus.
 
-**Open item yang dibutuhkan dari user**
-- Nama bucket R2 untuk dokumen (nilai final `R2_BUCKET_NAME`).
+### 4.2 Constraint keamanan & operasional ✅
+- Tidak ada `.env`/secret ter-commit.
+- Tidak ada write ke MariaDB produksi (preview tetap `READ_ONLY=true`).
+- Tidak ada perubahan deployment/domain/env/UI.
+- `backend/app/core/db.py` tidak disentuh.
+
+### 4.3 Open items (ditunda)
+- Migrasi router tenant yang tersisa (dashboard, documents, contracts, certifications, approvals, policies, reminders, audit_logs, settings_mail, dll) **ditunda** sampai PR #7 di-merge dan user memberi persetujuan tahap berikutnya.
+- Seluruh Tahap SaaS lainnya (subscription/trial/platform_console/platform_owner + domain) **ditunda** sampai Tahap 1 diterima user.
+- Dokumen audit `/app/AUDIT_SAAS_READINESS.md` belum di-commit; bila ingin dimasukkan ke repo, buat PR dokumentasi terpisah (1 PR = 1 tujuan).
