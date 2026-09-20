@@ -1,0 +1,91 @@
+# =====================================================================
+#  HRIS & Payroll - Docker Compose (Coolify "Docker Compose" build pack
+#  atau `docker compose up -d` lokal).  4 layer service:
+#    mariadb  -> database
+#    phpmyadmin -> GUI database
+#    backend  -> FastAPI (./backend)
+#    frontend -> React + Nginx, reverse-proxy /api -> backend (./frontend)
+#  Nilai env diambil dari file .env di root (lihat .env.example).
+# =====================================================================
+services:
+  mariadb:
+    image: mariadb:11.8
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-hris_payroll}
+      MARIADB_USER: ${MARIADB_USER:-mariadb}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD}
+      TZ: Asia/Jakarta
+    command: >-
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max-connections=300
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+      PMA_ABSOLUTE_URI: ${PMA_ABSOLUTE_URI:-}
+      UPLOAD_LIMIT: 64M
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      - "${PMA_PORT:-8080}:80"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql://${MARIADB_USER:-mariadb}:${MARIADB_PASSWORD}@mariadb:3306/${MARIADB_DATABASE:-hris_payroll}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-720}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-14}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-15}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-8}
+      LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-10}
+      AUTO_SEED: ${AUTO_SEED:-true}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-}
+      R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-}
+      R2_REGION: ${R2_REGION:-auto}
+      R2_PREFIX: ${R2_PREFIX:-hris-payroll}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    expose:
+      - "8001"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-}
+    restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: http://backend:8001
+      CLIENT_MAX_BODY_SIZE: 25m
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  mariadb_data:

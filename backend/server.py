@@ -50,7 +50,7 @@ async def root():
 async def health():
     try:
         await get_db().command("ping")
-        return {"status": "healthy", "database": "connected"}
+        return {"status": "healthy", "database": "mariadb:connected"}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -109,12 +109,12 @@ async def http_handler(request: Request, exc: StarletteHTTPException):
 @app.on_event("startup")
 async def on_startup():
     await ensure_indexes()
-    logger.info("Indeks database siap.")
+    logger.info("Skema MariaDB & indeks siap.")
     try:
-        from app.core.storage import init_storage
+        from app.core.storage import check_storage
 
-        init_storage()
-        logger.info("Object storage siap.")
+        check_storage()
+        logger.info("Object storage (Cloudflare R2) siap.")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Object storage belum siap: %s", exc)
 

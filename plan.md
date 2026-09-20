@@ -13,9 +13,18 @@
   - jadwal pengiriman WIB (Asia/Jakarta)
   - pratinjau digest, send-now, dan log histori
 - Menyediakan **Impor karyawan dari Excel** (template → validasi → commit) termasuk opsi basic salary + PTKP.
-- Menjaga UI **elegan & profesional**, konsisten dengan design system proyek (tanpa kesan “dibuat AI”).
+- Menjaga UI **elegan & profesional**, konsisten dengan design system proyek.
 
-> Status saat ini: seluruh fitur bundle (Payroll Run + Renewal Kontrak + Email Reminder + Import Excel) **sudah terimplementasi dan lulus E2E** (backend core & smoke & UI flows). Satu hal yang masih *environment-dependent*: pengiriman email via SMTP kantor harus diuji oleh user dengan kredensial SMTP nyata dari menu **Email & Pengingat**.
+> Status fitur aplikasi: bundle fitur (Payroll Run + Renewal Kontrak + Email Reminder + Import Excel) **sudah terimplementasi** dan sebelumnya **agent-tested** pada environment Emergent.
+
+**Objective baru (governing request): Productionization untuk Coolify**
+- Migrasi stack menjadi **1 repo** (root) dengan base directory `./backend` dan `./frontend`.
+- Deploy di Coolify memakai **Docker build strategy** (bukan Emergent supervisor).
+- **Database FULL MariaDB** menggantikan MongoDB (Motor) sepenuhnya.
+- Tambahkan **phpMyAdmin** sebagai GUI service.
+- Storage file/dokumen pindah dari Emergent object storage ke **Cloudflare R2 (S3-compatible)** via boto3.
+- Target domain aplikasi: **`hris.akuntakita.com`**.
+- Seed/demo data tetap dipertahankan (via `AUTO_SEED`).
 
 ---
 
@@ -113,47 +122,31 @@
 - Payroll:
   - `PayrollRunsPage` (list + create period dialog) ✅
   - `PayrollRunDetailPage` ✅
-    - stat tiles (bruto/bpjs/pph21/potongan/net)
-    - riwayat approval
-    - tabel slip per karyawan (badge TER/Pasal 17)
-    - dialog penyesuaian (hari kerja, unpaid days, overtime, extra earning/deduction)
-    - aksi submit/approve/reject/mark-paid/recalculate
-    - unduh slip PDF, unduh rekap Excel
   - `PayrollComponentsPage` (CRUD) ✅
   - `EmployeeSalariesPage` + `SalaryEditorDialog` ✅
-  - `PayrollConfigPage` ✅ (BPJS & PPh21 statutory config per perusahaan)
+  - `PayrollConfigPage` ✅
 
 - Employee self-service:
-  - `MyPayslipsPage` ✅ (lihat daftar slip sendiri dan download PDF)
+  - `MyPayslipsPage` ✅
 
 - Contract renewal:
   - `ContractRenewDialog` ✅
-  - Integrasi tombol **Perpanjang** pada `ExpiryCalendarPage` untuk item kontrak ✅
+  - Integrasi tombol **Perpanjang** pada `ExpiryCalendarPage` ✅
   - Integrasi aksi **Perpanjang kontrak** pada dropdown aksi kontrak di `EmployeeDetailPage` ✅
 
-- Employee detail:
-  - Tab baru **“Gaji & Pajak”** ✅
-    - ringkasan gaji pokok + komponen
-    - PTKP/TER category + NPWP + BPJS flags + rekening
-    - riwayat perubahan gaji
-    - tombol buka `SalaryEditorDialog`
-
 - Excel import:
-  - `EmployeeImportPage` ✅ (stepper 4 langkah: template → unggah → validasi → commit)
+  - `EmployeeImportPage` ✅
   - `EmployeesPage` tombol “Impor Excel” ✅
 
 - SMTP & reminders:
   - `MailSettingsPage` ✅
-    - SMTP (password write-only) + email test
-    - pengingat: windows H-, penerima, jam kirim, toggle include
-    - preview digest, send-now, logs
 
 - Utilities:
-  - `frontend/src/lib/download.js` ✅ untuk download PDF/XLSX via axios agar Authorization header terbawa.
+  - `frontend/src/lib/download.js` ✅
 
 **Quality gates (done)**
 - Compile check: `esbuild` bundle test clean.
-- Visual check: screenshot preview untuk PayrollRuns, PayrollRunDetail, MailSettings, Import, MyPayslips, Renewal dialog.
+- Visual check: screenshot preview.
 
 ---
 
@@ -164,82 +157,168 @@
 3. Sebagai HR, saya ingin histori reminder terlihat agar bisa membuktikan email terkirim.
 4. Sebagai pengguna, saya ingin error message jelas (Bahasa) saat validasi Excel gagal.
 5. Sebagai karyawan, saya ingin dijamin tidak bisa mengakses slip gaji orang lain.
-6. Sebagai user, saya ingin UX rapi: loading/empty/error state konsisten, label konsisten, tanpa teks debug.
+6. Sebagai user, saya ingin UX rapi: loading/empty/error state konsisten.
 
-**E2E coverage (testing agent iterations 5–7 + verifikasi manual)**
-- Payroll lifecycle lengkap:
-  - create run → adjustment → recalculate → submit → reject (catatan wajib) → submit ulang → approve → mark paid.
-  - download slip PDF + export Excel.
-- Self-service:
-  - employee hanya melihat & mengunduh slip sendiri; sidebar employee tidak menampilkan menu HR payroll.
-- Excel import:
-  - template → upload (2 valid + 1 invalid) → validasi row-level → commit valid rows.
-- Contract renewal:
-  - dari kalender expiry dan dari detail karyawan.
-- Mail settings:
-  - SMTP tersimpan (password tidak pernah ditampilkan)
-  - windows H-* tersimpan & ditampilkan
-  - pratinjau digest tampil tanpa crash.
-- Tenant isolation:
-  - cross-tenant access diblokir (404) dengan JWT yang benar.
+**E2E coverage**
+- Payroll lifecycle lengkap, self-service, import excel, contract renewal, mail settings, tenant isolation.
 
 **Bugs found & fixed (all resolved)**
-1. **CRITICAL** PayrollConfigPage crash
-   - Root cause: `GET /api/payroll/config` mengembalikan `jkk_risk_classes` sebagai object.
-   - Fix:
-     - Backend `/api/payroll/config` kini mengembalikan **array** (selaras dengan `/api/payroll/catalog`).
-     - Frontend `PayrollConfigPage` toleran menerima array/object.
-2. **CRITICAL** MailSettingsPage crash saat “Pratinjau isi”
-   - Root cause: backend `preview.items` berbentuk dict per-kind, frontend menganggap array.
-   - Fix: frontend flatten `preview.items` → array + label jenis Bahasa Indonesia + format H-/kedaluwarsa.
-3. **HIGH** Logout tidak bisa diklik saat E2E
-   - Root cause: toast Sonner posisi **top-right** menutupi tombol menu pengguna.
-   - Fix: Toaster dipindah ke **bottom-right**.
-4. **LOW** Hydration warning `<div>` di dalam `<p>` pada PageHeader subtitle
-   - Fix: subtitle detail payroll dibuat teks biasa, badge status dipindah ke area actions.
-5. **UX/Data** Komponen gaji di tab “Gaji & Pajak” tampil UUID / nilai “-”
-   - Fix: backend `GET /api/payroll/salaries/{employee_id}` enrich komponen dengan `name/code/kind/calc/percent/effective_amount/uses_default`.
-   - Catatan: `amount` mentah tetap `null` untuk menjaga editor tidak “membekukan” nilai default.
-6. **Stability** DOM detach setelah refresh
-   - Fix: `PayrollConfigPage` dan `MailSettingsPage` memakai **silent reload** agar tidak unmount input saat refresh.
-7. **UX** Riwayat approval payroll
-   - Fix: label aksi riwayat dibuat Bahasa Indonesia (Diajukan/Ditolak/Disetujui/Ditandai dibayar).
+- PayrollConfigPage crash → response normalization.
+- MailSettingsPage crash → flatten preview items.
+- Logout tertutup toaster → pindah posisi.
+- Hydration warning → perapihan markup.
+- Enrich komponen gaji → backend enrich.
+- Silent reload untuk stability.
 
 **Cleanup & demo data state (restored)**
-- Data uji dibersihkan.
-- Dataset demo saat ini:
-  - 8 karyawan demo
-  - 14 komponen payroll demo
-  - 2 payroll run demo: **Mei 2026 (paid)**, **Desember 2026 (draft)**
-  - 8 kontrak demo
-  - reminder_logs dikosongkan
-  - SMTP/reminder demo dipulihkan: windows **H-30/14/7/1**, jadwal **07:00** WIB.
+- Dataset demo dipulihkan.
 
-**Known note (pre-existing, not a regression)**
-- `DataTable` merender varian mobile + desktop sehingga `data-testid` row bisa muncul dua kali (salah satu hidden). Tidak mempengaruhi fungsi.
+---
+
+### Phase 5 — Coolify Productionization (Docker + MariaDB + phpMyAdmin + R2) 🟨 **In Progress (new)**
+**Tujuan fase**
+1. Aplikasi dapat di-build dan di-deploy di Coolify dengan **Docker build strategy** dalam **1 project**.
+2. Backend memakai **MariaDB** (bukan MongoDB) untuk semua modul.
+3. `phpMyAdmin` tersedia sebagai service GUI.
+4. Upload/download dokumen memakai **Cloudflare R2** (S3-compatible) dan tidak bergantung pada Emergent.
+5. Tetap mempertahankan seed/demo data (`AUTO_SEED=true`).
+
+#### Phase 5A — Repo layout & Docker build baseline
+- Root repo tetap 1, dengan:
+  - `./backend` untuk FastAPI
+  - `./frontend` untuk React (craco)
+- Tambahkan file:
+  - `docker-compose.yml` di root (4 services: `mariadb`, `phpmyadmin`, `backend`, `frontend`)
+  - `backend/Dockerfile` (Python 3.11, install deps, run uvicorn)
+  - `frontend/Dockerfile` (multi-stage: Node build → Nginx static)
+  - `frontend/nginx.conf` (serve React + reverse-proxy `/api` → `backend:8001`)
+  - `.dockerignore` (root, backend, frontend) untuk build cepat & aman
+- Frontend:
+  - Pastikan build output CRA ada di `/frontend/build`.
+  - Nginx fallback `try_files $uri /index.html`.
+
+#### Phase 5B — Database migration: MongoDB (Motor) → MariaDB (FULL)
+**Keputusan yang dikunci**: FULL MariaDB menggantikan MongoDB.
+
+**Langkah implementasi**
+- Ubah `app/core/config.py`:
+  - Ganti `MONGO_URL` menjadi `DATABASE_URL` atau komponen `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`.
+- Ganti `app/core/db.py`:
+  - Implementasi adapter async berbasis SQLAlchemy Core + asyncmy, namun **menyediakan API kompatibel** dengan pemakaian existing code:
+    - `get_db()` mengembalikan object `DB` yang mendukung `db.<collection>` / `db[collection]`.
+    - Collection API: `find/find_one/insert_one/insert_many/update_one/update_many/delete_one/delete_many/count_documents/distinct/find_one_and_update/replace_one`.
+    - Cursor API: `sort/skip/limit/to_list`.
+  - Dukungan filter ops yang dipakai codebase:
+    - `$ne,$in,$nin,$regex/$options,$or,$gt,$gte,$lt,$lte,$exists`
+    - khusus: dotted key `components.component_id` (query JSON)
+  - Dukungan update ops yang dipakai:
+    - `$set,$inc,$push,$setOnInsert`, `upsert=True`
+  - Ekspor konstanta kompatibilitas:
+    - `ASCENDING=1`, `DESCENDING=-1`
+    - `ReturnDocument` (enum minimal: BEFORE/AFTER)
+    - `NO_ID` (ignored, tapi diterima untuk kompat)
+  - Datetime disimpan `DATETIME(6)` UTC naive (mimic behavior sebelumnya).
+- Skema MariaDB:
+  - Buat tabel per collection (≈38), minimal kolom:
+    - `id CHAR(36) PK`, `company_id CHAR(36)`, `status VARCHAR`, `created_at`, `updated_at`, `created_by`, `updated_by`
+  - Kolom spesifik per collection dibuat sesuai field yang sudah diekstrak dari code.
+  - Field kompleks disimpan sebagai JSON:
+    - `payroll_items` (earnings/deductions/bpjs/tax/totals/adjustments/attendance/period)
+    - `payroll_runs` (totals/history/skipped/statutory_snapshot)
+    - `employee_salaries.components`, `audit_logs.before_value/after_value/changed_fields`, `config_overrides.value`
+  - Index/unique constraints disesuaikan dari `ensure_indexes()` (migrasi menjadi DDL index MariaDB).
+- Perubahan router yang mengimpor pymongo:
+  - `employees.py` (ReturnDocument), `dashboard.py` (ASC/DESC), `audit_logs.py`.
+  - Ganti import dari `pymongo` menjadi import dari `app.core.db`.
+- Update `server.py`:
+  - `health` ping ke MariaDB.
+  - `ensure_indexes()` menjadi `ensure_schema()` / `ensure_indexes_sql()`.
+
+**Validation**
+- Jalankan backend lokal menggunakan MariaDB (compose) dan pastikan:
+  - login, list master, employees, payroll run list/detail, import validate/commit, reminder preview/log.
+  - seed sukses tanpa duplikasi.
+
+#### Phase 5C — Storage migration: Emergent → Cloudflare R2
+- Ganti `app/core/storage.py`:
+  - Implementasi R2 via boto3:
+    - `put_object(path, data, content_type)`: upload ke bucket
+    - `get_object(path)`: download bytes + content-type
+    - (opsional) `delete_object(path)` untuk hard delete (tetap boleh soft delete di DB)
+  - Env placeholders (Coolify env):
+    - `R2_ACCOUNT_ID`
+    - `R2_ACCESS_KEY_ID`
+    - `R2_SECRET_ACCESS_KEY`
+    - `R2_BUCKET_NAME` (**perlu nilai final dari user**)
+    - `R2_ENDPOINT_URL` (atau derive dari account id)
+    - `R2_PUBLIC_BASE_URL` (opsional bila butuh direct URL; default tetap streaming via API)
+  - Tetap gunakan namespace path eksisting: `hris-payroll/companies/{company_id}/documents/{file_id}.{ext}`.
+
+**Catatan**
+- Kredensial dari `CredProduction.txt` tidak boleh di-commit atau di-print ke log.
+- Token/key yang terlanjur dishare via chat sebaiknya direvoke/rotate setelah deploy stabil.
+
+#### Phase 5D — Coolify networking: single domain + reverse-proxy
+- Service `frontend` (Nginx) menjadi entrypoint HTTP.
+- Nginx config:
+  - `/` → React static
+  - `/api` → proxy_pass ke `http://backend:8001` (tanpa mengubah prefix `/api`)
+- CORS:
+  - Untuk production single domain, `CORS_ORIGINS` bisa diset `*` atau domain tunggal.
+  - Backend tetap support list origins (comma-separated) untuk fleksibilitas.
+
+#### Phase 5E — Seed preservation
+- Pastikan `AUTO_SEED=true` tetap bekerja di MariaDB.
+- Porting seed:
+  - Port fungsi `_upsert` dan semua insert demo agar menggunakan adapter SQL.
+  - Pastikan behavior `upsert` dan uniqueness (roles/permissions/modules, company_settings unique per company, dsb).
+
+#### Phase 5F — Documentation update (README)
+- Tambahkan section Deploy to Coolify:
+  - Arsitektur 4 service
+  - Env vars backend/frontend
+  - Setup domain `hris.akuntakita.com`
+  - phpMyAdmin access
+  - R2 config
+
+#### Phase 5G — Final verification
+- Smoke test endpoints (curl) dan UI flows utama.
+- Minimal acceptance:
+  - `/api/health` healthy
+  - login berhasil
+  - daftar payroll runs muncul
+  - create payroll run + recalc tidak error
+  - dokumen upload/download bekerja via R2
+  - reminder preview & send-now tidak crash
 
 ---
 
 ## 3) Next Actions (immediate)
-1. **UAT / konfigurasi SMTP nyata oleh user**:
-   - Buka **Pengaturan → Email & Pengingat**.
-   - Isi host/port/security/username/password SMTP perusahaan.
-   - Klik **Kirim email tes**.
-   - Setelah valid, aktifkan pengingat otomatis dan atur recipients + windows H-* sesuai kebijakan.
-2. Jika diperlukan, tambah enhancement pasca-UAT:
-   - bank transfer file format tertentu (jika dibutuhkan)
-   - tambahan laporan (rekap BPJS, pajak)
-   - opsi template Excel tambahan (kontrak/sertifikasi/dokumen) di fase berikutnya.
+1. **Implement Phase 5A–5C** (Docker + MariaDB adapter + R2 storage) di repo `akuntakitatech-design/Payroll`.
+2. Setelah perubahan jalur backend selesai dan Docker build sudah green, user mengisi final env di Coolify:
+   - MariaDB credentials (Coolify service vars)
+   - R2 env vars (bucket name belum diinformasikan)
+3. UAT:
+   - SMTP nyata (menu Pengaturan → Email & Pengingat)
+   - Upload dokumen (verifikasi R2)
 
 ---
 
 ## 4) Success Criteria
+**Fitur aplikasi (sudah ada)**
 - `python backend/test_core.py` passes (**186/186**).
 - Backend smoke `python backend/smoke_api.py` passes (**137/137**).
-- Payroll run dapat dibuat, dihitung ulang, disubmit, diapprove/reject, ditandai dibayar; slip PDF & rekap Excel dapat diunduh (E2E verified).
-- Employee hanya dapat mengakses **slip gaji sendiri**; tidak dapat mengakses slip orang lain (E2E verified).
-- Tenant isolation enforced untuk semua endpoint by-id (E2E verified).
-- Contract renewal 1-klik bekerja dari kalender expiry dan dari tab kontrak employee (E2E verified).
-- SMTP configurable per company; password tidak pernah returned oleh API; reminder preview/log bekerja (E2E verified). Pengiriman email nyata menunggu kredensial SMTP kantor.
-- Excel import: template → validate → commit, error baris jelas, baris invalid tidak merusak data (E2E verified).
-- UI konsisten, profesional, dan stabil (tidak ada crash runtime; logout/login lancar; hydration warning diselesaikan).
+- Payroll run lifecycle lengkap; slip PDF & rekap Excel dapat diunduh (agent-tested).
+- Employee hanya dapat mengakses slip gaji sendiri; tenant isolation enforced (agent-tested).
+- Contract renewal 1-klik dan Excel import berjalan (agent-tested).
+
+**Productionization (baru, harus dicapai di Phase 5)**
+- `docker compose build` sukses (backend + frontend).
+- Coolify deploy 1 project sukses dengan 4 services: `mariadb`, `phpmyadmin`, `backend`, `frontend`.
+- Backend menggunakan MariaDB (tidak ada dependency MongoDB yang diperlukan saat runtime).
+- phpMyAdmin dapat diakses (domain/subdomain sesuai Coolify).
+- Upload/download dokumen bekerja via Cloudflare R2.
+- Seed/demo data berhasil di MariaDB saat `AUTO_SEED=true`.
+
+**Open item yang dibutuhkan dari user**
+- Nama bucket R2 untuk dokumen (nilai final `R2_BUCKET_NAME`).

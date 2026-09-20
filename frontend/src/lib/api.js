@@ -1,6 +1,8 @@
 import axios from "axios";
 
-export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// Kosong => panggil /api relatif (produksi: Nginx mem-proxy ke backend).
+// Terisi => panggil backend langsung (preview Emergent / backend berdomain sendiri).
+export const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/+$/, "");
 export const API = `${BACKEND_URL}/api`;
 
 export const TOKEN_KEY = "hris_access_token";

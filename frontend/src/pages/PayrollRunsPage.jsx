@@ -75,7 +75,7 @@ const PayrollRunsPage = () => {
   const [catalog, setCatalog] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const now = new Date();
+  const now = useMemo(() => new Date(), []);
   const [form, setForm] = useState({
     year: String(now.getFullYear()),
     month: String(now.getMonth() + 1),

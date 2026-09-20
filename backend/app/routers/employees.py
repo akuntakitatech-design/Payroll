@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from pymongo import ASCENDING, ReturnDocument
+from ..core.db import ASCENDING, ReturnDocument
 
 from ..core.audit import log_action
 from ..core.db import NO_ID, get_db, serialize, serialize_list
