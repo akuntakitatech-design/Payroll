@@ -2,7 +2,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, status
-from pymongo import ASCENDING, DESCENDING
+from .db import ASCENDING, DESCENDING
 
 from .db import NO_ID, audit_fields, get_db, new_id
 

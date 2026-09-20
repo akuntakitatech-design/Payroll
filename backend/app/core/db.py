@@ -1,29 +1,78 @@
-"""MongoDB access layer, designed relationally so it can be ported to PostgreSQL/Supabase.
+"""MariaDB access layer (SQLAlchemy Core + asyncmy).
 
-Conventions enforced across every collection:
-  - `id`           : UUID4 string primary key (never Mongo's ObjectId)
+The application was originally written against MongoDB (Motor). To keep the
+business logic in the routers untouched, this module exposes a *Mongo-shaped*
+async API (``db.users.find_one({...})``, ``update_one({...}, {"$set": ...})`` …)
+that is translated to plain SQL against real MariaDB tables.
+
+Conventions enforced across every table:
+  - `id`           : UUID4 string primary key (CHAR(36))
   - `company_id`   : tenant foreign key on every tenant-owned record
-  - `created_at` / `updated_at` : ISO datetimes (UTC)
+  - `created_at` / `updated_at` : DATETIME(6) in UTC
   - `created_by` / `updated_by` : user_id foreign keys
   - `status`       : active | inactive | archived  (soft delete preferred)
-All reads project out `_id` so responses stay JSON-serializable.
+  - nested objects / arrays are stored as JSON columns
+  - `extra`        : JSON catch-all for any key that has no dedicated column
 """
-import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo import ASCENDING, DESCENDING, TEXT
+import json
+import logging
+import re
+import uuid
+from datetime import date, datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+
+import sqlalchemy as sa
+from fastapi import HTTPException
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    and_,
+    func,
+    or_,
+    text,
+)
+from sqlalchemy.dialects import mysql
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from .config import settings
 
-_client: Optional[AsyncIOMotorClient] = None
-_db: Optional[AsyncIOMotorDatabase] = None
-
-NO_ID = {"_id": 0}
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# Collection catalogue ("tables")
+# Mongo compatibility constants
+# --------------------------------------------------------------------------
+ASCENDING = 1
+DESCENDING = -1
+NO_ID = {"_id": 0}  # accepted for compatibility, ignored
+
+
+class ReturnDocument:
+    BEFORE = False
+    AFTER = True
+
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def new_id() -> str:
+    return str(uuid.uuid4())
+
+
+# --------------------------------------------------------------------------
+# Table catalogue
 # --------------------------------------------------------------------------
 GLOBAL_COLLECTIONS = [
     "companies",
@@ -66,158 +115,1099 @@ TENANT_COLLECTIONS = [
     "smtp_settings",
     "reminder_settings",
     "reminder_logs",
+    "payslip_email_logs",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
 
+# type codes used in the compact column specs below
+_TYPES = {
+    "id": lambda: String(36),
+    "fk": lambda: String(36),
+    "s": lambda: String(255),
+    "s512": lambda: String(512),
+    "s64": lambda: String(64),
+    "s32": lambda: String(32),  # ISO date strings (YYYY-MM-DD)
+    "t": lambda: Text,
+    "i": lambda: Integer,
+    "bi": lambda: BigInteger,
+    "f": lambda: mysql.DOUBLE(),
+    "b": lambda: Boolean,
+    "dt": lambda: mysql.DATETIME(fsp=6),
+    "j": lambda: JSON,
+}
 
-def now() -> datetime:
-    return datetime.now(timezone.utc)
+COMMON = {
+    "company_id": "fk",
+    "status": "s64",
+    "created_at": "dt",
+    "updated_at": "dt",
+    "created_by": "fk",
+    "updated_by": "fk",
+}
+
+MASTER = {"code": "s", "name": "s", "description": "t"}
+
+TABLE_SPECS: Dict[str, Dict[str, str]] = {
+    "companies": {
+        "code": "s", "name": "s", "legal_name": "s", "npwp": "s64", "industry": "s",
+        "address": "t", "city": "s", "province": "s", "postal_code": "s64", "phone": "s64",
+        "email": "s", "website": "s", "logo_url": "t", "timezone": "s64", "currency": "s64",
+        "fiscal_year_start_month": "i",
+    },
+    "users": {
+        "email": "s", "full_name": "s", "password_hash": "s", "phone": "s64", "job_title": "s",
+        "employee_number": "s64", "default_company_id": "fk", "last_login_at": "dt",
+        "failed_login_attempts": "i", "locked_until": "dt", "must_change_password": "b",
+        "is_demo_account": "b",
+    },
+    "roles": {"key": "s64", "name": "s", "description": "t", "is_system": "b", "scope": "s64", "sort_order": "i"},
+    "permissions": {
+        "key": "s", "resource": "s64", "resource_label": "s", "action": "s64", "action_label": "s",
+        "module_key": "s64", "name": "s",
+    },
+    "modules": {"key": "s64", "name": "s", "description": "t", "is_core": "b", "icon": "s64", "sort_order": "i"},
+    "user_company_roles": {"user_id": "fk", "role_key": "s64"},
+    "role_permissions": {"role_key": "s64", "permission_key": "s"},
+    "company_settings": {
+        "employee_id_prefix": "s64", "employee_id_next_number": "i", "date_format": "s64",
+        "number_format": "s64", "default_language": "s64", "week_start": "s64",
+        "notification_email": "s", "enable_email_notification": "b", "enable_audit_retention_days": "i",
+        "require_two_factor": "b", "password_min_length": "i", "session_timeout_minutes": "i",
+        "payroll_bank_name": "s", "payroll_bank_account_number": "s64", "payroll_bank_account_name": "s",
+        "payroll_transfer_note": "t", "payroll_statutory": "j",
+    },
+    "branches": {
+        **MASTER, "address": "t", "city": "s", "province": "s", "postal_code": "s64", "phone": "s64",
+        "email": "s", "is_head_office": "b", "notes": "t",
+    },
+    "work_locations": {
+        **MASTER, "branch_id": "fk", "address": "t", "latitude": "f", "longitude": "f", "radius_meter": "f",
+        "location_type": "s64", "timezone": "s64", "notes": "t",
+    },
+    "departments": {**MASTER, "branch_id": "fk", "parent_id": "fk", "cost_center_id": "fk", "head_user_id": "fk"},
+    "divisions": {**MASTER, "department_id": "fk", "head_user_id": "fk"},
+    "positions": {
+        **MASTER, "department_id": "fk", "division_id": "fk", "job_grade_id": "fk",
+        "reports_to_position_id": "fk", "is_supervisory": "b",
+    },
+    "job_grades": {**MASTER, "level": "i", "min_salary": "f", "max_salary": "f"},
+    "cost_centers": {**MASTER, "branch_id": "fk", "budget_owner_user_id": "fk"},
+    "projects": {
+        **MASTER, "client_name": "s", "branch_id": "fk", "work_location_id": "fk", "cost_center_id": "fk",
+        "start_date": "s32", "end_date": "s32", "contract_value": "f", "project_manager_user_id": "fk",
+    },
+    "employment_statuses": {**MASTER, "is_permanent": "b", "requires_contract": "b"},
+    "contract_types": {**MASTER, "duration_months": "i", "is_extendable": "b", "max_extension": "i"},
+    "certification_types": {
+        **MASTER, "issuing_body": "s", "validity_months": "i", "is_mandatory": "b", "reminder_days": "i",
+    },
+    "document_types": {
+        **MASTER, "category": "s64", "owner_scope": "s64", "is_mandatory": "b", "has_expiry": "b",
+        "reminder_days": "i", "allowed_extensions": "s", "max_size_mb": "f",
+    },
+    "documents": {
+        "document_type_id": "fk", "name": "s", "owner_type": "s64", "owner_id": "fk", "owner_label": "s",
+        "document_number": "s", "issued_date": "s32", "expiry_date": "s32", "notes": "t",
+        "file_name": "s", "storage_path": "s512", "file_size": "bi", "file_extension": "s64",
+        "mime_type": "s", "is_deleted": "b", "version": "i", "is_demo_data": "b",
+    },
+    "employees": {
+        "full_name": "s", "employee_number": "s64", "nik": "s64", "npwp": "s64", "gender": "s64",
+        "birth_place": "s", "birth_date": "s32", "marital_status": "s64", "religion": "s64",
+        "education": "s64", "email": "s", "phone": "s64", "address": "t", "city": "s",
+        "emergency_contact_name": "s", "emergency_contact_phone": "s64", "job_title": "s",
+        "join_date": "s32", "employment_status_id": "fk", "branch_id": "fk", "work_location_id": "fk",
+        "department_id": "fk", "division_id": "fk", "position_id": "fk", "job_grade_id": "fk",
+        "cost_center_id": "fk", "project_id": "fk", "bank_name": "s", "bank_account_number": "s64",
+        "bank_account_name": "s", "bpjs_kesehatan_number": "s64", "bpjs_tk_number": "s64",
+        "notes": "t", "user_id": "fk", "is_demo_data": "b",
+    },
+    "employee_contracts": {
+        "employee_id": "fk", "contract_type_id": "fk", "contract_number": "s", "start_date": "s32",
+        "end_date": "s32", "position_id": "fk", "basic_salary": "f", "allowance": "f", "notes": "t",
+        "approval_state": "s64", "is_demo_data": "b",
+    },
+    "employee_certifications": {
+        "employee_id": "fk", "certification_type_id": "fk", "name": "s", "certificate_number": "s",
+        "issuer": "s", "issued_date": "s32", "expiry_date": "s32", "notes": "t", "is_demo_data": "b",
+    },
+    "company_modules": {"module_key": "s64", "is_active": "b", "activated_at": "dt", "deactivated_at": "dt", "notes": "t"},
+    "approval_workflows": {
+        "code": "s", "name": "s", "document_kind": "s64", "scope_type": "s64", "scope_id": "fk",
+        "description": "t", "is_default": "b", "step_count": "i", "is_demo_data": "b",
+    },
+    "approval_steps": {
+        "workflow_id": "fk", "step_order": "i", "name": "s", "approver_type": "s64",
+        "approver_role_key": "s64", "approver_user_id": "fk", "approver_position_id": "fk",
+        "is_mandatory": "b", "allow_delegation": "b", "sla_days": "i", "condition_note": "t",
+        "is_demo_data": "b",
+    },
+    "config_overrides": {
+        "config_key": "s", "scope_type": "s64", "scope_id": "fk", "scope_label": "s", "value": "j",
+        "effective_from": "s32", "effective_to": "s32", "notes": "t",
+    },
+    "audit_logs": {
+        "user_id": "fk", "user_name": "s", "user_email": "s", "module": "s64", "resource": "s64",
+        "action": "s64", "record_id": "fk", "record_label": "s", "before_value": "j", "after_value": "j",
+        "changed_fields": "j", "notes": "t", "ip_address": "s64", "user_agent": "t",
+    },
+    "payroll_components": {
+        "code": "s64", "name": "s", "kind": "s64", "calc": "s64", "default_amount": "f", "percent": "f",
+        "taxable": "b", "prorate": "b", "include_in_bpjs_base": "b", "sort_order": "i",
+        "description": "t", "is_demo_data": "b",
+    },
+    "employee_salaries": {
+        "employee_id": "fk", "basic_salary": "f", "ptkp_status": "s64", "has_npwp": "b",
+        "bpjs_kesehatan_enrolled": "b", "bpjs_jht_enrolled": "b", "bpjs_jp_enrolled": "b",
+        "components": "j", "effective_date": "s32", "notes": "t", "is_demo_data": "b",
+    },
+    "employee_salary_history": {
+        "employee_id": "fk", "basic_salary": "f", "previous_basic_salary": "f", "ptkp_status": "s64",
+        "effective_date": "s32", "notes": "t",
+    },
+    "payroll_runs": {
+        "year": "i", "month": "i", "period_label": "s", "run_status": "s64", "notes": "t",
+        "payment_date": "s32", "workflow_id": "fk", "workflow_name": "s", "totals": "j",
+        "employee_count": "i", "skipped": "j", "history": "j", "statutory_snapshot": "j",
+        "calculated_at": "dt", "calculated_by": "fk",
+        "submitted_at": "dt", "submitted_by": "fk", "submitted_by_name": "s", "submitted_note": "t",
+        "approved_at": "dt", "approved_by": "fk", "approved_by_name": "s", "approved_note": "t",
+        "rejected_at": "dt", "rejected_by": "fk", "rejected_by_name": "s", "rejected_note": "t",
+        "paid_at": "dt", "paid_by": "fk", "paid_by_name": "s", "paid_note": "t",
+    },
+    "payroll_items": {
+        "run_id": "fk", "employee_id": "fk", "employee_number": "s64", "full_name": "s", "job_title": "s",
+        "bank_name": "s", "bank_account_number": "s64", "period": "j", "attendance": "j",
+        "basic_salary": "f", "basic_salary_paid": "f", "earnings": "j", "deductions": "j", "bpjs": "j",
+        "tax": "j", "totals": "j", "adjustments": "j", "payslip_email_status": "s64",
+        "payslip_email_at": "dt", "payslip_email_to": "s", "payslip_email_error": "t",
+    },
+    "smtp_settings": {
+        "host": "s", "port": "i", "username": "s", "password": "s", "security": "s64", "from_email": "s",
+        "from_name": "s", "is_enabled": "b", "auto_send_payslip": "b",
+    },
+    "reminder_settings": {
+        "is_enabled": "b", "windows": "j", "recipients": "j", "send_hour": "i", "send_minute": "i",
+        "include_expired": "b", "include_contracts": "b", "include_certifications": "b",
+        "include_documents": "b", "skip_when_empty": "b",
+    },
+    "reminder_logs": {"trigger": "s64", "message": "t", "recipients": "j", "item_count": "i", "counts": "j", "subject": "s"},
+    "payslip_email_logs": {"run_id": "fk", "period_label": "s", "trigger": "s64", "sent_count": "i", "failed_count": "i", "summary": "t"},
+}
+
+# (index_name, [columns], unique)
+INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
+    "users": [("uq_users_email", ["email"], True)],
+    "companies": [("uq_companies_code", ["code"], True)],
+    "roles": [("uq_roles_key", ["key"], True)],
+    "permissions": [("uq_permissions_key", ["key"], True)],
+    "modules": [("uq_modules_key", ["key"], True)],
+    "role_permissions": [("uq_role_permission", ["role_key", "permission_key"], True)],
+    "user_company_roles": [
+        ("uq_user_company_role", ["user_id", "company_id", "role_key"], True),
+        ("ix_ucr_company", ["company_id"], False),
+    ],
+    "company_modules": [("uq_company_module", ["company_id", "module_key"], True)],
+    "company_settings": [("uq_company_settings", ["company_id"], True)],
+    "audit_logs": [
+        ("ix_audit_recent", ["company_id", "created_at"], False),
+        ("ix_audit_module_action", ["company_id", "module", "action"], False),
+    ],
+    "config_overrides": [("ix_config_lookup", ["company_id", "config_key", "scope_type"], False)],
+    "approval_steps": [("ix_steps_workflow", ["company_id", "workflow_id", "step_order"], False)],
+    "documents": [("ix_documents_owner", ["company_id", "owner_type", "owner_id"], False)],
+    "employees": [
+        ("ix_employee_number", ["company_id", "employee_number"], False),
+        ("ix_employee_name", ["company_id", "full_name"], False),
+        ("ix_employee_department", ["company_id", "department_id"], False),
+    ],
+    "employee_contracts": [
+        ("ix_contract_employee", ["company_id", "employee_id", "start_date"], False),
+        ("ix_contract_expiry", ["company_id", "end_date"], False),
+    ],
+    "employee_certifications": [
+        ("ix_cert_employee", ["company_id", "employee_id"], False),
+        ("ix_cert_expiry", ["company_id", "expiry_date"], False),
+    ],
+    "payroll_runs": [("ix_payroll_period", ["company_id", "year", "month"], False)],
+    "payroll_items": [
+        ("ix_payroll_item_run", ["company_id", "run_id", "employee_id"], False),
+        ("ix_payroll_item_employee", ["company_id", "employee_id"], False),
+    ],
+    "employee_salaries": [("uq_employee_salary", ["company_id", "employee_id"], True)],
+    "employee_salary_history": [("ix_salary_history", ["company_id", "employee_id", "created_at"], False)],
+    "payroll_components": [("ix_payroll_component_code", ["company_id", "code"], False)],
+    "smtp_settings": [("uq_smtp_company", ["company_id"], True)],
+    "reminder_settings": [("uq_reminder_company", ["company_id"], True)],
+    "reminder_logs": [("ix_reminder_log_recent", ["company_id", "created_at"], False)],
+    "payslip_email_logs": [("ix_payslip_log_run", ["company_id", "run_id"], False)],
+}
+
+metadata = MetaData()
+_tables: Dict[str, Table] = {}
 
 
-def new_id() -> str:
-    return str(uuid.uuid4())
+def _build_tables() -> None:
+    for name in ALL_COLLECTIONS:
+        spec = TABLE_SPECS.get(name, {})
+        cols: List[Column] = [Column("id", String(36), primary_key=True)]
+        for cname, code in {**COMMON, **spec}.items():
+            cols.append(Column(cname, _TYPES[code]()))
+        cols.append(Column("extra", JSON, nullable=True))
+        constraints: List[Any] = []
+        for idx_name, idx_cols, unique in INDEX_SPECS.get(name, []):
+            if unique:
+                constraints.append(UniqueConstraint(*idx_cols, name=idx_name))
+            else:
+                constraints.append(Index(idx_name, *idx_cols))
+        if name in TENANT_COLLECTIONS and not any(
+            c.name == "ix_company_status" for c in constraints if isinstance(c, Index)
+        ):
+            constraints.append(Index(f"ix_{name}_company_status", "company_id", "status"))
+        _tables[name] = Table(
+            name,
+            metadata,
+            *cols,
+            *constraints,
+            mysql_charset="utf8mb4",
+            mysql_collate="utf8mb4_unicode_ci",
+            mysql_engine="InnoDB",
+        )
 
 
-def get_client() -> AsyncIOMotorClient:
-    global _client
-    if _client is None:
-        _client = AsyncIOMotorClient(settings.MONGO_URL, uuidRepresentation="standard")
-    return _client
+_build_tables()
 
 
-def get_db() -> AsyncIOMotorDatabase:
-    global _db
-    if _db is None:
-        _db = get_client()[settings.DB_NAME]
-    return _db
+def get_table(name: str) -> Table:
+    try:
+        return _tables[name]
+    except KeyError as exc:
+        raise KeyError(f"Tabel '{name}' belum terdaftar pada katalog database (app/core/db.py).") from exc
+
+
+# --------------------------------------------------------------------------
+# Engine
+# --------------------------------------------------------------------------
+_engine: Optional[AsyncEngine] = None
+
+
+def _json_default(obj: Any) -> Any:
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, (set, tuple)):
+        return list(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", "ignore")
+    return str(obj)
+
+
+def json_dumps(value: Any) -> str:
+    return json.dumps(value, default=_json_default, ensure_ascii=False)
+
+
+def get_engine() -> AsyncEngine:
+    global _engine
+    if _engine is None:
+        _engine = create_async_engine(
+            settings.DATABASE_URL,
+            pool_pre_ping=True,
+            pool_recycle=1800,
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            json_serializer=json_dumps,
+            json_deserializer=json.loads,
+            echo=False,
+        )
+    return _engine
 
 
 async def close_db() -> None:
-    global _client, _db
-    if _client is not None:
-        _client.close()
-    _client, _db = None, None
+    global _engine
+    if _engine is not None:
+        await _engine.dispose()
+    _engine = None
+
+
+# --------------------------------------------------------------------------
+# Value coercion
+# --------------------------------------------------------------------------
+def _to_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _parse_datetime(value: str) -> Optional[datetime]:
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return _to_utc_naive(datetime.fromisoformat(raw))
+    except ValueError:
+        return None
+
+
+def _coerce_in(column: Column, value: Any) -> Any:
+    """Python value -> DB value for a given column."""
+    if value is None:
+        return None
+    t = column.type
+    if isinstance(t, (mysql.DATETIME, sa.DateTime)):
+        if isinstance(value, datetime):
+            return _to_utc_naive(value)
+        if isinstance(value, date):
+            return datetime(value.year, value.month, value.day)
+        if isinstance(value, str):
+            return _parse_datetime(value)
+        return None
+    if isinstance(t, Boolean):
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "y", "ya")
+        return bool(value)
+    if isinstance(t, (Integer, BigInteger)):
+        if isinstance(value, bool):
+            return int(value)
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+    if isinstance(t, (mysql.DOUBLE, sa.Float, sa.Numeric)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(t, JSON):
+        return value
+    # String / Text
+    if isinstance(value, (dict, list)):
+        return json_dumps(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _doc_to_row(table: Table, doc: Dict[str, Any], full: bool = False) -> Dict[str, Any]:
+    """Split a Mongo-style document into column values + `extra` JSON."""
+    row: Dict[str, Any] = {}
+    extra: Dict[str, Any] = {}
+    for key, value in doc.items():
+        if key == "_id":
+            continue
+        if key in table.c and key != "extra":
+            row[key] = _coerce_in(table.c[key], value)
+        elif key == "extra" and isinstance(value, dict):
+            extra.update(value)
+        else:
+            extra[key] = value
+    if full:
+        for col in table.c:
+            if col.name not in row and col.name != "extra":
+                row[col.name] = None
+    row["extra"] = extra or None
+    return row
+
+
+def _row_to_doc(row: Any) -> Dict[str, Any]:
+    data = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
+    extra = data.pop("extra", None)
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except ValueError:
+            extra = None
+    out: Dict[str, Any] = {}
+    if isinstance(extra, dict):
+        out.update(extra)
+    out.update(data)
+    return out
+
+
+_JSON_COLUMNS_CACHE: Dict[str, set] = {
+    name: {c.name for c in t.c if isinstance(c.type, JSON)} for name, t in _tables.items()
+}
+
+
+def _normalise_json_values(table: Table, doc: Dict[str, Any]) -> Dict[str, Any]:
+    """asyncmy returns JSON columns as str on MariaDB; decode them."""
+    for cname in _JSON_COLUMNS_CACHE[table.name]:
+        val = doc.get(cname)
+        if isinstance(val, (str, bytes)):
+            try:
+                doc[cname] = json.loads(val)
+            except (ValueError, TypeError):
+                pass
+    return doc
+
+
+# --------------------------------------------------------------------------
+# Query translation
+# --------------------------------------------------------------------------
+_OPERATORS = {"$ne", "$in", "$nin", "$regex", "$options", "$gt", "$gte", "$lt", "$lte", "$exists", "$eq", "$not"}
+
+
+def _is_operator_dict(value: Any) -> bool:
+    return isinstance(value, dict) and bool(value) and all(str(k).startswith("$") for k in value.keys())
+
+
+class _Field:
+    """Resolved reference to a document field: real column, JSON sub-path, or `extra`."""
+
+    def __init__(self, table: Table, key: str):
+        self.table = table
+        self.key = key
+        self.column: Optional[Column] = None
+        self.json_root: Optional[Column] = None
+        self.json_path: Optional[str] = None
+        if key in table.c and key != "extra":
+            self.column = table.c[key]
+        elif "." in key:
+            root, rest = key.split(".", 1)
+            if root in table.c and isinstance(table.c[root].type, JSON):
+                self.json_root = table.c[root]
+                self.json_path = rest
+            else:
+                self.json_root = table.c["extra"]
+                self.json_path = key
+        else:
+            self.json_root = table.c["extra"]
+            self.json_path = key
+
+    # SQL expression usable for comparisons / sorting
+    def expr(self):
+        if self.column is not None:
+            return self.column
+        return func.json_unquote(func.json_extract(self.json_root, f"$.{self.json_path}"))
+
+    def coerce(self, value: Any) -> Any:
+        if self.column is not None:
+            return _coerce_in(self.column, value)
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        return value if value is None else (value if isinstance(value, (int, float)) else str(value))
+
+    def is_null(self):
+        if self.column is not None:
+            return self.column.is_(None)
+        return or_(
+            self.json_root.is_(None),
+            func.json_extract(self.json_root, f"$.{self.json_path}").is_(None),
+            func.json_type(func.json_extract(self.json_root, f"$.{self.json_path}")) == "NULL",
+        )
+
+    def not_null(self):
+        if self.column is not None:
+            return self.column.isnot(None)
+        return and_(
+            self.json_root.isnot(None),
+            func.json_extract(self.json_root, f"$.{self.json_path}").isnot(None),
+            func.json_type(func.json_extract(self.json_root, f"$.{self.json_path}")) != "NULL",
+        )
+
+    def equals(self, value: Any):
+        if value is None:
+            return self.is_null()
+        if self.column is not None:
+            return self.column == self.coerce(value)
+        # JSON path: match scalar `$.path` OR element inside an array of objects `$[*].path`
+        clauses = [self.expr() == self.coerce(value)]
+        if isinstance(value, str):
+            clauses.append(
+                func.json_search(self.json_root, "one", value, None, f"$[*].{self.json_path}").isnot(None)
+            )
+            clauses.append(
+                func.json_search(self.json_root, "one", value, None, f"$.{self.json_path}").isnot(None)
+            )
+        return or_(*clauses)
+
+
+def _regex_clause(field: _Field, pattern: str, options: str = ""):
+    try:
+        re.compile(pattern)
+        valid = True
+    except re.error:
+        valid = False
+    expr = field.expr()
+    if not valid:
+        escaped = pattern.replace("%", r"\%").replace("_", r"\_")
+        return expr.like(f"%{escaped}%")
+    if "i" in (options or ""):
+        return func.lower(expr).op("REGEXP")(func.lower(pattern))
+    return expr.op("REGEXP")(pattern)
+
+
+def compile_filter(table: Table, flt: Optional[Dict[str, Any]]):
+    if not flt:
+        return sa.true()
+    clauses = []
+    for key, value in flt.items():
+        if key == "$or":
+            subs = [compile_filter(table, sub) for sub in (value or [])]
+            clauses.append(or_(*subs) if subs else sa.false())
+            continue
+        if key == "$and":
+            subs = [compile_filter(table, sub) for sub in (value or [])]
+            clauses.append(and_(*subs) if subs else sa.true())
+            continue
+        if key == "$nor":
+            subs = [compile_filter(table, sub) for sub in (value or [])]
+            clauses.append(sa.not_(or_(*subs)) if subs else sa.true())
+            continue
+        if key == "_id":
+            key = "id"
+        field = _Field(table, key)
+        if _is_operator_dict(value):
+            options = value.get("$options", "")
+            for op, operand in value.items():
+                if op == "$options":
+                    continue
+                if op == "$eq":
+                    clauses.append(field.equals(operand))
+                elif op == "$ne":
+                    if operand is None:
+                        clauses.append(field.not_null())
+                    else:
+                        clauses.append(or_(field.expr() != field.coerce(operand), field.is_null()))
+                elif op == "$in":
+                    items = list(operand or [])
+                    has_null = any(v is None for v in items)
+                    vals = [field.coerce(v) for v in items if v is not None]
+                    sub = []
+                    if vals:
+                        sub.append(field.expr().in_(vals))
+                    if has_null:
+                        sub.append(field.is_null())
+                    clauses.append(or_(*sub) if sub else sa.false())
+                elif op == "$nin":
+                    items = list(operand or [])
+                    has_null = any(v is None for v in items)
+                    vals = [field.coerce(v) for v in items if v is not None]
+                    if vals and has_null:
+                        clauses.append(and_(field.expr().notin_(vals), field.not_null()))
+                    elif vals:
+                        clauses.append(or_(field.expr().notin_(vals), field.is_null()))
+                    elif has_null:
+                        clauses.append(field.not_null())
+                elif op == "$regex":
+                    clauses.append(_regex_clause(field, str(operand), options))
+                elif op == "$gt":
+                    clauses.append(field.expr() > field.coerce(operand))
+                elif op == "$gte":
+                    clauses.append(field.expr() >= field.coerce(operand))
+                elif op == "$lt":
+                    clauses.append(field.expr() < field.coerce(operand))
+                elif op == "$lte":
+                    clauses.append(field.expr() <= field.coerce(operand))
+                elif op == "$exists":
+                    clauses.append(field.not_null() if operand else field.is_null())
+                elif op == "$not":
+                    clauses.append(sa.not_(compile_filter(table, {key: operand})))
+                else:
+                    raise ValueError(f"Operator query '{op}' belum didukung oleh adapter MariaDB.")
+        else:
+            clauses.append(field.equals(value))
+    return and_(*clauses) if clauses else sa.true()
+
+
+def _sort_clauses(table: Table, sort_spec: Optional[List[Tuple[str, int]]]):
+    out = []
+    for key, direction in sort_spec or []:
+        field = _Field(table, key)
+        expr = field.expr()
+        out.append(expr.desc() if int(direction) < 0 else expr.asc())
+    return out
+
+
+def _apply_projection(doc: Dict[str, Any], projection: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not projection:
+        return doc
+    inclusive = [k for k, v in projection.items() if v and k != "_id"]
+    if inclusive:
+        keep = set(inclusive) | {"id"}
+        return {k: v for k, v in doc.items() if k in keep}
+    exclusive = {k for k, v in projection.items() if not v}
+    return {k: v for k, v in doc.items() if k not in exclusive}
+
+
+# --------------------------------------------------------------------------
+# Result objects (subset of pymongo's)
+# --------------------------------------------------------------------------
+class InsertOneResult:
+    def __init__(self, inserted_id):
+        self.inserted_id = inserted_id
+        self.acknowledged = True
+
+
+class InsertManyResult:
+    def __init__(self, inserted_ids):
+        self.inserted_ids = inserted_ids
+        self.acknowledged = True
+
+
+class UpdateResult:
+    def __init__(self, matched: int, modified: int, upserted_id=None):
+        self.matched_count = matched
+        self.modified_count = modified
+        self.upserted_id = upserted_id
+        self.acknowledged = True
+
+
+class DeleteResult:
+    def __init__(self, deleted: int):
+        self.deleted_count = deleted
+        self.acknowledged = True
+
+
+def _duplicate_http(exc: IntegrityError) -> HTTPException:
+    return HTTPException(
+        409,
+        "Data duplikat: nilai unik (kode/email/kunci) sudah digunakan. Gunakan nilai lain.",
+    )
+
+
+# --------------------------------------------------------------------------
+# Cursor
+# --------------------------------------------------------------------------
+class Cursor:
+    def __init__(self, collection: "Collection", flt: Optional[Dict[str, Any]], projection=None):
+        self._coll = collection
+        self._filter = flt or {}
+        self._projection = projection
+        self._sort: List[Tuple[str, int]] = []
+        self._skip = 0
+        self._limit: Optional[int] = None
+        self._buffer: Optional[List[Dict[str, Any]]] = None
+
+    def sort(self, key_or_list, direction: Optional[int] = None) -> "Cursor":
+        if isinstance(key_or_list, str):
+            self._sort = [(key_or_list, direction if direction is not None else ASCENDING)]
+        else:
+            self._sort = [(k, d) for k, d in key_or_list]
+        return self
+
+    def skip(self, n: int) -> "Cursor":
+        self._skip = max(0, int(n or 0))
+        return self
+
+    def limit(self, n: int) -> "Cursor":
+        self._limit = int(n) if n else None
+        return self
+
+    async def to_list(self, length: Optional[int] = None) -> List[Dict[str, Any]]:
+        limit = self._limit
+        if length is not None:
+            limit = min(limit, int(length)) if limit else int(length)
+        return await self._coll._select(self._filter, self._projection, self._sort, self._skip, limit)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._buffer is None:
+            self._buffer = await self.to_list()
+        if not self._buffer:
+            raise StopAsyncIteration
+        return self._buffer.pop(0)
+
+
+# --------------------------------------------------------------------------
+# Collection
+# --------------------------------------------------------------------------
+class Collection:
+    def __init__(self, name: str):
+        self.name = name
+        self.table = get_table(name)
+
+    # ---- helpers -------------------------------------------------------
+    def _where(self, flt):
+        return compile_filter(self.table, flt)
+
+    def _doc(self, row) -> Dict[str, Any]:
+        return _normalise_json_values(self.table, _row_to_doc(row))
+
+    async def _select(self, flt, projection, sort_spec, skip, limit) -> List[Dict[str, Any]]:
+        stmt = sa.select(self.table).where(self._where(flt))
+        if sort_spec:
+            stmt = stmt.order_by(*_sort_clauses(self.table, sort_spec))
+        if skip:
+            stmt = stmt.offset(skip)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        async with get_engine().connect() as conn:
+            result = await conn.execute(stmt)
+            rows = result.fetchall()
+        return [_apply_projection(self._doc(r), projection) for r in rows]
+
+    async def _find_ids(self, conn, flt, limit: Optional[int] = None, for_update: bool = False) -> List[str]:
+        stmt = sa.select(self.table.c.id).where(self._where(flt))
+        if limit:
+            stmt = stmt.limit(limit)
+        if for_update:
+            stmt = stmt.with_for_update()
+        result = await conn.execute(stmt)
+        return [r[0] for r in result.fetchall()]
+
+    def _build_update_values(
+        self, update: Dict[str, Any], current: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Translate {$set,$inc,$push,$unset,$addToSet} into column values.
+
+        For `extra`/JSON sub-paths and $push we merge in Python using `current`
+        (the row read inside the same transaction)."""
+        table = self.table
+        values: Dict[str, Any] = {}
+        extra_patch: Dict[str, Any] = {}
+        extra_remove: List[str] = []
+        json_patches: Dict[str, Any] = {}  # json column -> new python value
+        current = current or {}
+
+        def _json_current(col: str):
+            if col in json_patches:
+                return json_patches[col]
+            return current.get(col)
+
+        def _set_path(container: Any, path: str, value: Any):
+            parts = path.split(".")
+            node = container if isinstance(container, dict) else {}
+            root = node
+            for p in parts[:-1]:
+                nxt = node.get(p)
+                if not isinstance(nxt, dict):
+                    nxt = {}
+                    node[p] = nxt
+                node = nxt
+            node[parts[-1]] = value
+            return root
+
+        for op, payload in update.items():
+            if op == "$set":
+                for key, value in (payload or {}).items():
+                    if key == "_id":
+                        continue
+                    if key in table.c and key != "extra":
+                        values[key] = _coerce_in(table.c[key], value)
+                    elif "." in key:
+                        root, rest = key.split(".", 1)
+                        if root in table.c and isinstance(table.c[root].type, JSON):
+                            json_patches[root] = _set_path(_json_current(root) or {}, rest, value)
+                        else:
+                            extra_patch[root] = _set_path(dict((current.get(root) or {})), rest, value)
+                    else:
+                        extra_patch[key] = value
+            elif op == "$setOnInsert":
+                continue  # handled by caller on insert
+            elif op == "$unset":
+                for key in (payload or {}).keys():
+                    if key in table.c and key != "extra":
+                        values[key] = None
+                    else:
+                        extra_remove.append(key)
+            elif op == "$inc":
+                for key, amount in (payload or {}).items():
+                    if key in table.c:
+                        col = table.c[key]
+                        values[key] = func.coalesce(col, 0) + amount
+                    else:
+                        extra_patch[key] = (current.get(key) or 0) + amount
+            elif op in ("$push", "$addToSet"):
+                for key, item in (payload or {}).items():
+                    if key in table.c and isinstance(table.c[key].type, JSON):
+                        arr = list(_json_current(key) or [])
+                        if op == "$push" or item not in arr:
+                            arr.append(item)
+                        json_patches[key] = arr
+                    else:
+                        arr = list(current.get(key) or [])
+                        if op == "$push" or item not in arr:
+                            arr.append(item)
+                        extra_patch[key] = arr
+            elif op == "$pull":
+                for key, item in (payload or {}).items():
+                    if key in table.c and isinstance(table.c[key].type, JSON):
+                        json_patches[key] = [x for x in (_json_current(key) or []) if x != item]
+                    else:
+                        extra_patch[key] = [x for x in (current.get(key) or []) if x != item]
+            elif op.startswith("$"):
+                raise ValueError(f"Operator update '{op}' belum didukung oleh adapter MariaDB.")
+
+        for col, val in json_patches.items():
+            values[col] = val
+
+        if extra_patch or extra_remove:
+            known = {c.name for c in table.c}
+            base = {k: v for k, v in current.items() if k not in known}
+            base.update(extra_patch)
+            for k in extra_remove:
+                base.pop(k, None)
+            values["extra"] = base or None
+        return values
+
+    def _needs_current(self, update: Dict[str, Any]) -> bool:
+        table = self.table
+        for op, payload in update.items():
+            if op in ("$push", "$addToSet", "$pull"):
+                return True
+            for key in (payload or {}).keys() if isinstance(payload, dict) else []:
+                if key not in table.c or "." in key:
+                    return True
+                if op == "$inc" and key not in table.c:
+                    return True
+        return False
+
+    def _upsert_doc(self, flt: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
+        doc: Dict[str, Any] = {}
+        for k, v in (flt or {}).items():
+            if not str(k).startswith("$") and not _is_operator_dict(v):
+                doc[k] = v
+        doc.update(update.get("$setOnInsert") or {})
+        doc.update(update.get("$set") or {})
+        for k, v in (update.get("$inc") or {}).items():
+            doc[k] = (doc.get(k) or 0) + v
+        for k, v in (update.get("$push") or {}).items():
+            doc[k] = list(doc.get(k) or []) + [v]
+        doc.setdefault("id", new_id())
+        return doc
+
+    # ---- public API ----------------------------------------------------
+    def find(self, flt: Optional[Dict[str, Any]] = None, projection=None, **kwargs) -> Cursor:
+        cur = Cursor(self, flt, projection)
+        if kwargs.get("sort"):
+            cur.sort(kwargs["sort"])
+        if kwargs.get("skip"):
+            cur.skip(kwargs["skip"])
+        if kwargs.get("limit"):
+            cur.limit(kwargs["limit"])
+        return cur
+
+    async def find_one(self, flt: Optional[Dict[str, Any]] = None, projection=None, **kwargs) -> Optional[Dict[str, Any]]:
+        sort_spec = kwargs.get("sort")
+        rows = await self._select(flt, projection, [tuple(s) for s in sort_spec] if sort_spec else None, 0, 1)
+        return rows[0] if rows else None
+
+    async def count_documents(self, flt: Optional[Dict[str, Any]] = None, **kwargs) -> int:
+        stmt = sa.select(func.count()).select_from(self.table).where(self._where(flt))
+        async with get_engine().connect() as conn:
+            result = await conn.execute(stmt)
+            return int(result.scalar() or 0)
+
+    async def estimated_document_count(self) -> int:
+        return await self.count_documents({})
+
+    async def distinct(self, key: str, flt: Optional[Dict[str, Any]] = None) -> List[Any]:
+        field = _Field(self.table, key)
+        stmt = sa.select(field.expr()).where(self._where(flt)).distinct()
+        async with get_engine().connect() as conn:
+            result = await conn.execute(stmt)
+            return [r[0] for r in result.fetchall() if r[0] is not None]
+
+    async def insert_one(self, doc: Dict[str, Any]) -> InsertOneResult:
+        if "id" not in doc or not doc["id"]:
+            doc["id"] = new_id()
+        row = _doc_to_row(self.table, doc)
+        try:
+            async with get_engine().begin() as conn:
+                await conn.execute(sa.insert(self.table).values(**row))
+        except IntegrityError as exc:
+            raise _duplicate_http(exc) from exc
+        return InsertOneResult(doc["id"])
+
+    async def insert_many(self, docs: Iterable[Dict[str, Any]]) -> InsertManyResult:
+        docs = list(docs)
+        if not docs:
+            return InsertManyResult([])
+        rows = []
+        for d in docs:
+            if not d.get("id"):
+                d["id"] = new_id()
+            rows.append(_doc_to_row(self.table, d, full=True))
+        try:
+            async with get_engine().begin() as conn:
+                await conn.execute(sa.insert(self.table), rows)
+        except IntegrityError as exc:
+            raise _duplicate_http(exc) from exc
+        return InsertManyResult([d["id"] for d in docs])
+
+    async def _update(self, flt, update, upsert: bool, many: bool) -> UpdateResult:
+        table = self.table
+        try:
+            async with get_engine().begin() as conn:
+                ids = await self._find_ids(conn, flt, None if many else 1, for_update=True)
+                if not ids:
+                    if upsert:
+                        doc = self._upsert_doc(flt or {}, update)
+                        await conn.execute(sa.insert(table).values(**_doc_to_row(table, doc)))
+                        return UpdateResult(0, 0, doc["id"])
+                    return UpdateResult(0, 0, None)
+                if self._needs_current(update):
+                    modified = 0
+                    for rid in ids:
+                        res = await conn.execute(sa.select(table).where(table.c.id == rid))
+                        current = self._doc(res.fetchone())
+                        values = self._build_update_values(update, current)
+                        if values:
+                            await conn.execute(sa.update(table).where(table.c.id == rid).values(**values))
+                            modified += 1
+                    return UpdateResult(len(ids), modified, None)
+                values = self._build_update_values(update)
+                if not values:
+                    return UpdateResult(len(ids), 0, None)
+                res = await conn.execute(sa.update(table).where(table.c.id.in_(ids)).values(**values))
+                return UpdateResult(len(ids), res.rowcount if res.rowcount is not None else len(ids), None)
+        except IntegrityError as exc:
+            raise _duplicate_http(exc) from exc
+
+    async def update_one(self, flt, update, upsert: bool = False, **kwargs) -> UpdateResult:
+        return await self._update(flt, update, upsert, many=False)
+
+    async def update_many(self, flt, update, upsert: bool = False, **kwargs) -> UpdateResult:
+        return await self._update(flt, update, upsert, many=True)
+
+    async def replace_one(self, flt, replacement: Dict[str, Any], upsert: bool = False) -> UpdateResult:
+        table = self.table
+        try:
+            async with get_engine().begin() as conn:
+                ids = await self._find_ids(conn, flt, 1, for_update=True)
+                if not ids:
+                    if upsert:
+                        doc = dict(replacement)
+                        doc.setdefault("id", new_id())
+                        await conn.execute(sa.insert(table).values(**_doc_to_row(table, doc)))
+                        return UpdateResult(0, 0, doc["id"])
+                    return UpdateResult(0, 0, None)
+                doc = dict(replacement)
+                doc["id"] = ids[0]
+                row = _doc_to_row(table, doc, full=True)
+                row.pop("id", None)
+                await conn.execute(sa.update(table).where(table.c.id == ids[0]).values(**row))
+                return UpdateResult(1, 1, None)
+        except IntegrityError as exc:
+            raise _duplicate_http(exc) from exc
+
+    async def find_one_and_update(
+        self,
+        flt,
+        update,
+        projection=None,
+        return_document: bool = ReturnDocument.BEFORE,
+        upsert: bool = False,
+        **kwargs,
+    ) -> Optional[Dict[str, Any]]:
+        table = self.table
+        try:
+            async with get_engine().begin() as conn:
+                ids = await self._find_ids(conn, flt, 1, for_update=True)
+                if not ids:
+                    if not upsert:
+                        return None
+                    doc = self._upsert_doc(flt or {}, update)
+                    await conn.execute(sa.insert(table).values(**_doc_to_row(table, doc)))
+                    return _apply_projection(doc, projection) if return_document else None
+                rid = ids[0]
+                res = await conn.execute(sa.select(table).where(table.c.id == rid))
+                before = self._doc(res.fetchone())
+                values = self._build_update_values(update, before)
+                if values:
+                    await conn.execute(sa.update(table).where(table.c.id == rid).values(**values))
+                if not return_document:
+                    return _apply_projection(before, projection)
+                res = await conn.execute(sa.select(table).where(table.c.id == rid))
+                return _apply_projection(self._doc(res.fetchone()), projection)
+        except IntegrityError as exc:
+            raise _duplicate_http(exc) from exc
+
+    async def delete_one(self, flt) -> DeleteResult:
+        table = self.table
+        async with get_engine().begin() as conn:
+            ids = await self._find_ids(conn, flt, 1)
+            if not ids:
+                return DeleteResult(0)
+            await conn.execute(sa.delete(table).where(table.c.id == ids[0]))
+            return DeleteResult(1)
+
+    async def delete_many(self, flt) -> DeleteResult:
+        async with get_engine().begin() as conn:
+            res = await conn.execute(sa.delete(self.table).where(self._where(flt)))
+            return DeleteResult(res.rowcount or 0)
+
+    async def create_index(self, *args, **kwargs) -> str:  # compatibility no-op
+        return kwargs.get("name", "index")
+
+
+# --------------------------------------------------------------------------
+# Database facade
+# --------------------------------------------------------------------------
+class Database:
+    def __getitem__(self, name: str) -> Collection:
+        return Collection(name)
+
+    def __getattr__(self, name: str) -> Collection:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return Collection(name)
+
+    async def command(self, cmd: Any) -> Dict[str, Any]:
+        async with get_engine().connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"ok": 1}
+
+    async def execute(self, sql: str, params: Optional[Dict[str, Any]] = None):
+        async with get_engine().begin() as conn:
+            return await conn.execute(text(sql), params or {})
+
+
+_db = Database()
+
+
+def get_db() -> Database:
+    return _db
+
+
+# --------------------------------------------------------------------------
+# Schema management
+# --------------------------------------------------------------------------
+def _sync_schema(sync_conn) -> None:
+    """Create missing tables, then add any columns that are missing in existing tables."""
+    metadata.create_all(sync_conn, checkfirst=True)
+    inspector = sa.inspect(sync_conn)
+    dialect = sync_conn.dialect
+    for table in metadata.sorted_tables:
+        existing = {c["name"] for c in inspector.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            ddl_type = col.type.compile(dialect=dialect)
+            sync_conn.execute(text(f"ALTER TABLE `{table.name}` ADD COLUMN `{col.name}` {ddl_type} NULL"))
+            logger.info("Kolom baru ditambahkan: %s.%s", table.name, col.name)
+        existing_idx = {i["name"] for i in inspector.get_indexes(table.name)}
+        existing_uq = {u["name"] for u in inspector.get_unique_constraints(table.name)}
+        for idx in table.indexes:
+            if idx.name not in existing_idx:
+                idx.create(sync_conn)
+        for cons in table.constraints:
+            if isinstance(cons, UniqueConstraint) and cons.name and cons.name not in existing_idx | existing_uq:
+                cols = ", ".join(f"`{c.name}`" for c in cons.columns)
+                sync_conn.execute(text(f"ALTER TABLE `{table.name}` ADD UNIQUE `{cons.name}` ({cols})"))
 
 
 async def ensure_indexes() -> None:
-    """Create foreign-key style indexes. Mirrors what PK/FK/UNIQUE would be in SQL."""
-    db = get_db()
-
-    await db.users.create_index([("email", ASCENDING)], unique=True, name="uq_users_email")
-    await db.users.create_index([("id", ASCENDING)], unique=True, name="pk_users")
-    await db.companies.create_index([("id", ASCENDING)], unique=True, name="pk_companies")
-    await db.companies.create_index([("code", ASCENDING)], unique=True, name="uq_companies_code")
-    await db.roles.create_index([("key", ASCENDING)], unique=True, name="uq_roles_key")
-    await db.permissions.create_index([("key", ASCENDING)], unique=True, name="uq_permissions_key")
-    await db.modules.create_index([("key", ASCENDING)], unique=True, name="uq_modules_key")
-    await db.role_permissions.create_index(
-        [("role_key", ASCENDING), ("permission_key", ASCENDING)],
-        unique=True,
-        name="uq_role_permission",
-    )
-    await db.user_company_roles.create_index(
-        [("user_id", ASCENDING), ("company_id", ASCENDING), ("role_key", ASCENDING)],
-        unique=True,
-        name="uq_user_company_role",
-    )
-    await db.user_company_roles.create_index([("company_id", ASCENDING)], name="ix_ucr_company")
-
-    for coll in TENANT_COLLECTIONS:
-        await db[coll].create_index(
-            [("company_id", ASCENDING), ("id", ASCENDING)], unique=True, name="pk_tenant"
-        )
-        await db[coll].create_index(
-            [("company_id", ASCENDING), ("status", ASCENDING)], name="ix_company_status"
-        )
-
-    await db.company_modules.create_index(
-        [("company_id", ASCENDING), ("module_key", ASCENDING)],
-        unique=True,
-        name="uq_company_module",
-    )
-    await db.company_settings.create_index(
-        [("company_id", ASCENDING)], unique=True, name="uq_company_settings"
-    )
-    await db.audit_logs.create_index(
-        [("company_id", ASCENDING), ("created_at", DESCENDING)], name="ix_audit_recent"
-    )
-    await db.audit_logs.create_index(
-        [("company_id", ASCENDING), ("module", ASCENDING), ("action", ASCENDING)],
-        name="ix_audit_module_action",
-    )
-    await db.config_overrides.create_index(
-        [("company_id", ASCENDING), ("config_key", ASCENDING), ("scope_type", ASCENDING)],
-        name="ix_config_lookup",
-    )
-    await db.approval_steps.create_index(
-        [("company_id", ASCENDING), ("workflow_id", ASCENDING), ("step_order", ASCENDING)],
-        name="ix_steps_workflow",
-    )
-    await db.documents.create_index(
-        [("company_id", ASCENDING), ("owner_type", ASCENDING), ("owner_id", ASCENDING)],
-        name="ix_documents_owner",
-    )
-    await db.employees.create_index(
-        [("company_id", ASCENDING), ("employee_number", ASCENDING)], name="ix_employee_number"
-    )
-    await db.employees.create_index(
-        [("company_id", ASCENDING), ("full_name", ASCENDING)], name="ix_employee_name"
-    )
-    await db.employees.create_index(
-        [("company_id", ASCENDING), ("department_id", ASCENDING)], name="ix_employee_department"
-    )
-    await db.employee_contracts.create_index(
-        [("company_id", ASCENDING), ("employee_id", ASCENDING), ("start_date", DESCENDING)],
-        name="ix_contract_employee",
-    )
-    await db.employee_contracts.create_index(
-        [("company_id", ASCENDING), ("end_date", ASCENDING)], name="ix_contract_expiry"
-    )
-    await db.employee_certifications.create_index(
-        [("company_id", ASCENDING), ("employee_id", ASCENDING)], name="ix_cert_employee"
-    )
-    await db.employee_certifications.create_index(
-        [("company_id", ASCENDING), ("expiry_date", ASCENDING)], name="ix_cert_expiry"
-    )
-
-    # ---- payroll ----
-    await db.payroll_runs.create_index(
-        [("company_id", ASCENDING), ("year", DESCENDING), ("month", DESCENDING)],
-        name="ix_payroll_period",
-    )
-    await db.payroll_items.create_index(
-        [("company_id", ASCENDING), ("run_id", ASCENDING), ("employee_id", ASCENDING)],
-        name="ix_payroll_item_run",
-    )
-    await db.payroll_items.create_index(
-        [("company_id", ASCENDING), ("employee_id", ASCENDING)], name="ix_payroll_item_employee"
-    )
-    await db.employee_salaries.create_index(
-        [("company_id", ASCENDING), ("employee_id", ASCENDING)],
-        unique=True,
-        name="uq_employee_salary",
-    )
-    await db.employee_salary_history.create_index(
-        [("company_id", ASCENDING), ("employee_id", ASCENDING), ("created_at", DESCENDING)],
-        name="ix_salary_history",
-    )
-    await db.payroll_components.create_index(
-        [("company_id", ASCENDING), ("code", ASCENDING)], name="ix_payroll_component_code"
-    )
-    await db.smtp_settings.create_index(
-        [("company_id", ASCENDING)], unique=True, name="uq_smtp_company"
-    )
-    await db.reminder_settings.create_index(
-        [("company_id", ASCENDING)], unique=True, name="uq_reminder_company"
-    )
-    await db.reminder_logs.create_index(
-        [("company_id", ASCENDING), ("created_at", DESCENDING)], name="ix_reminder_log_recent"
-    )
+    """Create tables / indexes (SQL equivalent of the former Mongo index bootstrap)."""
+    async with get_engine().begin() as conn:
+        await conn.run_sync(_sync_schema)
 
 
+ensure_schema = ensure_indexes
+
+
+# --------------------------------------------------------------------------
+# Serialization helpers (kept for compatibility with existing routers)
+# --------------------------------------------------------------------------
 def serialize(doc):
-    """Make a Mongo document JSON-safe: drop ObjectId `_id`, keep everything else."""
     if doc is None:
         return None
     out = {}

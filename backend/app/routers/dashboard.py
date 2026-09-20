@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
-from pymongo import ASCENDING, DESCENDING
+from ..core.db import ASCENDING, DESCENDING
 
 from ..core.db import NO_ID, get_db, serialize_list
 from ..core.deps import AuthContext, get_auth

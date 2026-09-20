@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
-from pymongo import DESCENDING
+from ..core.db import DESCENDING
 
 from ..core.db import NO_ID, get_db, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission

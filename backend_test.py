@@ -15,7 +15,7 @@ import requests
 import sys
 from typing import Dict, Optional, Tuple
 
-BASE_URL = "https://github-payroll-build.preview.emergentagent.com/api"
+BASE_URL = "https://commit-checker-live-9.preview.emergentagent.com/api"
 PASSWORD = "Hris#2026"
 
 # Test accounts

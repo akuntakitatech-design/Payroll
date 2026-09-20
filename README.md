@@ -38,6 +38,8 @@ Aplikasi otomatis melakukan *seed* data demo saat backend pertama kali dijalanka
 
 ## 2. Tech Stack
 
+Ringkasan: **React + Nginx** (frontend) · **FastAPI** (backend) · **MariaDB** (database) · **phpMyAdmin** (GUI database) · **Cloudflare R2** (penyimpanan dokumen) · **Docker** di **Coolify** (deployment, 1 repo dengan base directory `/backend` dan `/frontend`).
+
 ### Frontend
 | Komponen | Teknologi |
 |----------|-----------|
@@ -45,27 +47,42 @@ Aplikasi otomatis melakukan *seed* data demo saat backend pertama kali dijalanka
 | Routing | React Router v7 |
 | UI Kit | **shadcn/ui** (Radix UI primitives) + **Tailwind CSS** |
 | Ikon | lucide-react |
-| HTTP Client | Axios (interceptor Bearer token & auto-logout 401) |
+| HTTP Client | Axios (interceptor Bearer token & auto-logout 401); base URL `/api` relatif di produksi |
 | Form & Validasi | react-hook-form + zod |
 | Notifikasi | sonner (toast) |
 | Grafik | recharts |
 | Tanggal / Format | dayjs, date-fns, `Intl.NumberFormat` (IDR) |
+| Web server produksi | **Nginx 1.27** (alpine) — serve static build + reverse-proxy `/api` → backend |
+| Build image | Multi-stage `node:20-alpine` → `nginx:1.27-alpine` (`frontend/Dockerfile`) |
 
 ### Backend
 | Komponen | Teknologi |
 |----------|-----------|
-| Framework | **FastAPI** (Python 3.11+, async) |
-| Server | Uvicorn (dikelola supervisor) |
+| Framework | **FastAPI 0.110** (Python 3.11, async) |
+| Server | Uvicorn (image `python:3.11-slim`, `backend/Dockerfile`, port 8001) |
 | Validasi | Pydantic v2 |
-| Driver DB | Motor (async MongoDB driver) + PyMongo |
-| Penjadwal | APScheduler (job pengingat per jam) |
+| Database driver | **SQLAlchemy 2.0 Core (async)** + **asyncmy** → MariaDB; adapter API bergaya dokumen di `app/core/db.py` |
+| Object storage | **boto3** (S3 compatible) → **Cloudflare R2** |
+| Autentikasi | PyJWT (HS256) + bcrypt |
+| Penjadwal | APScheduler (job pengingat per jam, zona Asia/Jakarta) |
 | PDF | ReportLab (slip gaji) |
 | Excel | openpyxl (impor karyawan, export laporan, file bank) |
 | Email | smtplib + SSL/STARTTLS (SMTP per perusahaan) |
 
+### Infrastruktur & Deployment
+| Komponen | Teknologi |
+|----------|-----------|
+| Platform | **Coolify** (self-hosted PaaS) di VPS, Docker build strategy |
+| Database | **MariaDB 11.x** (resource Database Coolify) |
+| GUI Database | **phpMyAdmin 5** (resource Service Coolify) |
+| Penyimpanan berkas | **Cloudflare R2** (bucket S3-compatible) |
+| Orkestrasi lokal | `docker-compose.yml` di root (mariadb, phpmyadmin, backend, frontend) |
+| Reverse proxy publik | Traefik/Caddy bawaan Coolify (TLS otomatis) → Nginx frontend → FastAPI |
+
 ### Database
-- **MongoDB** — satu database, koleksi bersama dengan kolom `company_id` pada setiap dokumen tenant. Indeks unik dibuat saat startup (`ensure_indexes`).
-- Koleksi utama: `companies`, `users`, `roles`, `employees`, `employee_contracts`, `employee_certifications`, `documents`, `payroll_components`, `employee_salaries`, `payroll_runs`, `approval_workflows`, `config_overrides`, `smtp_settings`, `audit_logs`, dan koleksi master data (`branches`, `departments`, `positions`, dll.).
+- **MariaDB 10.11+/11.x** — satu database, setiap entitas menjadi tabel dengan kolom `company_id` pada tabel tenant. Skema (tabel, kolom, indeks, unique) dibuat/diperbarui otomatis saat startup oleh `ensure_indexes()` di `backend/app/core/db.py` — tidak perlu migrasi manual; kolom baru yang ditambahkan ke katalog akan di-`ALTER TABLE` otomatis.
+- Lapisan akses data (`app/core/db.py`) mengekspos API bergaya dokumen (`find_one`, `update_one({"$set": ...})`, dll.) yang diterjemahkan ke SQL, sehingga logika bisnis router tidak berubah. Objek bertingkat (mis. `payroll_items.earnings`, `payroll_runs.history`) disimpan sebagai kolom **JSON**; key yang tidak punya kolom masuk ke kolom `extra` (JSON).
+- Tabel utama: `companies`, `users`, `roles`, `employees`, `employee_contracts`, `employee_certifications`, `documents`, `payroll_components`, `employee_salaries`, `payroll_runs`, `approval_workflows`, `config_overrides`, `smtp_settings`, `audit_logs`, dan koleksi master data (`branches`, `departments`, `positions`, dll.).
 
 ### Autentikasi
 - **JWT (HS256)** — access token (default 12 jam) & refresh token (default 14 hari), payload menyimpan `sub` (user id) dan `active_company_id`.
@@ -74,8 +91,8 @@ Aplikasi otomatis melakukan *seed* data demo saat backend pertama kali dijalanka
 - Perlindungan brute-force: penguncian sementara setelah `LOGIN_MAX_ATTEMPTS` gagal.
 
 ### Storage
-- **Object Storage (Emergent)** — semua file dokumen karyawan (PDF, gambar, Office) disimpan di object storage, **bukan** di disk server. Path objek: `hris-payroll/companies/{company_id}/documents/{file_id}.{ext}`.
-- Metadata file (nama, ukuran, MIME, path) disimpan di MongoDB koleksi `documents`.
+- **Cloudflare R2 (S3 compatible, via boto3)** — semua file dokumen karyawan (PDF, gambar, Office) disimpan di bucket R2, **bukan** di disk server. Path objek: `{R2_PREFIX}/companies/{company_id}/documents/{file_id}.{ext}`. Konfigurasi lewat env `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` (+ opsional `R2_ENDPOINT_URL`).
+- Metadata file (nama, ukuran, MIME, path) disimpan di tabel MariaDB `documents`.
 - Slip gaji PDF & file Excel dihasilkan on-the-fly (streaming), tidak disimpan.
 
 ---
@@ -89,7 +106,7 @@ payroll/
 │   ├── requirements.txt           # Dependensi Python (pip)
 │   ├── pytest.ini                 # Konfigurasi pytest (xdist, 2 worker)
 │   ├── test_core.py               # Smoke test core flow (login, tenant scope, RBAC)
-│   ├── .env                       # MONGO_URL, DB_NAME, CORS_ORIGINS, JWT_SECRET, EMERGENT_LLM_KEY (tidak di-commit)
+│   ├── .env                       # DATABASE_URL, CORS_ORIGINS, JWT_SECRET, R2_* (tidak di-commit)
 │   └── app/
 │       ├── schemas.py             # Pydantic model request/response (LoginRequest, CompanyCreate, PayrollRunCreate, ...)
 │       ├── masters.py             # Definisi generik master data (resource, field, label, validasi)
@@ -188,7 +205,7 @@ payroll/
 
 ```
 ┌──────────────┐   1. Axios request      ┌─────────────────────┐   4. Motor query       ┌──────────────┐
-│  React Page  │ ──────────────────────▶ │  FastAPI Router     │ ─────────────────────▶ │   MongoDB    │
+│  React Page  │ ──────────────────────▶ │  FastAPI Router     │ ─────────────────────▶ │   MariaDB    │
 │  (pages/*)   │   Authorization: Bearer │  (/api/...)         │   {company_id: ...}    │              │
 │              │ ◀────────────────────── │                     │ ◀───────────────────── │              │
 └──────────────┘   6. JSON response      └─────────────────────┘   5. documents         └──────────────┘
@@ -228,7 +245,7 @@ CompanySwitcher ──POST /api/auth/switch-company──▶ token baru dengan a
 DocumentsPage ──multipart POST /api/documents──▶ documents.py
                                                     ├─▶ validasi ukuran/MIME (policy)
                                                     ├─▶ storage.put_object() ──▶ Object Storage
-                                                    └─▶ simpan metadata ──▶ MongoDB `documents`
+                                                    └─▶ simpan metadata ──▶ MariaDB `documents`
 Preview/Download ──GET /api/documents/{id}/download──▶ storage.get_object() ──▶ stream ke browser
 ```
 
@@ -317,7 +334,7 @@ APScheduler (setiap jam, Asia/Jakarta)
 # Backend
 cd backend
 pip install -r requirements.txt
-cp .env.example .env   # isi MONGO_URL, DB_NAME, JWT_SECRET, EMERGENT_LLM_KEY
+cp .env.example .env   # isi DATABASE_URL (MariaDB), JWT_SECRET, R2_*
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 
 # Frontend
@@ -333,12 +350,77 @@ Buka `http://localhost:3000`, login dengan salah satu akun demo di atas. Dokumen
 
 | Variabel | Sisi | Keterangan |
 |----------|------|------------|
-| `MONGO_URL` | backend | Connection string MongoDB |
-| `DB_NAME` | backend | Nama database |
+| `DATABASE_URL` | backend | Connection string MariaDB, mis. `mysql://user:pass@host:3306/hris_payroll` (alternatif: `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`) |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL` | backend | Kredensial Cloudflare R2 untuk penyimpanan dokumen |
+| `AUTO_SEED` | backend | `true` = isi data demo saat startup (idempoten) |
 | `CORS_ORIGINS` | backend | Daftar origin dipisah koma, atau `*` |
 | `JWT_SECRET` | backend | Secret penandatanganan JWT (wajib diganti di produksi) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_DAYS` | backend | Umur token (default 720 / 14) |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCK_MINUTES` | backend | Proteksi brute-force (default 8 / 10) |
 | `MAX_UPLOAD_MB` | backend | Batas ukuran upload dokumen (default 15) |
-| `EMERGENT_LLM_KEY` | backend | Kunci akses object storage dokumen |
-| `REACT_APP_BACKEND_URL` | frontend | URL dasar backend (tanpa `/api`) |
+| `REACT_APP_BACKEND_URL` | frontend (build-time) | URL dasar backend tanpa `/api`. **Kosongkan di produksi** agar frontend memanggil `/api` relatif yang di-proxy Nginx ke backend |
+| `BACKEND_UPSTREAM` | frontend (runtime, Nginx) | Alamat internal backend untuk proxy `/api`, default `http://backend:8001` |
+
+---
+
+## Deploy ke Coolify (Docker)
+
+Repo ini **satu repo** dengan dua base directory yang masing-masing punya `Dockerfile`:
+
+| Service | Tipe Coolify | Base directory | Port internal | Catatan |
+|---------|--------------|----------------|---------------|---------|
+| `mariadb` | Database (MariaDB 11) | — | 3306 | dibuat dari menu Databases |
+| `phpmyadmin` | Service (phpMyAdmin) | — | 80 | `PMA_HOST` = hostname internal MariaDB |
+| `backend` | Application → Dockerfile | `/backend` | **8001** | FastAPI |
+| `frontend` | Application → Dockerfile | `/frontend` | **80** | Nginx: React + proxy `/api` → backend |
+
+### 1. MariaDB
+Buat resource **MariaDB** di project. Catat *internal URL*-nya, bentuknya
+`mysql://USER:PASS@<uuid-container>:3306/<db>`. Tabel & indeks dibuat otomatis oleh backend saat start (tidak perlu SQL manual).
+
+### 2. Backend (`Backend-Payroll`)
+- Build Pack: **Dockerfile**, Base Directory: `/backend`, Port exposes: `8001`.
+- Domain: opsional (tidak wajib, karena diakses lewat proxy frontend).
+- Environment variables:
+
+```env
+DATABASE_URL=mysql://USER:PASS@<host-internal-mariadb>:3306/<db>
+JWT_SECRET=<acak panjang>
+CORS_ORIGINS=https://hris.akuntakita.com
+AUTO_SEED=true
+MAX_UPLOAD_MB=15
+R2_ACCOUNT_ID=<cloudflare account id>
+R2_ACCESS_KEY_ID=<r2 access key>
+R2_SECRET_ACCESS_KEY=<r2 secret>
+R2_BUCKET_NAME=<nama bucket>
+R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+R2_PUBLIC_BASE_URL=https://pub-xxxx.r2.dev   # opsional, URL publik bucket
+```
+
+### 3. Frontend (`Frontend-Payroll`)
+- Build Pack: **Dockerfile**, Base Directory: `/frontend`, Port exposes: `80`.
+- Domain: `https://hris.akuntakita.com`.
+- Build arg `REACT_APP_BACKEND_URL` **dibiarkan kosong** (frontend memanggil `/api` relatif).
+- Environment variable runtime:
+
+```env
+BACKEND_UPSTREAM=http://<nama-container-backend>:8001
+```
+
+Nama container backend dapat dilihat di Coolify → Backend-Payroll → *Advanced / Network* (biasanya `<uuid>`; bisa diberi **Custom Docker Container Name**, mis. `hris-backend`, agar mudah). Backend & frontend harus berada di *destination/network* yang sama, atau aktifkan **"Connect To Predefined Network"** pada keduanya.
+
+### 4. phpMyAdmin
+Service phpMyAdmin dari katalog Coolify; set `PMA_HOST` ke hostname internal MariaDB dan beri domain (mis. `db.hris.akuntakita.com`). Login dengan user/password MariaDB.
+
+### Alternatif: satu resource Docker Compose
+Root repo menyediakan `docker-compose.yml` (4 service sekaligus). Di Coolify pilih Build Pack **Docker Compose**, isi env sesuai `.env.example` di root. Untuk lokal:
+
+```bash
+cp .env.example .env   # isi password & JWT_SECRET
+docker compose up -d --build
+# app: http://localhost:3000  |  phpMyAdmin: http://localhost:8080
+```
+
+### Health check
+- Backend: `GET /api/health` → `{"status":"healthy","database":"mariadb:connected"}`
+- Frontend (Nginx): `GET /healthz` → `ok`
