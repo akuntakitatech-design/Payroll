@@ -40,6 +40,11 @@ class Settings:
     DATABASE_URL: str = _build_database_url()
     DB_POOL_SIZE: int = int(os.environ.get("DB_POOL_SIZE", "10"))
     DB_MAX_OVERFLOW: int = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
+    # Matikan bila database berada jauh (latensi tinggi) untuk menghemat
+    # satu perjalanan jaringan pada setiap pengambilan koneksi.
+    DB_POOL_PRE_PING: bool = (
+        os.environ.get("DB_POOL_PRE_PING", "true") or ""
+    ).strip().lower() in ("1", "true", "yes", "y", "ya")
 
     CORS_ORIGINS: str = os.environ.get("CORS_ORIGINS", "*")
 

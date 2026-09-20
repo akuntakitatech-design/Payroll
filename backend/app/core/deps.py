@@ -8,6 +8,7 @@ Every tenant-owned endpoint depends on `get_auth` which resolves:
 
 Authorization is enforced on the BACKEND. The frontend only *hides* menus.
 """
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
@@ -67,7 +68,15 @@ async def effective_permissions(user_id: str, company_id: Optional[str]) -> Dict
     db = get_db()
     query: Dict[str, Any] = {"user_id": user_id, "status": "active"}
     memberships = await db.user_company_roles.find(query, NO_ID).to_list(500)
+    return await _permissions_from_memberships(memberships, company_id)
 
+
+async def _permissions_from_memberships(
+    memberships: List[Dict[str, Any]], company_id: Optional[str]
+) -> Dict[str, Any]:
+    """Bagian murni-hitung + satu query izin, dipisah agar `memberships`
+    dapat diambil bersamaan dengan query lain (lihat `_base_auth`)."""
+    db = get_db()
     global_roles = [m["role_key"] for m in memberships if m.get("company_id") is None]
     company_roles = (
         [m["role_key"] for m in memberships if m.get("company_id") == company_id]
@@ -130,16 +139,34 @@ async def _base_auth(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Jenis token tidak sesuai.")
 
     db = get_db()
-    user = await db.users.find_one({"id": payload.get("sub")}, NO_ID)
+    company_id = payload.get("active_company_id")
+
+    # Gelombang 1: pengguna, keanggotaan, perusahaan aktif, dan modul
+    # perusahaan tidak saling bergantung -> diambil BERSAMAAN.
+    wave1 = [
+        db.users.find_one({"id": payload.get("sub")}, NO_ID),
+        db.user_company_roles.find({"user_id": payload.get("sub"), "status": "active"}, NO_ID).to_list(500),
+    ]
+    if company_id:
+        wave1.append(db.companies.find_one({"id": company_id}, NO_ID))
+        wave1.append(
+            db.company_modules.find({"company_id": company_id, "is_active": True}, NO_ID).to_list(200)
+        )
+
+    results = await asyncio.gather(*wave1)
+    user = results[0]
+    memberships = results[1]
+    company = results[2] if company_id else None
+    module_rows = results[3] if company_id else []
+
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Pengguna tidak ditemukan.")
     if user.get("status") != "active":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Akun Anda tidak aktif. Hubungi administrator.")
 
-    company_id = payload.get("active_company_id")
-    info = await effective_permissions(user["id"], company_id)
+    # Gelombang 2: izin bergantung pada daftar peran hasil gelombang 1.
+    info = await _permissions_from_memberships(memberships, company_id)
 
-    company = None
     if company_id:
         allowed_ids = {m["company_id"] for m in info["memberships"] if m.get("company_id")}
         if not info["is_super_admin"] and company_id not in allowed_ids:
@@ -147,18 +174,22 @@ async def _base_auth(
                 status.HTTP_403_FORBIDDEN,
                 "Anda tidak memiliki akses ke perusahaan ini. Silakan pilih perusahaan lain.",
             )
-        company = await db.companies.find_one({"id": company_id}, NO_ID)
         if not company:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Perusahaan tidak ditemukan.")
         if company.get("status") == "archived":
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Perusahaan ini sudah diarsipkan.")
+
+    modules: Set[str] = set()
+    if company_id:
+        modules = {r["module_key"] for r in module_rows}
+        modules.add("hr_core")  # modul inti tidak dapat dimatikan
 
     return AuthContext(
         user=user,
         company=company,
         role_keys=info["role_keys"],
         permissions=info["permissions"],
-        modules=await company_modules(company_id),
+        modules=modules,
         is_super_admin=info["is_super_admin"],
         request=request,
     )

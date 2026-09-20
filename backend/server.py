@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
-from app.core.db import close_db, ensure_indexes, get_db
+from app.core.db import close_db, ensure_indexes, get_db, warm_pool
 from app.routers import (
     approvals,
     audit_logs,
@@ -161,6 +161,14 @@ async def on_startup():
     await _wait_for_database()
     await ensure_indexes()
     logger.info("Skema MariaDB & indeks siap.")
+
+    # Panaskan kolam koneksi. Penting saat database berada jauh: tanpa ini,
+    # permintaan pertama harus membuka puluhan koneksi sekaligus (~1,5 detik
+    # masing-masing) sehingga halaman terasa menggantung.
+    try:
+        await warm_pool()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Pemanasan kolam koneksi dilewati: %s", exc)
     try:
         from app.core.storage import check_storage
 

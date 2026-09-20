@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LogOut, Menu, User, KeyRound } from "lucide-react";
+import { LogOut, Menu, User, KeyRound, ChevronDown } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { initials } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import CompanySwitcher from "./CompanySwitcher";
 import { SidebarContent } from "./Sidebar";
+import GlobalSearch from "./GlobalSearch";
+import NotificationBell from "./NotificationBell";
+import ReadOnlyPill from "./ReadOnlyPill";
 
 const ROLE_LABELS = {
   super_admin: "Super Admin",
@@ -42,8 +45,9 @@ const Topbar = () => {
   return (
     <header
       data-testid="app-topbar"
-      className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-card px-3 sm:px-4"
+      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:gap-3 sm:px-4"
     >
+      {/* Menu navigasi untuk layar kecil */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetTrigger asChild>
           <Button
@@ -61,32 +65,46 @@ const Topbar = () => {
         </SheetContent>
       </Sheet>
 
-      <CompanySwitcher />
+      <div className="shrink-0" data-testid="topbar-company-selector">
+        <CompanySwitcher />
+      </div>
 
-      <div className="ml-auto flex items-center gap-2">
-        {/* Peran ditampilkan sebagai teks pendukung, bukan badge berwarna. */}
-        {roleText && (
-          <span className="hidden text-[13px] text-muted-foreground md:inline" data-testid="topbar-role-label">
-            {roleText}
-          </span>
-        )}
-        <span className="hidden h-5 w-px bg-border md:inline-block" aria-hidden="true" />
+      <span className="hidden h-6 w-px bg-border lg:inline-block" aria-hidden="true" />
+
+      {/* Pencarian global mengambil sisa ruang */}
+      <div className="flex min-w-0 flex-1 items-center justify-end md:justify-start">
+        <GlobalSearch />
+      </div>
+
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <ReadOnlyPill />
+        <NotificationBell />
+
+        <span className="hidden h-6 w-px bg-border sm:inline-block" aria-hidden="true" />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              className="h-9 gap-2 px-2"
-              data-testid="user-menu-trigger"
+            <button
+              type="button"
+              data-testid="topbar-user-menu"
               aria-label="Menu pengguna"
+              className="flex h-9 items-center gap-2 rounded-lg px-1.5 transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary-border bg-primary-soft text-[11px] font-bold text-primary">
                 {initials(user?.full_name)}
               </span>
-              <span className="hidden max-w-[10rem] truncate text-sm font-medium text-foreground sm:inline">
-                {user?.full_name}
+              <span className="hidden min-w-0 text-left sm:block">
+                <span className="block max-w-[9rem] truncate text-[12.5px] font-semibold leading-tight text-ink-1">
+                  {user?.full_name}
+                </span>
+                {roleText && (
+                  <span className="block max-w-[9rem] truncate text-[11px] leading-tight text-ink-3">
+                    {roleText}
+                  </span>
+                )}
               </span>
-            </Button>
+              <ChevronDown className="hidden h-3.5 w-3.5 shrink-0 text-ink-3 sm:block" strokeWidth={2} />
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuLabel className="space-y-0.5">
