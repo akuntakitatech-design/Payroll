@@ -598,3 +598,20 @@ class OfferingRespond(BaseModel):
 
 class OfferingCancel(BaseModel):
     reason: Optional[str] = None
+
+
+class CandidateConvertInput(BaseModel):
+    """Tahap C — pelengkap data yang belum tersedia di kandidat/offering.
+    Semua opsional: data yang sudah ada TIDAK perlu diketik ulang. company_id dari payload diabaikan."""
+    nik: Optional[str] = Field(None, max_length=32)
+    join_date: Optional[str] = None
+    employment_status_id: Optional[str] = None
+    job_title: Optional[str] = Field(None, max_length=160)
+    gender: Optional[str] = None
+    birth_place: Optional[str] = Field(None, max_length=120)
+    birth_date: Optional[str] = None
+    phone: Optional[str] = Field(None, max_length=32)
+    email: Optional[EmailStr] = None
+    address: Optional[str] = None
+    city: Optional[str] = Field(None, max_length=120)
+    notes: Optional[str] = None

@@ -12,6 +12,7 @@ import {
   Trash2,
   Upload,
   UserRound,
+  UserRoundPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
@@ -29,6 +30,7 @@ import ScreeningDialog from "@/components/recruitment/ScreeningDialog";
 import InterviewTab from "@/components/recruitment/InterviewTab";
 import ApprovalTab from "@/components/recruitment/ApprovalTab";
 import OfferingTab from "@/components/recruitment/OfferingTab";
+import ConvertEmployeeDialog, { HiredPanel } from "@/components/recruitment/ConvertEmployeeDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,7 +76,7 @@ const EDIT_FIELDS = [
 const CandidateDetailPage = () => {
   const { candidateId } = useParams();
   const navigate = useNavigate();
-  const { can } = useAuth();
+  const { can, hasModule } = useAuth();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -93,6 +95,7 @@ const CandidateDetailPage = () => {
   const [submitting, setSubmitting] = useState(false);
 
   const [screeningOpen, setScreeningOpen] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
   const [confirm, setConfirm] = useState(null); // {kind:'start'|'delete'|'document', row?}
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [previewId, setPreviewId] = useState(null);
@@ -290,10 +293,20 @@ const CandidateDetailPage = () => {
   }
 
   const stage = candidate.stage_status;
-  const canEdit = can("recruitment", "edit") && stage !== "hired";
+  const isHired = stage === "hired";
+  const conversion = pipeline?.conversion;
+  const canEdit = can("recruitment", "edit") && !isHired;
   const canStart = can("recruitment", "edit") && (candidate.allowed_next || []).includes("screening");
   const canScreen = can("recruitment", "edit") && candidate.can_screen;
-  const canDelete = can("recruitment", "delete") && candidate.can_delete;
+  const canDelete = can("recruitment", "delete") && candidate.can_delete && !isHired;
+  const canConvert =
+    stage === "offering_accepted" &&
+    !candidate.employee_id &&
+    can("recruitment", "edit") &&
+    can("employee", "create") &&
+    hasModule("employee_core") &&
+    (conversion ? conversion.can_convert : true);
+  const docsReadOnly = isHired;
 
   const documentColumns = [
     {
@@ -326,7 +339,7 @@ const CandidateDetailPage = () => {
           <Button variant="outline" size="sm" onClick={() => setPreviewId(row.id)} data-testid={`candidate-doc-preview-${row.id}`}>
             <Eye className="mr-1.5 h-3.5 w-3.5" /> Pratinjau
           </Button>
-          {can("document", "delete") && (
+          {can("document", "delete") && !docsReadOnly && (
             <Button
               variant="ghost"
               size="icon"
@@ -372,6 +385,11 @@ const CandidateDetailPage = () => {
                 <ClipboardCheck className="mr-2 h-4 w-4" /> Isi Hasil Screening
               </Button>
             )}
+            {canConvert && (
+              <Button onClick={() => setConvertOpen(true)} data-testid="candidate-convert-button">
+                <UserRoundPlus className="mr-2 h-4 w-4" /> Jadikan Karyawan
+              </Button>
+            )}
             {canDelete && (
               <Button
                 variant="ghost"
@@ -387,6 +405,12 @@ const CandidateDetailPage = () => {
       />
 
       <PageBody>
+        {isHired && <HiredPanel conversion={conversion} loading={pipelineLoading} />}
+        {stage === "offering_accepted" && !isHired && conversion && !conversion.can_convert && conversion.blockers?.length > 0 && (
+          <div className="rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-[12px] text-muted-foreground" data-testid="convert-blocked-note">
+            Jadikan Karyawan belum tersedia: {conversion.blockers.join(" ")}
+          </div>
+        )}
         <Tabs defaultValue="profile">
           <TabsList data-testid="candidate-tabs" className="flex-wrap">
             <TabsTrigger value="profile" data-testid="tab-profile">Profil</TabsTrigger>
@@ -546,8 +570,9 @@ const CandidateDetailPage = () => {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-muted-foreground">
                 CV, KTP, ijazah, sertifikat, dan dokumen pendukung kandidat. Tersimpan di modul Dokumen (pemilik: Pelamar).
+                {docsReadOnly ? " Kandidat sudah menjadi karyawan — dokumen bersifat read-only." : ""}
               </p>
-              {can("document", "create") && (
+              {can("document", "create") && !docsReadOnly && (
                 <Button
                   onClick={() => {
                     setUploadForm({ document_type_id: docTypes[0]?.id || "", name: "", expiry_date: "" });
@@ -619,6 +644,14 @@ const CandidateDetailPage = () => {
         onChange={(name, value) => setValues((p) => ({ ...p, [name]: value }))}
         onSubmit={submitEdit}
         submitting={submitting}
+      />
+
+      <ConvertEmployeeDialog
+        open={convertOpen}
+        onOpenChange={setConvertOpen}
+        candidate={candidate}
+        catalog={catalog}
+        onConverted={() => reloadAll()}
       />
 
       <ScreeningDialog

@@ -973,8 +973,11 @@ async def candidate_pipeline(candidate_id: str, ctx: AuthContext = Depends(_perm
     )
     blockers = _offering_blockers(candidate, offerings)
     enriched = (await _enrich(ctx.company_id, [serialize(candidate)]))[0]
+    from .recruitment_conversion import conversion_state  # impor lokal: hindari siklus impor
+    conversion = await conversion_state(ctx, candidate)
     return {
         "candidate": enriched,
+        "conversion": conversion,
         "interviews": interviews,
         "can_schedule_interview": candidate.get("stage_status") in INTERVIEW_ALLOWED_STAGES
         and ctx.has_permission("recruitment", "create"),

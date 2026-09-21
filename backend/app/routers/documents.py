@@ -84,6 +84,20 @@ async def list_documents(
     return result
 
 
+async def _assert_applicant_writable(ctx: AuthContext, owner_type: Optional[str], owner_id: Optional[str]) -> None:
+    """Rekrutmen Tahap C: dokumen kandidat yang sudah menjadi karyawan bersifat read-only."""
+    if owner_type != "applicant" or not owner_id:
+        return
+    cand = await ctx.tdb.candidates.find_one(
+        {"company_id": ctx.company_id, "id": owner_id}, NO_ID
+    )
+    if cand and (cand.get("stage_status") == "hired" or cand.get("employee_id")):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Kandidat sudah menjadi karyawan; dokumen kandidat bersifat read-only. Kelola dokumen lewat Data Karyawan.",
+        )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
@@ -98,6 +112,7 @@ async def upload_document(
     notes: Optional[str] = Form(None),
     ctx: AuthContext = Depends(require_permission("document", "create")),
 ):
+    await _assert_applicant_writable(ctx, owner_type, owner_id)
     db = get_db()
     doc_type = serialize(
         await db.document_types.find_one({"company_id": ctx.company_id, "id": document_type_id}, NO_ID)
@@ -287,6 +302,8 @@ async def update_document(
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
     repo = TenantRepository("documents", ctx.company_id)
+    existing = await repo.get(document_id)
+    await _assert_applicant_writable(ctx, existing.get("owner_type"), existing.get("owner_id"))
     before, after = await repo.update(document_id, data, ctx.user_id)
     await log_action(ctx, "update", "document", document_id, after.get("name"), before=before, after=after)
     return after
@@ -299,6 +316,7 @@ async def delete_document(
     """Soft delete - object storage has no delete API, and history must stay auditable."""
     repo = TenantRepository("documents", ctx.company_id)
     doc = await repo.get(document_id)
+    await _assert_applicant_writable(ctx, doc.get("owner_type"), doc.get("owner_id"))
     before, after = await repo.update(
         document_id, {"is_deleted": True, "status": "archived"}, ctx.user_id
     )

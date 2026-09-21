@@ -232,6 +232,8 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "cost_center_id": "fk", "project_id": "fk", "bank_name": "s", "bank_account_number": "s64",
         "bank_account_name": "s", "bpjs_kesehatan_number": "s64", "bpjs_tk_number": "s64",
         "notes": "t", "user_id": "fk", "is_demo_data": "b",
+        # Rekrutmen Tahap C: jejak asal karyawan (kandidat) — unik per perusahaan
+        "candidate_id": "fk",
     },
     "employee_contracts": {
         "employee_id": "fk", "contract_type_id": "fk", "contract_number": "s", "start_date": "s32",
@@ -387,6 +389,8 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("ix_employee_number", ["company_id", "employee_number"], False),
         ("ix_employee_name", ["company_id", "full_name"], False),
         ("ix_employee_department", ["company_id", "department_id"], False),
+        # Satu kandidat hanya boleh menjadi satu karyawan (NULL dibolehkan untuk karyawan non-rekrutmen)
+        ("uq_employee_candidate", ["company_id", "candidate_id"], True),
     ],
     "employee_contracts": [
         ("ix_contract_employee", ["company_id", "employee_id", "start_date"], False),

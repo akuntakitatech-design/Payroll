@@ -13,6 +13,7 @@ from ..core.db import ASCENDING, ReturnDocument
 from ..core.audit import log_action
 from ..core.db import NO_ID, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
+from ..core.employee_numbering import next_employee_number
 from ..core.expiry import expiry_state
 from ..core.policy import resolve_config
 from ..core.repo import TenantRepository
@@ -84,24 +85,9 @@ async def _validate_refs(company_id: str, data: Dict[str, Any]) -> None:
             )
 
 
-async def _next_employee_number(company_id: str, code: Optional[str]) -> str:
-    db = get_tenant_db(company_id)  # tenant-scoped
-    doc = await db.company_settings.find_one_and_update(
-        {"company_id": company_id},
-        {"$inc": {"employee_id_next_number": 1}},
-        projection=NO_ID,
-        return_document=ReturnDocument.BEFORE,
-    )
-    prefix = (doc or {}).get("employee_id_prefix") or code or "EMP"
-    number = int((doc or {}).get("employee_id_next_number") or 1)
-    candidate = f"{prefix}-{number:04d}"
-    # Guard against manual numbers already using the slot
-    while await db.employees.count_documents(
-        {"company_id": company_id, "employee_number": candidate, "status": {"$ne": "deleted"}}
-    ):
-        number += 1
-        candidate = f"{prefix}-{number:04d}"
-    return candidate
+# Penomoran karyawan dipindahkan ke core/employee_numbering.py (dipakai juga oleh
+# Rekrutmen Tahap C). Alias dipertahankan agar pemanggilan di router ini tidak berubah.
+_next_employee_number = next_employee_number
 
 
 async def _label_maps(company_id: str, items: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
