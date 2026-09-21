@@ -117,6 +117,15 @@ TENANT_COLLECTIONS = [
     "reminder_settings",
     "reminder_logs",
     "payslip_email_logs",
+    # Rekrutmen V1 (Tahap A): kandidat + riwayat status. Dokumen kandidat
+    # memakai tabel `documents` existing dengan owner_type="applicant".
+    "candidates",
+    "candidate_status_history",
+    # Rekrutmen V1 (Tahap B): interview, instance approval (snapshot dari
+    # approval_workflows/approval_steps existing), offering.
+    "candidate_interviews",
+    "candidate_approvals",
+    "candidate_offerings",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
@@ -295,6 +304,62 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
     },
     "reminder_logs": {"trigger": "s64", "message": "t", "recipients": "j", "item_count": "i", "counts": "j", "subject": "s"},
     "payslip_email_logs": {"run_id": "fk", "period_label": "s", "trigger": "s64", "sent_count": "i", "failed_count": "i", "summary": "t"},
+    # ------------------------------------------------------------------ Rekrutmen V1
+    # `status` (COMMON) = status record (active/deleted); `stage_status` = tahapan pipeline.
+    "candidates": {
+        # identitas
+        "candidate_number": "s64", "full_name": "s", "nik": "s64", "birth_place": "s", "birth_date": "s32",
+        "gender": "s64", "phone": "s64", "email": "s", "address": "t", "city": "s",
+        # lamaran (FK ke master existing, tanpa master duplikat)
+        "position_id": "fk", "department_id": "fk", "work_location_id": "fk", "project_id": "fk",
+        "applied_position_title": "s", "source": "s64", "source_detail": "s", "applied_at": "s32",
+        "expected_salary": "f", "available_from": "s32",
+        # pendidikan & pengalaman
+        "last_education": "s64", "major": "s", "institution": "s", "graduation_year": "i",
+        "last_company": "s", "last_position": "s", "experience_years": "f",
+        # pipeline
+        "stage_status": "s64", "stage_changed_at": "dt", "rejection_reason": "t",
+        # screening
+        "screening_result": "s64", "screening_score": "i", "screening_notes": "t",
+        "screening_recommendation": "s64", "screened_by": "fk", "screened_by_name": "s", "screened_at": "dt",
+        # konversi (dipakai tahap berikutnya; disiapkan agar tidak perlu ALTER lagi)
+        "employee_id": "fk", "converted_at": "dt", "converted_by": "fk",
+        # approval (Tahap B): ronde approval aktif; naik bila kelak ada resubmit
+        "approval_round": "i",
+        "notes": "t", "is_demo_data": "b",
+    },
+    "candidate_status_history": {
+        "candidate_id": "fk", "action": "s64", "from_status": "s64", "to_status": "s64",
+        "notes": "t", "changed_by": "fk", "changed_by_name": "s", "changed_at": "dt",
+    },
+    # `status` (COMMON) = status record; `interview_status` = scheduled|completed|cancelled
+    "candidate_interviews": {
+        "candidate_id": "fk", "interview_type": "s64", "interview_type_label": "s", "sequence": "i",
+        "scheduled_date": "s32", "start_time": "s32", "end_time": "s32",
+        "interviewer_user_id": "fk", "interviewer_name": "s", "interviewer_title": "s",
+        "interview_mode": "s32", "location": "s", "meeting_link": "s512", "notes": "t",
+        "score": "i", "recommendation": "s32", "result": "s32", "interviewer_notes": "t",
+        "interview_status": "s32", "completed_at": "dt", "completed_by": "fk",
+        "cancelled_at": "dt", "cancelled_by": "fk", "cancel_reason": "t",
+    },
+    # Snapshot langkah workflow saat submit; konfigurasi asli tidak diubah.
+    "candidate_approvals": {
+        "candidate_id": "fk", "approval_round": "i", "workflow_id": "fk", "workflow_code": "s64",
+        "workflow_name": "s", "workflow_step_id": "fk", "step_order": "i", "step_name": "s",
+        "approver_type": "s32", "approver_role_key": "s64", "approver_user_id": "fk",
+        "approver_position_id": "fk", "approver_label": "s", "is_mandatory": "b",
+        "decision": "s32", "decided_by": "fk", "decided_by_name": "s", "decided_at": "dt", "notes": "t",
+        "submitted_by": "fk", "submitted_at": "dt",
+    },
+    # Satu offering aktif per kandidat: active_flag = 1 (aktif) atau NULL, dijaga unique index.
+    "candidate_offerings": {
+        "candidate_id": "fk", "version": "i", "active_flag": "i",
+        "position_id": "fk", "department_id": "fk", "work_location_id": "fk", "project_id": "fk",
+        "employment_status_id": "fk", "start_date": "s32", "basic_salary": "f", "allowances": "j",
+        "probation_months": "i", "notes": "t", "offer_status": "s32",
+        "offered_at": "dt", "offered_by": "fk", "responded_at": "dt", "responded_by": "fk",
+        "response_notes": "t", "response_date": "s32", "cancelled_at": "dt", "cancelled_by": "fk", "cancel_reason": "t",
+    },
 }
 
 # (index_name, [columns], unique)
@@ -343,6 +408,31 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "reminder_settings": [("uq_reminder_company", ["company_id"], True)],
     "reminder_logs": [("ix_reminder_log_recent", ["company_id", "created_at"], False)],
     "payslip_email_logs": [("ix_payslip_log_run", ["company_id", "run_id"], False)],
+    "candidates": [
+        ("uq_candidate_number", ["company_id", "candidate_number"], True),
+        ("ix_candidate_stage", ["company_id", "stage_status"], False),
+        ("ix_candidate_position", ["company_id", "position_id"], False),
+        ("ix_candidate_nik", ["company_id", "nik"], False),
+        ("ix_candidate_name", ["company_id", "full_name"], False),
+        ("ix_candidate_employee", ["company_id", "employee_id"], False),
+    ],
+    "candidate_status_history": [
+        ("ix_candidate_history", ["company_id", "candidate_id", "changed_at"], False),
+    ],
+    "candidate_interviews": [
+        ("ix_interview_candidate", ["company_id", "candidate_id", "scheduled_date"], False),
+        ("ix_interview_status", ["company_id", "interview_status", "scheduled_date"], False),
+        ("ix_interview_interviewer", ["company_id", "interviewer_user_id"], False),
+    ],
+    "candidate_approvals": [
+        ("uq_candidate_approval_step", ["company_id", "candidate_id", "approval_round", "step_order"], True),
+        ("ix_candidate_approval_pending", ["company_id", "decision", "approver_role_key"], False),
+    ],
+    "candidate_offerings": [
+        ("uq_candidate_offering_version", ["company_id", "candidate_id", "version"], True),
+        ("uq_candidate_offering_active", ["company_id", "candidate_id", "active_flag"], True),
+        ("ix_candidate_offering_status", ["company_id", "offer_status"], False),
+    ],
 }
 
 metadata = MetaData()

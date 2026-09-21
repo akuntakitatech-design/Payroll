@@ -22,6 +22,8 @@ from app.routers import (
     master,
     payroll,
     policies,
+    recruitment,
+    recruitment_pipeline,
     reminders,
     settings_mail,
     users,
@@ -58,6 +60,7 @@ async def system_mode():
     from app.core.storage import storage_configured
 
     return {
+        "environment": os.environ.get("APP_ENV", "production"),
         "read_only": bool(settings.READ_ONLY),
         "database": "mariadb",
         "storage": "cloudflare-r2" if storage_configured() else "not-configured",
@@ -77,7 +80,7 @@ async def health():
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "unhealthy", "database": str(exc)},
+            content={"status": "unhealthy", "database": "unavailable", "message": "Koneksi database belum tersedia. Hubungi administrator."},
         )
 
 
@@ -95,9 +98,31 @@ api.include_router(policies.router)
 api.include_router(audit_logs.router)
 api.include_router(dashboard.router)
 api.include_router(payroll.router)
+api.include_router(recruitment.router)
+api.include_router(recruitment_pipeline.router)
 api.include_router(settings_mail.router)
 
 app.include_router(api)
+
+
+@app.middleware("http")
+async def protect_production_preview(request: Request, call_next):
+    """Blokir efek samping sebelum router, termasuk email dan perubahan sandi."""
+    safe_auth = {
+        "/api/auth/login", "/api/auth/refresh",
+        "/api/auth/switch-company", "/api/auth/logout",
+    }
+    path = request.url.path.rstrip("/")
+    if (
+        settings.READ_ONLY
+        and request.method not in {"GET", "HEAD", "OPTIONS"}
+        and not (request.method == "POST" and path in safe_auth)
+    ):
+        return JSONResponse(status_code=423, content={
+            "detail": "Mode HANYA-BACA aktif: perubahan data, unggah berkas, perubahan kata sandi, dan pengiriman email dinonaktifkan untuk melindungi produksi."
+        })
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -182,7 +207,7 @@ async def on_startup():
             "=== MODE HANYA-BACA AKTIF === Database & R2 PRODUKSI terhubung. "
             "Seed data, penjadwal pengingat, dan semua operasi tulis dinonaktifkan."
         )
-    else:
+    elif os.environ.get("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from app.core.scheduler import start_scheduler
 

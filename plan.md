@@ -225,3 +225,41 @@ Constraint: preview terhubung ke MariaDB produksi dengan `READ_ONLY=true`, sehin
 - Migrasi router tenant yang tersisa (dashboard, documents, contracts, certifications, approvals, policies, reminders, audit_logs, settings_mail, dll) **ditunda** sampai PR #7 di-merge dan user memberi persetujuan tahap berikutnya.
 - Seluruh Tahap SaaS lainnya (subscription/trial/platform_console/platform_owner + domain) **ditunda** sampai Tahap 1 diterima user.
 - Dokumen audit `/app/AUDIT_SAAS_READINESS.md` belum di-commit; bila ingin dimasukkan ke repo, buat PR dokumentasi terpisah (1 PR = 1 tujuan).
+
+---
+
+# Log Pengembangan (Emergent)
+
+## Phase: Pull Request ke GitHub (Status: COMPLETED)
+- Branch `feature/stage1-module-foundations-demo-login` di-push ke origin (commit 17428a8, 22 file).
+- PR #8 dibuat ke `main`: https://github.com/akuntakitatech-design/Payroll/pull/8 (melanjutkan PR #7).
+- Tidak ada `.env` / `memory/test_credentials.md` yang ikut commit. Token GitHub dipakai sekali, tidak disimpan.
+- Pemilih akun demo di login diverifikasi via esbuild + screenshot preview (klik akun mengisi email & kata sandi).
+- Belum dijawab user: apakah MariaDB/R2 remote adalah staging/demo atau production (catatan ada di deskripsi PR).
+
+## Phase: Rekrutmen V1 — Tahap A (Status: COMPLETED, menunggu review user di preview)
+Lingkungan: APP_ENV=development; MariaDB DEVELOPMENT remote `default` + R2 DEVELOPMENT bucket `media-akunkita` — dikonfirmasi user. Scheduler off, AUTO_SEED off.
+Dibangun: tabel `candidates`, `candidate_status_history`; router `/api/recruitment` (catalog, summary, candidates CRUD, status, screening, history);
+state machine `app/core/recruitment_workflow.py` (draft -> screening -> screening_passed|screening_failed, fail-closed);
+UI: /modules/recruitment (dashboard), /modules/recruitment/candidates (daftar+form), /modules/recruitment/candidates/:id (tab Profil/Lamaran/Screening/Dokumen/Riwayat).
+Dokumen kandidat reuse modul Documents (owner_type=applicant). Audit: create/update/status_change/screening/delete resource `candidate` module `recruitment`.
+Delete policy: soft-delete hanya untuk draft & screening_failed; screening/screening_passed -> 409.
+Test: iteration_8 backend 31/32 (1 salah endpoint harness), tenant isolation & RBAC lulus; frontend flow lulus, temuan "loading" = latensi DB remote (login 10-24 dtk saat uji). Query rekrutmen dioptimalkan dengan asyncio.gather.
+Data contoh DEVELOPMENT (NEP): 6 kandidat. Modul recruitment diaktifkan untuk KBS (dev) untuk uji isolasi.
+TIDAK: commit/push/PR/merge/deploy. Belum: interview, approval, offering, konversi karyawan, import Excel (Tahap B+).
+
+
+## Phase: Rekrutmen V1 — Tahap B: Interview, Approval, Offering (Status: COMPLETED — menunggu review user di preview)
+Lingkungan sama dengan Tahap A (APP_ENV=development, MariaDB DEVELOPMENT `default`, R2 `media-akunkita`, scheduler off). Diverifikasi ulang via /api/system/mode.
+Backend (sudah ada, ditinjau ulang + 1 bug diperbaiki):
+- Tabel `candidate_interviews`, `candidate_approvals`, `candidate_offerings`; kolom `candidates.approval_round`. Unique aktif: (company, candidate, active_flag) => satu offering aktif.
+- Router `app/routers/recruitment_pipeline.py`: interviewers, interviews (list/create/update/complete/cancel/delete), approvals (get/submit/decide), offerings (list/create/update/send/respond/cancel), pipeline agregat.
+- Approval memakai `approval_workflows`/`approval_steps` existing (document_kind=recruitment); snapshot langkah saat submit; sequential; approver harus match role/user/position + permission recruitment:approve; tanpa workflow => 422 fail-closed.
+- BUG DIPERBAIKI: `create_offering` tidak menyimpan `candidate_id` (offering hilang dari kandidat, unique aktif tidak berlaku). Data orphan dibersihkan.
+- Keputusan: role `manager` default tidak punya `recruitment:approve` -> jika dikonfigurasi sebagai approver akan 403 (fail closed). Workflow dev NEP `WF-REKRUT` diubah ke 2 tahap (HR Manager -> Direksi) via API Alur Persetujuan existing.
+Frontend:
+- Baru: `components/recruitment/OfferingTab.jsx`; integrasi InterviewTab/ApprovalTab/OfferingTab ke `CandidateDetailPage` (tab: Profil | Lamaran | Screening | Interview | Approval | Offering | Dokumen | Riwayat) via GET .../pipeline; dashboard baris KPI Tahap B (Interview Dijadwalkan, Menunggu Approval, Approved, Offering Aktif, Offering Diterima).
+Test: `tests/smoke_recruitment_b.py` 79/79 PASS; testing agent iteration_9 backend 12/12, frontend lulus (1 catatan LOW: locator Batal generik -> ditambah data-testid) (validasi, urutan, RBAC approver, konkurensi, tenant isolation 404, versi offering, cancel->approved). Data SMOKE-B dibersihkan (`tests/_cleanup_recruitment_test_data.py`).
+Data preview (NEP, `tests/seed_preview_recruitment_b.py`): Bagus (offering diterima), Andini (interview berjalan), Dimas (menunggu Direksi), Raka (ditolak), Maya (offering v1 ditolak, v2 draft).
+Backlog Tahap B: resubmit approval setelah rejected; approver_type=supervisor; Tahap C (konversi karyawan).
+TIDAK: commit/push/PR/merge/deploy; Payroll/BPJS/PPh21/Auth tidak disentuh.
