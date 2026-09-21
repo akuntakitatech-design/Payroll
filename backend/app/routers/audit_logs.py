@@ -47,6 +47,18 @@ ACTION_LABELS = {
     "revoke_access": "Cabut Akses",
     "change_password": "Ubah Kata Sandi",
     "export": "Ekspor",
+    # Absensi (Time Management) — label aditif, tidak mengubah action existing
+    "check_in": "Absen Masuk",
+    "check_out": "Absen Pulang",
+    "check_in_outside_radius": "Absen Masuk Di Luar Radius",
+    "check_out_outside_radius": "Absen Pulang Di Luar Radius",
+    "geofence_approved": "Lokasi Absensi Disetujui",
+    "geofence_rejected": "Lokasi Absensi Ditolak",
+    "correction_submit": "Ajukan Koreksi Absensi",
+    "correction_approved": "Koreksi Absensi Disetujui",
+    "correction_rejected": "Koreksi Absensi Ditolak",
+    "import": "Impor Data",
+    "attendance_import_update": "Impor Memperbarui Absensi",
 }
 
 

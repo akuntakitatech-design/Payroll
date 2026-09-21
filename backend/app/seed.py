@@ -1384,6 +1384,10 @@ async def run_seed() -> Dict[str, Any]:
     await seed_employees(company_ids)
     await seed_demo_documents(company_ids)
     await seed_payroll(company_ids)
+    # Time Management V1 — master shift, kalender, jenis cuti, geofence, alur persetujuan, saldo cuti
+    from .seed_time import seed_time_management
+
+    await seed_time_management(company_ids)
     return {"companies": company_ids, "password": DEMO_PASSWORD, "users": [u[0] for u in DEMO_USERS]}
 
 

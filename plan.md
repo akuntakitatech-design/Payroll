@@ -1,278 +1,294 @@
-# Development Plan — Payroll Run + Renewal Kontrak + Email Reminder (SMTP) + Import Excel (Karyawan)
+# Time Management V1 (HRIS & Payroll) — Plan
 
 ## 1) Objectives
-- Menyediakan **Payroll bulanan per perusahaan** yang patuh regulasi Indonesia:
-  - Basic salary + allowances + overtime
-  - Potongan BPJS (Kes 1%/4%, JHT 2%/3.7%, JP 1%/2% + cap)
-  - PPh 21 metode **TER (PMK 168/2023)** + rekonsiliasi Pasal 17 pada masa pajak terakhir (Desember)
-  - Alur **calculate → submit → approval → mark paid → payslip PDF + export Excel**
-- Menyediakan **Perpanjang Kontrak 1 klik** dari **Kalender Masa Berlaku** dan dari aksi di tab kontrak detail karyawan.
-- Menyediakan **Email reminder otomatis** masa berlaku kontrak/sertifikasi/dokumen lewat **SMTP perusahaan**, termasuk:
-  - konfigurasi SMTP per perusahaan (password write-only)
-  - reminder windows (H-*)
-  - jadwal pengiriman WIB (Asia/Jakarta)
-  - pratinjau digest, send-now, dan log histori
-- Menyediakan **Impor karyawan dari Excel** (template → validasi → commit) termasuk opsi basic salary + PTKP.
-- Menjaga UI **elegan & profesional**, konsisten dengan design system proyek.
+- Deliver Time Management V1 terintegrasi untuk **Absensi**, **Jadwal/Shift/Kalender**, **Cuti/Izin/Sakit**, **Lembur**, **Approval**, **Period Lock**, **Audit Log**, **Tenant Isolation**, siap integrasi Payroll (tanpa ubah engine Payroll/BPJS/PPh21).
+- Semua UI user-facing **Bahasa Indonesia**, reuse menu existing **`attendance`** dan **`leave_overtime`** (tanpa modul/menu duplikat).
+- Bekerja **hanya** di DEVELOPMENT:
+  - **MariaDB lokal `hris_payroll_dev`** (jangan buat DB baru; **remote `<host-produksi>` dianggap PRODUCTION dan tidak disentuh**).
+  - R2 DEVELOPMENT existing (kredensial diisi user; jangan tampilkan secret).
+- Ikuti alur: **Coding DEV → Test → Preview → User Uji → Revisi → User Approve → baru PR**.
+  - Untuk saat ini: **stop sebelum GitHub action** (tanpa commit/push/PR/merge/deploy).
 
-> Status fitur aplikasi: bundle fitur (Payroll Run + Renewal Kontrak + Email Reminder + Import Excel) **sudah terimplementasi** dan sebelumnya **agent-tested** pada environment Emergent.
-
-**Objective baru (governing request saat ini): Foundation Penguatan Tenant Isolation (Tahap 1 SaaS) — WAJIB**
-- Menghilangkan ketergantungan pada developer menulis filter manual `{"company_id": ctx.company_id}` untuk setiap query.
-- Membuat **tenant-aware enforcement** di data access layer agar semua operasi ke tabel tenant otomatis terikat ke `active company` dari authenticated context.
-- Prinsip:
-  - **Tidak** mengganti adapter Mongo-style existing.
-  - **Tidak** mengganti SQLAlchemy Core / menambah ORM baru.
-  - **Tidak** menambah Alembic.
-  - **Tidak** mengubah struktur 31 tabel tenant existing.
-  - **Tidak** mengubah bentuk JWT, auth, role, semantics `company_id`.
-  - Tetap kompatibel dengan pola Mongo-style (`find`, `find_one`, `update_one`, `$or`, `$regex`, dsb).
-  - **Fail-safe**: akses tenant-scoped tanpa company context harus ditolak.
-  - Platform bypass hanya lewat mekanisme internal eksplisit yang tidak bisa dipakai role tenant biasa.
-
-**Larangan eksplisit (untuk tahap ini)**
-- Jangan membuat/menambah: `tenant_subscriptions`, `subscription_history`, `platform_settings`, `platform_audit_logs`, `tenant_profiles`.
-- Jangan membuat: role `PLATFORM_OWNER`, Platform Console, subscription/trial.
-- Jangan mengubah domain/deployment/env/UI.
-
-**Catatan status terbaru (berdasarkan sesi ini)**
-- Preview Emergent: backend/frontend berjalan, `/api/health` mengembalikan `mariadb:connected` dan `read_only: true`.
-- GitHub:
-  - PR #1–#5: **merged**.
-  - PR #6 (redesign dashboard premium): **merged**.
-  - **PR #7 (Tenant Isolation Foundation / Tahap 1 SaaS): OPEN, mergeable clean (6 file, +949/-43).**
-- Audit SaaS readiness telah selesai (dokumen lokal `/app/AUDIT_SAAS_READINESS.md`, belum di-commit).
-
----
+### Update fokus (fase baru)
+- Fokus saat ini sesuai instruksi user: **MODUL ABSENSI — Alur Operasional Karyawan (Employee Self Service/ESS)**.
+- Batas scope untuk pekerjaan lanjutan ini:
+  - **Hanya Absensi** (ESS check-in/out GPS + approval lokasi).
+  - **Jangan masuk** cuti/izin/sakit, lembur, payroll, BPJS, PPh21, refactor besar tenant, recruitment.
 
 ## 2) Implementation Steps
 
-### Phase 1 — Core POC (isolated, mandatory: `/app/backend/test_core.py` overwrite) ✅ **Completed (agent-tested)**
-**User stories**
-1. Sebagai HR, saya ingin kalkulasi BPJS+PPh21 TER akurat agar slip gaji sesuai regulasi.
-2. Sebagai Finance, saya ingin rekonsiliasi pajak Desember sesuai Pasal 17 agar total setahun tepat.
-3. Sebagai Admin, saya ingin template Excel + validasi jelas agar impor massal tidak merusak data.
-4. Sebagai HR, saya ingin slip gaji bisa dibuat PDF agar bisa dibagikan/diarsipkan.
-5. Sebagai HR, saya ingin reminder expiry bisa dibangun dan dikirim via SMTP agar tidak ada kontrak/dokumen terlewat.
+### Phase 1 — Environment & Core Workflow POC (Isolation) (COMPLETED)
+Core = “Time events + policy + approval + period lock + tenant isolation”
+- Environment DEV diverifikasi:
+  - MariaDB lokal `hris_payroll_dev` **connected & writable**.
+  - Remote MariaDB `<host-produksi>` **tidak disentuh**.
+- POC API + schema + seed + smoke test `backend/smoke_time.py`.
 
-**Steps (POC must be green before Phase 2)**
-- Implement POC di `backend/test_core.py` (tanpa FastAPI/DB) untuk:
-  - (a) **TER integrity**: hardcoded tables A/B/C; assert counts 44/40/41, contiguous, spot-check rate.
-  - (b) **Monthly payslip calc**: multiple skenario (threshold 0 tax, mid TK/0, K/3, high earner w caps, overtime, proration unpaid absence, ad-hoc earning/deduction).
-  - (c) **December annual recalc**: simulasi Jan–Nov TER withholding lalu compute Pasal 17 annual dan delta.
-  - (d) **Excel roundtrip**: generate template, write sample rows, parse+validate; assert error messages Bahasa Indonesia.
-  - (e) **Payslip PDF**: render PDF bytes; assert `%PDF` dan ukuran non-trivial.
-  - (f) **SMTP send**: dummy SMTP (aiosmtpd), kirim HTML digest.
-  - (g) **Expiry selection logic**: pilih item berdasarkan windows hari.
-- Exit criteria: `python backend/test_core.py` lulus end-to-end.
+**User stories (POC)**
+1. Sebagai HR, saya bisa menutup periode agar semua perubahan time data pada periode itu tertolak.
+2. Sebagai karyawan, saya bisa absen masuk/pulang dengan GPS dan sistem menghitung status (hadir/telat/pulang cepat).
+3. Sebagai karyawan, saya bisa mengajukan cuti dan saldo terhitung berbasis ledger.
+4. Sebagai supervisor/HR, saya bisa melihat daftar pending approval dan mengambil keputusan.
+5. Sebagai admin multi-tenant, saya tidak bisa mengakses data tenant lain (404/isolasi).
 
-**Result**
-- `test_core.py`: **186/186** pemeriksaan lulus.
+**Status:** COMPLETED.
 
 ---
 
-### Phase 2 — Backend V1 (build around proven core) ✅ **Completed (agent-tested)**
-(**Tetap, tidak ada perubahan untuk Tahap 1 SaaS**)
+### Phase 2 — V1 App Development (Backend) (COMPLETED)
+#### 2.1 Backend (COMPLETED)
+- Schema: **14 tabel Time Management + indexes**.
+- Router terdaftar: `time_core`, `schedules`, `attendance`, `leave`, `overtime`.
+- Shared services: `timekeeping.py`, `time_service.py`, `time_approval.py`, `time_excel.py`.
+- Seed: `seed_time.py` (shift, kalender, leave types, **geofence di lokasi existing**, workflow approval tambahan, saldo cuti, top-up RBAC aditif).
+- RBAC: perubahan **aditif** untuk permission Time Management.
+- Smoke API: **45/45 PASS**.
+
+**Catatan audit Absensi (backend) — sudah ada & berfungsi (REUSE)**
+- Check-in/out self-service: `POST /attendance/check-in`, `POST /attendance/check-out`.
+  - Waktu **server** sebagai sumber waktu (`tk.now_utc()`), timestamp frontend tidak dijadikan sumber final.
+  - Proteksi double: unique index `(company_id, employee_id, work_date)` + atomic update pada checkout.
+- Perhitungan: shift normal, toleransi telat/pulang cepat, istirahat, overnight shift 23:00–07:00.
+- GPS/geofence: Haversine backend + 4 policy: `inside_required`, `outside_requires_approval`, `gps_only`, `disabled`.
+- Status user-facing Bahasa Indonesia tersedia via katalog (Hadir/Terlambat/Pulang Cepat/Terlambat & Pulang Cepat/Belum Absen Pulang/Menunggu Persetujuan Lokasi/Lokasi Ditolak/OFF/Libur/Tidak Ada Jadwal/Alfa).
+- Approval lokasi: reuse approval engine bersama (`time_approval.py`, sequential, fail-closed jika workflow tidak ada).
+- Audit log: `check_in`, `check_out`, `geofence_approved`, `geofence_rejected` sudah dicatat.
+- Tenant scoping: seluruh query memakai `ctx.company_id` (company_id dari payload tidak jadi otoritas).
+
+**Backend follow-ups (gate sebelum final handover)**
+- **R2 integration gate:** upload lampiran (sakit/izin/koreksi) hanya setelah R2 DEV configured.
+
+**Status:** COMPLETED.
 
 ---
 
-### Phase 3 — Frontend V1 (UI parity + UX) ✅ **Completed (agent-tested)**
-(**Tetap, tidak ada perubahan untuk Tahap 1 SaaS**)
+### Phase 3 — V1 App Development (Frontend) (COMPLETED)
+Target: menu existing **Absensi** dan **Cuti & Lembur** menampilkan V1 flows end-to-end.
+
+**Attendance module (menu existing `attendance`)**
+- Implementasi halaman: Ringkasan, Absensi Saya, Daftar Absensi, Jadwal Kerja, Rekap, Persetujuan, Impor (wizard), Pengaturan + layout & tab.
+- UI Bahasa Indonesia, memakai design system existing.
+
+**Leave & Overtime module (menu existing `leave_overtime`)**
+- Implementasi halaman ringkasan/pengajuan/saldo/persetujuan.
+- Lampiran: UI upload hanya jika R2 configured; kalau belum, tampilkan pesan “Storage belum terkonfigurasi”.
+
+**Build/quality gates**
+- Compile `esbuild` OK.
+- Bahasa Indonesia untuk UI Time Management.
+- Screenshot awal disetujui user.
+
+**Status:** COMPLETED.
 
 ---
 
-### Phase 4 — Harden · Regression · Security ✅ **Completed (E2E)**
-(**Tetap, tidak ada perubahan untuk Tahap 1 SaaS**)
+### Phase 4 — Testing & Validation (agent + regression) (COMPLETED)
+Semua pengujian berbasis report di `/app/test_reports/`.
+
+- **Iterasi 9** (`/app/test_reports/iteration_9.json`)
+  - Cakupan: fitur inti backend + sebagian frontend.
+  - Hasil: backend 42/45, frontend 10/11 (temuan minor/non-blocking).
+
+- **Iterasi 10** (`/app/test_reports/iteration_10.json`)
+  - Prioritas: **Impor Kehadiran E2E** (analyze → preview → commit + verifikasi DB).
+  - Regression modul existing: **8/8 PASS**.
+
+- **Iterasi 11** (`/app/test_reports/iteration_11.json`)
+  - Edge cases import + RBAC + lock + tenant + audit: **43/43 PASS**.
+
+- **Iterasi 12** (`/app/test_reports/iteration_12.json`)
+  - Empty-state Absensi aman.
+  - Smoke ulang **45/45 PASS**.
+
+**Status:** COMPLETED.
 
 ---
 
-### Phase 4B — Preview Produksi Aman (READ_ONLY) ✅ **Completed (merged via PR #4)**
-(**Tetap. Ini menjadi constraint untuk pengujian: tes tulis tidak boleh menyentuh DB produksi.**)
+### Phase 5 — R2 DEVELOPMENT (Attachment) (BLOCKED — Menunggu User)
+- Status runtime storage: **not-configured** karena `R2_*` di `backend/.env` masih kosong.
+- Upload lampiran (sakit/izin/koreksi) **belum bisa divalidasi** sampai user mengisi credential R2 DEV.
+- Perilaku saat storage belum configured: pesan jelas Bahasa Indonesia (bukan 500 crash).
+
+**Status:** BLOCKED.
 
 ---
 
-### Phase 4C — Aturan Kerja Repo (Manusia + AI) ✅ **Completed (merged via PR #5)**
-(**Tetap. Semua perubahan Tahap 1 SaaS harus melalui PR.**)
+### Phase 6 — Preview + Handover + STOP (IN PROGRESS)
+- Preview DEVELOPMENT siap diuji user:
+  - URL: `https://repo-clone-setup-1.preview.emergentagent.com`
+- Tidak ada aksi GitHub:
+  - **tanpa** commit/push/PR/merge/deploy.
+- Setelah laporan akhir, agent **STOP** dan menunggu uji & approval user.
+
+**Status:** IN PROGRESS.
 
 ---
 
-### Phase 4D — Redesign Dashboard Premium (Desktop) ✅ **Completed (merged via PR #6)**
-(**Di luar scope Tahap 1 SaaS; sudah selesai dan merged.**)
+### Phase 7 — Absensi ESS (Alur Operasional Karyawan) — Audit → Lengkapi → TEST → Publish Preview → STOP (COMPLETED — menunggu uji & approval user)
+Fase ini mengikuti instruksi user: **jangan mengulang fitur yang sudah selesai**; audit dulu; lengkapi yang belum lengkap/terhubung.
 
----
+#### 7.1 Audit hasil (faktual)
+**SUDAH ADA & BERFUNGSI (REUSE, tidak dibuat ulang)**
+- Master Shift (backend `time_core`, seeded; shift P/S/M/OFF).
+- Jadwal Kerja (backend `schedules.py`, UI SchedulesPage).
+- Lokasi Kerja (master `work_locations` sudah punya kolom geofence di DB).
+- Absen Masuk/Pulang (GPS + server-time authoritative).
+- GPS/geofence (Haversine + 4 policy).
+- Perhitungan telat/pulang cepat/overnight/break.
+- ESS “Absensi Saya” (MyAttendancePage) + histori sederhana.
+- Approval lokasi (router `/attendance/approvals` + decide endpoint; frontend AttendanceApprovalsPage).
+- Audit log untuk check-in/out dan approval.
 
-### Phase 5 — SaaS Tahap 1: Tenant Isolation Foundation ✅ **IMPLEMENTED — PR #7 OPEN (menunggu review/merge)**
+**SUDAH ADA TAPI BELUM LENGKAP (target pekerjaan fase 7)**
+1) **Master Lokasi Kerja — konfigurasi geofence belum muncul di UI**
+   - DB sudah punya `geofence_enabled`, `attendance_location_policy`, `gps_accuracy_max_meter`, tapi master form (`masterConfig.js`/`masters.py`) belum mengekspos.
 
-#### 5.1 Latar masalah
-Saat ini isolasi tenant terjadi karena developer menambahkan filter manual:
-```json
-{"company_id": ctx.company_id}
-```
-Risiko: 1 query lupa filter ⇒ data lintas perusahaan dapat terbaca/terubah.
+2) **RBAC data scope untuk Karyawan (self-service only) belum enforced di API**
+   - Role `employee` punya `attendance:view` + `attendance:create`.
+   - Endpoint `attendance:view` saat ini juga membuka akses ke list/dashboard/exceptions/recap dan schedules list.
+   - Perlu pemisahan scope: karyawan hanya bisa akses endpoint/rows miliknya (tanpa menambah modul/menu baru).
 
-#### 5.2 Temuan analisis (Step A) ✅
-- **Choke point tunggal terbaik** ada di `Collection._where()` (`backend/app/core/db.py:891`) karena dipakai oleh:
-  - `find/find_one` via `_select`
-  - `count_documents`
-  - `distinct`
-  - `_find_ids` → dipakai oleh `update_one/update_many/replace_one/find_one_and_update/delete_one`
-  - `delete_many`
-  ⇒ Mengikat `_where()` berarti mengikat seluruh read + matching update/delete.
-- `compile_filter()` menggabungkan top-level key dengan `and_()`, sehingga injeksi filter `company_id` pada top-level aman meskipun query memiliki `$or/$and/$nor`.
-- Jalur insert tidak melewati `_where()` ⇒ perlu enforcement khusus untuk insert/upsert.
-- Koreksi audit: sudah ada `TenantRepository` (`backend/app/core/repo.py`) yang melakukan scoping untuk sebagian master data, namun banyak router masih memakai `db = get_db()` langsung. Gap utama ada pada akses DB yang tidak melalui repository.
+3) **Approval untuk check-out luar radius (dan alasan pulang) belum lengkap**
+   - Saat check-out berada di luar radius, jika sebelumnya status lokasi sudah `approved`, sistem tidak membuat approval baru.
+   - Alasan check-out belum disimpan terpisah (masih memakai field reason tunggal).
 
-#### 5.3 Desain solusi (Step B) ✅ **Dibuat (additive, minimal)**
-**Tujuan desain:** menambah lapisan tenant-aware tanpa merombak `core/db.py`.
+4) **Idempotensi retry**
+   - Proteksi double sudah ada (unique index + atomic update), tetapi retry request yang sama masih bisa berakhir 409.
+   - Target: jika client mengirim request-id yang sama, server mengembalikan record yang sama (200) dan tidak membuat transaksi ganda.
 
-**Deliverables yang sudah dibuat (PR #7):**
-1. **File baru** `backend/app/core/tenancy.py` (303 baris)
-   - `TenantContextMissing(HTTPException 400)` — fail-safe jika tabel tenant diakses tanpa company context.
-   - `CrossTenantDenied(HTTPException 403)` — jika client mencoba memaksa/override company_id atau mengakses record tenant lain.
-   - `TenantCollection(Collection)`:
-     - override `_where()` untuk menyuntik filter `company_id` sebagai enforcement tunggal.
-     - defense-in-depth: bila filter sudah memuat `company_id` dan nilainya berbeda dari context ⇒ **403**.
-     - override `insert_one/insert_many/_upsert_doc/replace_one` untuk memaksa `doc["company_id"]` dari context.
-     - update/delete cross-tenant terblok karena `_find_ids` selalu ter-scope.
-   - `TenantDatabase`:
-     - mengembalikan `TenantCollection` untuk tabel tenant dan `Collection` biasa untuk `GLOBAL_COLLECTIONS`.
-     - **Fail-closed:** nama tabel yang tidak dikenal diperlakukan sebagai tenant (tetap ter-scope).
-     - `unscoped_db(reason)` sebagai satu-satunya bypass eksplisit + logging (tidak terjangkau dari request).
+5) **/me/today & /me**
+   - `/attendance/me/today` belum menyediakan ringkasan status harian kanonik dari backend (“Belum Absen / OFF / Libur / Jadwal kerja belum tersedia”).
+   - `/attendance/me` belum menyertakan `work_location_name` (baru tersedia di list HR via decorate helper).
 
-2. **Perubahan additive** di `backend/app/core/deps.py`
-   - Property baru pada `AuthContext`: `ctx.tdb` (tenant db accessor) yang memanggil `get_tenant_db(ctx.company_id)`.
+6) **UI Approvals & MyAttendance (mobile-first) perlu dipoles untuk alur operasional**
+   - Approvals: perlu tampilkan jenis absen (Masuk/Pulang), shift, jam, GPS aktual, akurasi, jarak, radius, alasan, map link yang relevan.
+   - MyAttendancePage: action utama besar & hanya tampil yang relevan (jangan menampilkan tombol yang tidak bisa dipakai), teks “Jadwal kerja belum tersedia.” sesuai instruksi, dan riwayat menampilkan Shift/Lokasi.
 
-**Catatan penting:** `backend/app/core/db.py` **TIDAK DIUBAH SAMA SEKALI** (hanya diturunkan/subclass).
+7) **Audit labels**
+   - Perlu action spesifik untuk outside-radius check-in/out (mis. `check_in_outside_radius`, `check_out_outside_radius`) dan labelnya.
 
-#### 5.4 Migrasi bertahap (Step C + D) ✅ **POC selesai, defense-in-depth dipertahankan**
-**Scope POC migrasi (sudah diterapkan, PR #7):**
-1. **Employees** (`backend/app/routers/employees.py`)
-   - 6 endpoint + 5 helper: `db = ctx.tdb` atau `db = get_tenant_db(company_id)`.
-2. **Payroll** (`backend/app/routers/payroll.py`)
-   - 22 endpoint + 4 helper + 1 pemanggilan khusus: `db = ctx.tdb` atau `db = get_tenant_db(cid)`.
-3. **Master data** (`backend/app/routers/master.py`)
-   - 2 helper yang dipakai untuk seluruh entitas master: `db = get_tenant_db(company_id)`.
+8) **Data DEVELOPMENT siap pakai untuk user test ESS**
+   - Seed tidak membuat jadwal; saat ini hanya ada 3 schedule row untuk satu employee pada tanggal berjalan.
+   - Perlu membuat jadwal bulan berjalan untuk karyawan yang ter-link via **API existing** `/schedules/bulk` sebagai HR (tanpa membuat DB baru).
 
-**Defense-in-depth:** filter manual `{"company_id": ctx.company_id}` yang sudah ada **tidak dihapus**.
+9) **Cleanup: orphan approval rows**
+   - Ditemukan `time_approvals` pending untuk `attendance_correction` yang sudah tidak punya record koreksi (orphan). Perlu dibersihkan dengan aman di DEV.
 
-#### 5.5 Automated tests (Step E) ✅
-Constraint: preview terhubung ke MariaDB produksi dengan `READ_ONLY=true`, sehingga tes tulis **tidak boleh** dilakukan ke produksi.
+**BELUM ADA:** tidak ada fitur inti ESS Absensi yang benar-benar belum ada; fokus fase 7 adalah *melengkapi & menghubungkan*.
 
-**Test baru (PR #7):** `backend/tests/test_tenant_isolation.py`
-- Berjalan di **SQLite + aiosqlite** pada file DB temporer.
-- Tidak menambah dependency baru (menggunakan `asyncio.run`, bukan `pytest-asyncio`).
-- **Hasil:** 12/12 lulus.
+#### 7.2 Implementation steps (fase 7)
+1) **Master Lokasi Kerja (UI)**
+   - Update master config (`frontend/src/lib/masterConfig.js`) untuk menambah fields:
+     - `geofence_enabled` (boolean)
+     - `attendance_location_policy` (select: 4 policy)
+     - `gps_accuracy_max_meter` (number)
+   - Update backend master registry (`backend/app/masters.py`) agar field tersebut diizinkan untuk CRUD (tanpa membuat master baru).
+   - Pastikan boolean/numeric coercion di backend mendukung field baru (tambahkan ke `BOOLEAN_FIELDS` / `NUMERIC_FIELDS` bila perlu).
 
-**Cakupan test utama:**
-1. Tenant A bisa membaca data sendiri.
-2. Tenant A tidak bisa membaca data Tenant B.
-3. Tenant A tidak bisa update data Tenant B.
-4. Tenant A tidak bisa delete data Tenant B.
-5. Insert/upsert tenant otomatis mendapat company_id yang benar.
-6. Akses tenant-scoped tanpa company context ditolak (HTTP 400).
-7. GLOBAL_COLLECTIONS tetap bekerja seperti existing.
-8. switch-company (simulasi scope A ↔ B) tetap bekerja.
-9. super_admin existing tidak rusak (semantik `company_id = NULL` tetap utuh) + bypass eksplisit `unscoped_db(reason)`.
-10. payroll flow minimal tetap bekerja.
-11. Regression keamanan: `company_id` dari klien tidak boleh mengalahkan context (ditolak 403).
-12. SQL selalu memuat batasan company_id pada tabel tenant dan TIDAK memuat batasan pada tabel global.
+2) **RBAC scope enforcement untuk Karyawan (tanpa memperluas matrix permission)**
+   - Implement helper (mis. `svc.self_employee_id(ctx)` / `attendance.self_scope(ctx)`):
+     - Jika role employee tanpa `attendance:approve|edit|export|delete`:
+       - Endpoint list/dashboard/exceptions/recap/import/manual/schedules list/bulk → tolak (403) atau scope ketat.
+       - Endpoint `/attendance/me*` tetap boleh.
+       - Endpoint `/attendance/check-in|check-out` tetap boleh.
+       - Endpoint `/attendance/corrections` untuk `mine=true` tetap boleh.
+     - Enforcement ada di backend (bukan hanya hide tab di UI).
 
-#### 5.6 Validation & verification ✅
-- Backend compile OK.
-- Aplikasi preview tetap sehat (`/api/health` OK; `read_only: true`).
-- **Wajib testing agent**: sudah dipenuhi.
-  - testing_agent report: **20/20 regresi lulus** (auth login/me/switch-company; employees; payroll; master; dashboard; global tables; UI load + company switcher).
-  - Tidak ada kebocoran data lintas tenant terdeteksi.
-  - Data produksi tidak berubah.
+3) **Check-in/out outside radius (approval per event)**
+   - Tambahkan kolom attendance untuk alasan check-out terpisah:
+     - `check_out_reason_code`, `check_out_reason` (atau penamaan yang konsisten dengan existing).
+   - Tambahkan kolom untuk membedakan approval target:
+     - `location_approval_for` = `check_in` / `check_out` (atau field serupa).
+   - Pastikan:
+     - check-in outside radius → approval `attendance_location` untuk check-in.
+     - check-out outside radius → approval baru (approval_round increment) untuk check-out **meski check-in sudah approved**.
+   - Update approval detail payload `/attendance/approvals` agar memuat informasi check-in/check-out yang relevan.
 
-#### 5.7 Deliverables tahap ini ✅
-- **PR #7 (OPEN)**: tenant isolation enforcement foundation.
-- Ringkasan implementasi, test, dan hasil verifikasi ada pada deskripsi PR.
+4) **Idempotensi request**
+   - Tambahkan kolom:
+     - `check_in_request_id` & `check_out_request_id` (string)
+   - Jika request_id sama sudah pernah diproses:
+     - check-in: return 200 dengan row yang sama (bukan membuat row baru / bukan 409).
+     - check-out: return 200 dengan row hasil update yang sama.
 
-**Stop condition:** berhenti setelah Tahap 1 selesai dan menunggu review/merge PR #7. **Tidak lanjut ke Tahap SaaS lain**.
+5) **API enhancements untuk ESS**
+   - `/attendance/me/today`: tambahkan `today_status_key` + `today_status_label` yang kanonik dari backend (termasuk “Belum Absen”, “Jadwal kerja belum tersedia”, “OFF”, “Libur”).
+   - `/attendance/me`: tambahkan `work_location_name` dan `shift_name` bila belum ada di item.
 
----
+6) **UI/UX ESS**
+   - MyAttendancePage:
+     - Mobile-first: hanya tampilkan 1 action utama yang relevan; tombol besar.
+     - Pastikan pesan GPS gagal sesuai instruksi (“Lokasi belum dapat diperoleh…”) dan tidak membuat absensi palsu.
+     - Ubah copy untuk no-schedule jadi persis “Jadwal kerja belum tersedia.”
+     - Riwayat: tambah kolom Shift & Lokasi.
+   - AttendanceApprovalsPage:
+     - Tampilkan jenis absen (Masuk/Pulang), shift, jam, akurasi, GPS, jarak, radius, alasan, map link.
+
+7) **Audit log & label**
+   - Tambahkan audit action spesifik untuk outside radius (check-in/out), dan tambahkan labelnya di katalog action audit log (agar tampil rapi di filter/view).
+
+8) **Data DEV untuk uji user**
+   - Buat jadwal bulan berjalan untuk user karyawan yang ter-link, via `/schedules/bulk` menggunakan akun HR/Owner (tanpa seed otomatis, tanpa DB baru).
+
+9) **Cleanup orphan approvals (DEV-only)**
+   - Hapus/mark `time_approvals` pending yang record-nya tidak ada lagi (khusus `attendance_correction` orphan yang ditemukan).
+   - Pastikan tidak menyentuh data perusahaan lain (tenant isolation).
+
+#### 7.3 Test plan (wajib sebelum publish preview)
+- Jalankan testing agent untuk minimal 15 skenario user:
+  1) Jadwal normal → check-in dalam radius sukses.
+  2) Terlambat → `late_minutes` benar.
+  3) Check-out normal → `actual_work_minutes` benar.
+  4) Pulang cepat → `early_leave_minutes` benar.
+  5) Double check-in → tidak duplikat.
+  6) Check-out tanpa check-in → ditolak.
+  7) GPS dalam radius → valid.
+  8) GPS luar radius policy approval → “Menunggu Persetujuan Lokasi”.
+  9) HR approve → attendance valid.
+  10) HR reject → status “Lokasi Ditolak” dan histori tetap ada.
+  11) Policy GPS Saja → diterima tanpa cek radius.
+  12) GPS permission ditolak → tidak buat attendance palsu, pesan jelas.
+  13) Overnight 23:00–07:00 → dihitung benar.
+  14) Tenant isolation A tidak bisa akses data B.
+  15) Employee hanya bisa lihat riwayat dirinya.
+- Regression minimal: login, demo login, company switcher, dashboard, recruitment, employees, contracts, certifications, documents, approval config, payroll, BPJS, PPh21, master data.
+
+#### 7.4 Publish preview & STOP
+- Setelah semua test internal pass → pastikan preview updated dan laporkan URL.
+- **STOP** menunggu user uji & approval. Tidak ada GitHub action.
+
+**Status:** COMPLETED (development-tested; belum user-accepted).
+
+#### 7.5 Hasil (ringkas)
+- Backend: scope self-service (`time_service.self_service_only/scope_employee_id/require_hr_scope`), idempotensi `client_request_id`, approval per peristiwa (masuk/pulang, `approval_round`), pre-check `ta.ensure_ready`, gate decide = penyetuju tahap ATAU `attendance:approve`, `/me/today.today_status`, timezone lokasi pada list/detail/approval, master Lokasi Kerja ekspos geofence fields, label audit.
+- Frontend: MyAttendancePage mobile-first (satu aksi relevan, jam server, banner jadwal/OFF/pending/ditolak, timeline approval, riwayat + Lokasi/Shift), AttendanceApprovalsPage detail lengkap, tab berdasarkan scope + redirect, AttendanceListPage detail (masuk & pulang, peta, histori putaran), form Lokasi Kerja.
+- Test: `backend/smoke_ess.py` 81/81 (unit menit + API E2E), testing agent iterasi 13 backend 77/78 (1 "minor" = ekspektasi tester salah; `GET /attendance/{id}` memang `{attendance, approval}`), frontend 100%; regresi API/UI existing normal, tanpa console error.
+- Data DEV: jadwal Sep–Okt 2026 (Shift Pagi, Sen–Jum) untuk NEP-0001 & NEP-0002 via `/schedules/bulk`; absensi uji hari ini direset (`backend/reset_ess_today.py`); 4 approval koreksi orphan dibersihkan.
+- Env: paket MariaDB hilang saat pod restart (di luar /app) → dipasang ulang, datadir `/app/.local-data/mariadb` utuh (lihat ops/README.md).
 
 ## 3) Next Actions (immediate)
-1. **User review PR #7**: https://github.com/akuntakitatech-design/Payroll/pull/7
-2. Jika disetujui, **merge PR #7** ke `main`.
-3. Setelah merge, berhenti (sesuai instruksi). Tahap berikutnya (migrasi router lain, subscription/trial/platform console/platform owner/domain) hanya dilakukan bila ada persetujuan eksplisit dan dalam PR terpisah.
-
----
+1) Implement Phase 7.2 (Absensi ESS gap fixes) secara incremental (mulai dari Master Lokasi Kerja config UI + RBAC scope enforcement).
+2) Internal test + testing agent skenario 1–15 + regression.
+3) Publish/update preview DEVELOPMENT + laporkan URL.
+4) **STOP** menunggu uji & approval user.
 
 ## 4) Success Criteria
+- UI Absensi ESS nyaman dipakai di HP (action utama jelas dan kontekstual).
+- ESS flow end-to-end: Login → Absensi Saya → Jadwal Hari Ini → Lokasi Kerja → Absen Masuk (GPS) → Absen Pulang (GPS) → status dihitung backend.
+- GPS/geofence policy per lokasi kerja bisa diatur dari Master Lokasi Kerja (tanpa master baru).
+- Outside radius (policy approval): transaksi tetap tersimpan + alasan wajib + status “Menunggu Persetujuan Lokasi”, dan approval HR bisa approve/reject dengan audit log.
+- Proteksi transaksi: no double check-in/out; idempotent retry tidak membuat transaksi ganda.
+- Tenant isolation: Company A tidak dapat akses data Company B.
+- Karyawan hanya dapat melihat data absensinya sendiri (API enforcement, bukan hanya UI hide).
+- Regression modul existing tetap normal.
+- Setelah publish preview: agent berhenti dan menunggu approval user sebelum tindakan GitHub apa pun.
 
-### 4.1 Tenant Isolation Foundation (Tahap 1 SaaS) — wajib ✅
-- Semua operasi tenant-scoped secara default terikat `ctx.company_id`.
-- Akses tenant-scoped tanpa company context ditolak (fail-safe).
-- Insert/upsert tenant selalu memaksa `company_id` dari context.
-- Update/delete tidak dapat menyentuh record tenant lain.
-- GLOBAL_COLLECTIONS tetap berfungsi seperti existing.
-- `switch-company` tetap bekerja.
-- `super_admin` existing tidak rusak.
-- Payroll existing tidak rusak.
-- Tidak ada perubahan contract response endpoint.
-- Regression test mencakup upaya override company_id dari client (ditolak).
-- **Verified oleh testing_agent** (wajib) — 20/20 lulus.
+## Appendix — Cleanup & Open Notes
+### Cleanup yang sudah dilakukan
+- Pembersihan data uji DB dev (historis fase sebelumnya): attendance/import/corrections dibersihkan; empty state diverifikasi.
+- `.gitignore` ditambah (aditif) untuk mencegah kebocoran.
 
-### 4.2 Constraint keamanan & operasional ✅
-- Tidak ada `.env`/secret ter-commit.
-- Tidak ada write ke MariaDB produksi (preview tetap `READ_ONLY=true`).
-- Tidak ada perubahan deployment/domain/env/UI.
-- `backend/app/core/db.py` tidak disentuh.
-
-### 4.3 Open items (ditunda)
-- Migrasi router tenant yang tersisa (dashboard, documents, contracts, certifications, approvals, policies, reminders, audit_logs, settings_mail, dll) **ditunda** sampai PR #7 di-merge dan user memberi persetujuan tahap berikutnya.
-- Seluruh Tahap SaaS lainnya (subscription/trial/platform_console/platform_owner + domain) **ditunda** sampai Tahap 1 diterima user.
-- Dokumen audit `/app/AUDIT_SAAS_READINESS.md` belum di-commit; bila ingin dimasukkan ke repo, buat PR dokumentasi terpisah (1 PR = 1 tujuan).
-
----
-
-# Log Pengembangan (Emergent)
-
-## Phase: Pull Request ke GitHub (Status: COMPLETED)
-- Branch `feature/stage1-module-foundations-demo-login` di-push ke origin (commit 17428a8, 22 file).
-- PR #8 dibuat ke `main`: https://github.com/akuntakitatech-design/Payroll/pull/8 (melanjutkan PR #7).
-- Tidak ada `.env` / `memory/test_credentials.md` yang ikut commit. Token GitHub dipakai sekali, tidak disimpan.
-- Pemilih akun demo di login diverifikasi via esbuild + screenshot preview (klik akun mengisi email & kata sandi).
-- Belum dijawab user: apakah MariaDB/R2 remote adalah staging/demo atau production (catatan ada di deskripsi PR).
-
-## Phase: Rekrutmen V1 — Tahap A (Status: COMPLETED, menunggu review user di preview)
-Lingkungan: APP_ENV=development; MariaDB DEVELOPMENT remote `default` + R2 DEVELOPMENT bucket `media-akunkita` — dikonfirmasi user. Scheduler off, AUTO_SEED off.
-Dibangun: tabel `candidates`, `candidate_status_history`; router `/api/recruitment` (catalog, summary, candidates CRUD, status, screening, history);
-state machine `app/core/recruitment_workflow.py` (draft -> screening -> screening_passed|screening_failed, fail-closed);
-UI: /modules/recruitment (dashboard), /modules/recruitment/candidates (daftar+form), /modules/recruitment/candidates/:id (tab Profil/Lamaran/Screening/Dokumen/Riwayat).
-Dokumen kandidat reuse modul Documents (owner_type=applicant). Audit: create/update/status_change/screening/delete resource `candidate` module `recruitment`.
-Delete policy: soft-delete hanya untuk draft & screening_failed; screening/screening_passed -> 409.
-Test: iteration_8 backend 31/32 (1 salah endpoint harness), tenant isolation & RBAC lulus; frontend flow lulus, temuan "loading" = latensi DB remote (login 10-24 dtk saat uji). Query rekrutmen dioptimalkan dengan asyncio.gather.
-Data contoh DEVELOPMENT (NEP): 6 kandidat. Modul recruitment diaktifkan untuk KBS (dev) untuk uji isolasi.
-TIDAK: commit/push/PR/merge/deploy. Belum: interview, approval, offering, konversi karyawan, import Excel (Tahap B+).
-
-
-## Phase: Rekrutmen V1 — Tahap B: Interview, Approval, Offering (Status: COMPLETED — menunggu review user di preview)
-Lingkungan sama dengan Tahap A (APP_ENV=development, MariaDB DEVELOPMENT `default`, R2 `media-akunkita`, scheduler off). Diverifikasi ulang via /api/system/mode.
-Backend (sudah ada, ditinjau ulang + 1 bug diperbaiki):
-- Tabel `candidate_interviews`, `candidate_approvals`, `candidate_offerings`; kolom `candidates.approval_round`. Unique aktif: (company, candidate, active_flag) => satu offering aktif.
-- Router `app/routers/recruitment_pipeline.py`: interviewers, interviews (list/create/update/complete/cancel/delete), approvals (get/submit/decide), offerings (list/create/update/send/respond/cancel), pipeline agregat.
-- Approval memakai `approval_workflows`/`approval_steps` existing (document_kind=recruitment); snapshot langkah saat submit; sequential; approver harus match role/user/position + permission recruitment:approve; tanpa workflow => 422 fail-closed.
-- BUG DIPERBAIKI: `create_offering` tidak menyimpan `candidate_id` (offering hilang dari kandidat, unique aktif tidak berlaku). Data orphan dibersihkan.
-- Keputusan: role `manager` default tidak punya `recruitment:approve` -> jika dikonfigurasi sebagai approver akan 403 (fail closed). Workflow dev NEP `WF-REKRUT` diubah ke 2 tahap (HR Manager -> Direksi) via API Alur Persetujuan existing.
-Frontend:
-- Baru: `components/recruitment/OfferingTab.jsx`; integrasi InterviewTab/ApprovalTab/OfferingTab ke `CandidateDetailPage` (tab: Profil | Lamaran | Screening | Interview | Approval | Offering | Dokumen | Riwayat) via GET .../pipeline; dashboard baris KPI Tahap B (Interview Dijadwalkan, Menunggu Approval, Approved, Offering Aktif, Offering Diterima).
-Test: `tests/smoke_recruitment_b.py` 79/79 PASS; testing agent iteration_9 backend 12/12, frontend lulus (1 catatan LOW: locator Batal generik -> ditambah data-testid) (validasi, urutan, RBAC approver, konkurensi, tenant isolation 404, versi offering, cancel->approved). Data SMOKE-B dibersihkan (`tests/_cleanup_recruitment_test_data.py`).
-Data preview (NEP, `tests/seed_preview_recruitment_b.py`): Bagus (offering diterima), Andini (interview berjalan), Dimas (menunggu Direksi), Raka (ditolak), Maya (offering v1 ditolak, v2 draft).
-Backlog Tahap B: resubmit approval setelah rejected; approver_type=supervisor; Tahap C (konversi karyawan).
-TIDAK: commit/push/PR/merge/deploy; Payroll/BPJS/PPh21/Auth tidak disentuh.
-
-## Phase: Rekrutmen V1 — Tahap C: Jadikan Karyawan (Status: IMPLEMENTED — smoke 43/43, menunggu review preview)
-Lingkungan sama (APP_ENV=development, MariaDB DEVELOPMENT `default`, R2 dev). Kandidat `offering_accepted` -> Karyawan (struktur Data Karyawan existing, tanpa tabel baru).
-Skema: `employees.candidate_id` (fk) + UNIQUE (company_id, candidate_id); kolom `candidates.employee_id/converted_at/converted_by` sudah ada dari blueprint. Transisi `offering_accepted -> hired` hanya via endpoint konversi (ENDPOINT_ONLY).
-Backend baru: `app/routers/recruitment_conversion.py` — GET `/api/recruitment/candidates/{id}/convert-preview` (mapping identitas/pekerjaan/pendidikan, field wajib kurang, peringatan, nik_conflict, blockers) dan POST `/api/recruitment/candidates/{id}/convert` (201).
-Otorisasi: recruitment:edit + modul employee_core aktif + employee:create; tenant dari AuthContext (company_id payload diabaikan).
-Idempotent tanpa transaksi lintas tabel (adapter tidak menyediakan): (1) klaim conditional-update kandidat offering_accepted & employee_id NULL -> hired+converted_*; (2) buat employee dengan candidate_id (UNIQUE DB menolak duplikat); (3) tautkan employee_id. Gagal di (2) -> klaim dikompensasi; gagal di (3) -> self-heal lewat employees.candidate_id.
-Employee number: helper bersama `app/core/employee_numbering.py` (dipindah apa adanya dari routers/employees.py; alias dipertahankan). Gaji offering TIDAK ditulis ke employee_salaries/payroll.
-Read-only hired: PUT/DELETE/status/screening/interview/approval/offering ditolak 4xx (guard stage existing); dokumen pelamar hired -> 409 di documents.py (upload/ubah/hapus).
-History `candidate_converted` (offering_accepted -> hired); audit `candidate_converted_to_employee` + `employee_created_from_recruitment`.
-Frontend: `components/recruitment/ConvertEmployeeDialog.jsx` (dialog Preview Data Karyawan + HiredPanel "Sudah menjadi Karyawan" + Buka Data Karyawan); CandidateDetailPage: tombol Jadikan Karyawan, panel hired, dokumen read-only.
-Test: `tests/smoke_recruitment_c.py` 43/43 PASS (draft 422, offering sent 422, permission 403, tenant 404, NIK duplikat 409 + existing_employee, 3 request konkuren [201,409,409], retry 409, satu karyawan, read-only, history/audit, format override 422). Data SMOKE-C dibersihkan. Testing agent penuh + regresi UI belum dijalankan (dijeda user).
-Demo dev: Bagus Prakoso -> NEP-0006 (hired), panel + Buka Data Karyawan diverifikasi screenshot.
+### Catatan terbuka (non-blocking)
+- Console warning recharts `width(-1) height(-1)` berasal dari file existing `frontend/src/components/dashboard/DepartmentChart.jsx` dan **bukan** regression Time Management; tidak diubah tanpa izin user.
+- R2 DEV masih belum configured; upload lampiran tidak divalidasi (di luar scope fase Absensi ESS saat ini, kecuali user meminta).
+- Ditemukan orphan approvals pending untuk `attendance_correction` (DEV) → akan dibersihkan pada Phase 7.2 langkah 9.

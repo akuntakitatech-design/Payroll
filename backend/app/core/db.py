@@ -126,6 +126,26 @@ TENANT_COLLECTIONS = [
     "candidate_interviews",
     "candidate_approvals",
     "candidate_offerings",
+    # ------------------------------------------------------------------
+    # Time Management V1 (Absensi + Cuti/Izin/Sakit + Lembur)
+    # Satu fondasi bersama: kalender kerja, shift, jadwal, absensi,
+    # approval bersama, cuti, lembur, dan tutup periode.
+    # Lampiran tetap memakai tabel `documents` existing.
+    # ------------------------------------------------------------------
+    "work_shifts",
+    "work_calendar_days",
+    "work_schedules",
+    "attendances",
+    "attendance_corrections",
+    "time_imports",
+    "time_approvals",
+    "time_policies",
+    "time_periods",
+    "leave_types",
+    "leave_requests",
+    "leave_ledger",
+    "leave_balances",
+    "overtime_requests",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
@@ -194,6 +214,8 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
     "work_locations": {
         **MASTER, "branch_id": "fk", "address": "t", "latitude": "f", "longitude": "f", "radius_meter": "f",
         "location_type": "s64", "timezone": "s64", "notes": "t",
+        # Time Management V1 — konfigurasi geofence absensi (per lokasi kerja).
+        "geofence_enabled": "b", "attendance_location_policy": "s32", "gps_accuracy_max_meter": "f",
     },
     "departments": {**MASTER, "branch_id": "fk", "parent_id": "fk", "cost_center_id": "fk", "head_user_id": "fk"},
     "divisions": {**MASTER, "department_id": "fk", "head_user_id": "fk"},
@@ -362,6 +384,149 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "offered_at": "dt", "offered_by": "fk", "responded_at": "dt", "responded_by": "fk",
         "response_notes": "t", "response_date": "s32", "cancelled_at": "dt", "cancelled_by": "fk", "cancel_reason": "t",
     },
+    # ======================================================================
+    # TIME MANAGEMENT V1
+    # ======================================================================
+    # Master shift per perusahaan. Overnight = jam pulang <= jam masuk.
+    "work_shifts": {
+        **MASTER, "start_time": "s32", "end_time": "s32", "break_start": "s32", "break_end": "s32",
+        "late_tolerance_minutes": "i", "early_leave_tolerance_minutes": "i",
+        "is_overnight": "b", "is_day_off": "b", "sort_order": "i",
+    },
+    # Kalender kerja: tanggal khusus (libur nasional / libur perusahaan /
+    # cuti bersama / hari kerja pengganti). Hari OFF rutin berasal dari jadwal.
+    "work_calendar_days": {
+        "calendar_date": "s32", "day_type": "s32", "name": "s", "notes": "t",
+    },
+    # Jadwal kerja per karyawan per tanggal — sumber konteks bersama
+    # (shift + lokasi kerja + hari kerja) untuk Absensi, Cuti, dan Lembur.
+    "work_schedules": {
+        "employee_id": "fk", "work_date": "s32", "shift_id": "fk", "shift_code": "s64",
+        "work_location_id": "fk", "is_day_off": "b", "notes": "t",
+        "source": "s32", "import_batch_id": "fk",
+    },
+    # Transaksi absensi. Satu baris per karyawan per work_date.
+    "attendances": {
+        "employee_id": "fk", "employee_number": "s64", "employee_name": "s",
+        "work_date": "s32", "period_key": "s32",
+        "schedule_id": "fk", "shift_id": "fk", "shift_code": "s64", "shift_name": "s",
+        "work_location_id": "fk", "is_day_off": "b", "day_type": "s32",
+        "scheduled_start_at": "dt", "scheduled_end_at": "dt", "scheduled_minutes": "i",
+        "check_in_at": "dt", "check_out_at": "dt",
+        "check_in_source": "s32", "check_out_source": "s32",
+        "check_in_latitude": "f", "check_in_longitude": "f", "check_in_accuracy": "f",
+        "check_in_location_captured_at": "dt",
+        "check_out_latitude": "f", "check_out_longitude": "f", "check_out_accuracy": "f",
+        "check_out_location_captured_at": "dt",
+        "check_in_distance_meter": "f", "check_out_distance_meter": "f",
+        "configured_radius_meter": "f", "geofence_policy": "s32",
+        "check_in_geofence_result": "s32", "check_out_geofence_result": "s32",
+        "location_approval_status": "s32", "location_reason_code": "s32", "location_reason": "t",
+        "location_decided_by": "fk", "location_decided_at": "dt", "location_decision_notes": "t",
+        # ESS Absensi: persetujuan lokasi per peristiwa (masuk/pulang), alasan pulang terpisah,
+        # dan kunci idempotensi agar retry/double-click tidak menghasilkan transaksi ganda.
+        "location_approval_for": "s32", "location_approval_round": "i",
+        "check_out_location_reason_code": "s32", "check_out_location_reason": "t",
+        "check_in_request_id": "s64", "check_out_request_id": "s64",
+        "check_in_client_captured_at": "dt", "check_out_client_captured_at": "dt",
+        "actual_work_minutes": "i", "late_minutes": "i", "early_leave_minutes": "i",
+        "attendance_status": "s32", "is_valid": "b",
+        "note": "t", "source": "s32", "import_batch_id": "fk",
+        "manual_reason": "t", "corrected_by": "fk", "corrected_at": "dt", "correction_reason": "t",
+        "leave_request_id": "fk", "leave_type_code": "s64",
+        "approved_overtime_minutes": "i",
+    },
+    # Pengajuan koreksi absensi (karyawan) + koreksi manual HR.
+    "attendance_corrections": {
+        "employee_id": "fk", "employee_name": "s", "attendance_id": "fk", "work_date": "s32",
+        "period_key": "s32", "correction_type": "s32",
+        "current_check_in_at": "dt", "current_check_out_at": "dt",
+        "proposed_check_in_at": "dt", "proposed_check_out_at": "dt",
+        "reason": "t", "document_id": "fk", "request_status": "s32",
+        "submitted_by": "fk", "submitted_at": "dt",
+        "decided_by": "fk", "decided_at": "dt", "decision_notes": "t",
+        "applied_at": "dt", "before_value": "j", "after_value": "j",
+    },
+    # Batch import Excel (absensi & jadwal) — dapat ditelusuri.
+    "time_imports": {
+        "import_kind": "s32", "filename": "s", "mapping": "j", "options": "j",
+        "total_rows": "i", "success_rows": "i", "error_rows": "i", "skipped_rows": "i",
+        "updated_rows": "i", "errors": "j", "imported_by": "fk", "imported_by_name": "s",
+        "imported_at": "dt", "period_keys": "j",
+    },
+    # LAPISAN EKSEKUSI APPROVAL BERSAMA Time Management.
+    # Snapshot dari approval_workflows/approval_steps existing saat submit.
+    "time_approvals": {
+        "document_kind": "s32", "record_id": "fk", "record_label": "s",
+        "employee_id": "fk", "approval_round": "i",
+        "workflow_id": "fk", "workflow_code": "s64", "workflow_name": "s",
+        "workflow_step_id": "fk", "step_order": "i", "step_name": "s",
+        "approver_type": "s32", "approver_role_key": "s64", "approver_user_id": "fk",
+        "approver_position_id": "fk", "approver_label": "s", "is_mandatory": "b",
+        "decision": "s32", "decided_by": "fk", "decided_by_name": "s", "decided_at": "dt",
+        "notes": "t", "submitted_by": "fk", "submitted_at": "dt",
+    },
+    # Kebijakan Time Management per perusahaan (satu baris per perusahaan).
+    "time_policies": {
+        "attendance": "j", "overtime": "j", "leave": "j",
+    },
+    # Tutup / Buka Kembali Periode (per perusahaan per bulan).
+    "time_periods": {
+        "period_key": "s32", "period_label": "s", "period_status": "s32",
+        "closed_by": "fk", "closed_by_name": "s", "closed_at": "dt", "close_notes": "t",
+        "reopened_by": "fk", "reopened_by_name": "s", "reopened_at": "dt", "reopen_reason": "t",
+        "history": "j",
+    },
+    # Master jenis cuti / izin / sakit (configurable per perusahaan).
+    "leave_types": {
+        **MASTER, "category": "s32", "deduct_balance": "b", "is_paid": "b",
+        "attachment_required": "b", "approval_required": "b", "allow_half_day": "b",
+        "minimum_notice_days": "i", "maximum_consecutive_days": "i",
+        "default_quota_days": "f", "sort_order": "i", "color": "s32",
+    },
+    # Pengajuan cuti / izin / sakit (satu fondasi untuk ketiga tipe).
+    "leave_requests": {
+        "employee_id": "fk", "employee_number": "s64", "employee_name": "s",
+        "leave_type_id": "fk", "leave_type_code": "s64", "leave_type_name": "s",
+        "leave_category": "s32", "start_date": "s32", "end_date": "s32",
+        "day_part": "s32", "requested_days": "f", "working_days": "f", "day_breakdown": "j",
+        "period_keys": "j", "reason": "t", "contact_during_leave": "s",
+        "document_id": "fk", "request_status": "s32",
+        "deduct_balance": "b", "is_paid": "b",
+        "submitted_by": "fk", "submitted_at": "dt",
+        "decided_by": "fk", "decided_at": "dt", "decision_notes": "t",
+        "cancelled_by": "fk", "cancelled_at": "dt", "cancel_reason": "t",
+        "conflict_notes": "j",
+    },
+    # Buku besar saldo cuti — setiap pergerakan tercatat & dapat diaudit.
+    "leave_ledger": {
+        "employee_id": "fk", "employee_name": "s", "leave_type_id": "fk", "leave_type_code": "s64",
+        "year": "i", "movement_type": "s32", "days": "f", "balance_after": "f",
+        "reference_type": "s32", "reference_id": "fk", "notes": "t",
+        "effective_date": "s32", "created_by_name": "s",
+    },
+    # Ringkasan saldo (diturunkan dari ledger; dipakai untuk tampilan cepat).
+    "leave_balances": {
+        "employee_id": "fk", "employee_name": "s", "leave_type_id": "fk", "leave_type_code": "s64",
+        "year": "i", "entitlement_days": "f", "used_days": "f", "pending_days": "f",
+        "adjustment_days": "f", "carry_forward_days": "f", "available_days": "f",
+        "recalculated_at": "dt",
+    },
+    # Lembur: rencana -> persetujuan -> aktual -> approved_minutes final.
+    "overtime_requests": {
+        "employee_id": "fk", "employee_number": "s64", "employee_name": "s",
+        "work_date": "s32", "period_key": "s32", "day_category": "s32",
+        "planned_start_at": "dt", "planned_end_at": "dt",
+        "planned_start_time": "s32", "planned_end_time": "s32",
+        "requested_minutes": "i", "actual_minutes": "i", "approved_minutes": "i",
+        "rounded_minutes": "i", "overtime_category": "s32",
+        "project_id": "fk", "work_location_id": "fk", "reason": "t", "notes": "t",
+        "is_retroactive": "b", "request_status": "s32",
+        "submitted_by": "fk", "submitted_at": "dt",
+        "decided_by": "fk", "decided_at": "dt", "decision_notes": "t",
+        "cancelled_by": "fk", "cancelled_at": "dt", "cancel_reason": "t",
+        "attendance_id": "fk",
+    },
 }
 
 # (index_name, [columns], unique)
@@ -436,6 +601,50 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("uq_candidate_offering_version", ["company_id", "candidate_id", "version"], True),
         ("uq_candidate_offering_active", ["company_id", "candidate_id", "active_flag"], True),
         ("ix_candidate_offering_status", ["company_id", "offer_status"], False),
+    ],
+    # ---------------------- TIME MANAGEMENT V1 ----------------------
+    "work_shifts": [("uq_work_shift_code", ["company_id", "code"], True)],
+    "work_calendar_days": [("uq_calendar_day", ["company_id", "calendar_date"], True)],
+    "work_schedules": [
+        # Satu jadwal per karyawan per tanggal (anti duplikasi + concurrency-safe).
+        ("uq_schedule_employee_date", ["company_id", "employee_id", "work_date"], True),
+        ("ix_schedule_date", ["company_id", "work_date"], False),
+    ],
+    "attendances": [
+        # Satu absensi per karyawan per work_date -> mencegah double check-in.
+        ("uq_attendance_employee_date", ["company_id", "employee_id", "work_date"], True),
+        ("ix_attendance_date", ["company_id", "work_date"], False),
+        ("ix_attendance_period", ["company_id", "period_key"], False),
+        ("ix_attendance_status", ["company_id", "attendance_status"], False),
+        ("ix_attendance_location_approval", ["company_id", "location_approval_status"], False),
+    ],
+    "attendance_corrections": [
+        ("ix_correction_employee", ["company_id", "employee_id", "work_date"], False),
+        ("ix_correction_status", ["company_id", "request_status"], False),
+    ],
+    "time_imports": [("ix_time_import_kind", ["company_id", "import_kind", "imported_at"], False)],
+    "time_approvals": [
+        ("uq_time_approval_step", ["company_id", "document_kind", "record_id", "approval_round", "step_order"], True),
+        ("ix_time_approval_pending", ["company_id", "document_kind", "decision"], False),
+        ("ix_time_approval_record", ["company_id", "record_id"], False),
+    ],
+    "time_policies": [("uq_time_policy_company", ["company_id"], True)],
+    "time_periods": [("uq_time_period", ["company_id", "period_key"], True)],
+    "leave_types": [("uq_leave_type_code", ["company_id", "code"], True)],
+    "leave_requests": [
+        ("ix_leave_employee", ["company_id", "employee_id", "start_date"], False),
+        ("ix_leave_status", ["company_id", "request_status"], False),
+    ],
+    "leave_ledger": [
+        ("ix_leave_ledger_lookup", ["company_id", "employee_id", "leave_type_id", "year"], False),
+    ],
+    "leave_balances": [
+        ("uq_leave_balance", ["company_id", "employee_id", "leave_type_id", "year"], True),
+    ],
+    "overtime_requests": [
+        ("ix_overtime_employee", ["company_id", "employee_id", "work_date"], False),
+        ("ix_overtime_status", ["company_id", "request_status"], False),
+        ("ix_overtime_period", ["company_id", "period_key"], False),
     ],
 }
 

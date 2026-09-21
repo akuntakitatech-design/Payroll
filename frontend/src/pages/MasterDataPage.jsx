@@ -132,7 +132,11 @@ const MasterDataPage = ({ resourcePath }) => {
 
   const openCreate = () => {
     setEditing(null);
-    setValues({});
+    const initial = {};
+    config.fields.forEach((f) => {
+      if (f.defaultValue !== undefined) initial[f.name] = f.defaultValue;
+    });
+    setValues(initial);
     setErrors({});
     setDialogOpen(true);
   };
@@ -141,7 +145,7 @@ const MasterDataPage = ({ resourcePath }) => {
     setEditing(row);
     const next = {};
     config.fields.forEach((f) => {
-      next[f.name] = row[f.name] ?? (f.type === "boolean" ? false : "");
+      next[f.name] = row[f.name] ?? f.defaultValue ?? (f.type === "boolean" ? false : "");
     });
     setValues(next);
     setErrors({});

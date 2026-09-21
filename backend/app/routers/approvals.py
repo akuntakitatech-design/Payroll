@@ -13,8 +13,10 @@ router = APIRouter(prefix="/approval-workflows", tags=["Alur Persetujuan"])
 DOCUMENT_KINDS = [
     {"key": "recruitment", "label": "Rekrutmen", "module": "recruitment"},
     {"key": "contract", "label": "Kontrak Kerja", "module": "employee_core"},
-    {"key": "leave", "label": "Cuti", "module": "leave_overtime"},
+    {"key": "leave", "label": "Cuti / Izin / Sakit", "module": "leave_overtime"},
     {"key": "overtime", "label": "Lembur", "module": "leave_overtime"},
+    {"key": "attendance", "label": "Absensi Di Luar Radius", "module": "attendance"},
+    {"key": "attendance_correction", "label": "Koreksi Absensi", "module": "attendance"},
     {"key": "mobilization", "label": "Mobilisasi", "module": "mobilization"},
     {"key": "expense", "label": "Reimbursement / Biaya", "module": "finance_request"},
     {"key": "payroll", "label": "Payroll", "module": "payroll"},

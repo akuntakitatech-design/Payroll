@@ -33,6 +33,23 @@ import ModulePlaceholderPage from "@/pages/ModulePlaceholderPage";
 import RecruitmentDashboardPage from "@/pages/recruitment/RecruitmentDashboardPage";
 import CandidatesPage from "@/pages/recruitment/CandidatesPage";
 import CandidateDetailPage from "@/pages/recruitment/CandidateDetailPage";
+// Time Management V1 — Absensi
+import AttendanceModuleLayout from "@/pages/attendance/AttendanceModuleLayout";
+import AttendanceOverviewPage from "@/pages/attendance/AttendanceOverviewPage";
+import MyAttendancePage from "@/pages/attendance/MyAttendancePage";
+import AttendanceListPage from "@/pages/attendance/AttendanceListPage";
+import SchedulesPage from "@/pages/attendance/SchedulesPage";
+import AttendanceRecapPage from "@/pages/attendance/AttendanceRecapPage";
+import AttendanceApprovalsPage from "@/pages/attendance/AttendanceApprovalsPage";
+import TimeImportPage from "@/pages/attendance/TimeImportPage";
+import TimeSettingsPage from "@/pages/attendance/TimeSettingsPage";
+// Time Management V1 — Cuti & Lembur
+import LeaveOvertimeModuleLayout from "@/pages/leave/LeaveOvertimeModuleLayout";
+import LeaveOvertimeOverviewPage from "@/pages/leave/LeaveOvertimeOverviewPage";
+import LeaveRequestsPage from "@/pages/leave/LeaveRequestsPage";
+import OvertimePage from "@/pages/leave/OvertimePage";
+import LeaveBalancesPage from "@/pages/leave/LeaveBalancesPage";
+import LeaveOvertimeApprovalsPage from "@/pages/leave/LeaveOvertimeApprovalsPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import { Loader2 } from "lucide-react";
 
@@ -107,6 +124,25 @@ const AppRoutes = () => (
       <Route path="/modules/recruitment" element={<RecruitmentDashboardPage />} />
       <Route path="/modules/recruitment/candidates" element={<CandidatesPage />} />
       <Route path="/modules/recruitment/candidates/:candidateId" element={<CandidateDetailPage />} />
+      {/* Time Management V1 — Absensi (menu existing, tanpa menu baru) */}
+      <Route path="/modules/attendance" element={<AttendanceModuleLayout />}>
+        <Route index element={<AttendanceOverviewPage />} />
+        <Route path="saya" element={<MyAttendancePage />} />
+        <Route path="data" element={<AttendanceListPage />} />
+        <Route path="jadwal" element={<SchedulesPage />} />
+        <Route path="rekap" element={<AttendanceRecapPage />} />
+        <Route path="persetujuan" element={<AttendanceApprovalsPage />} />
+        <Route path="impor" element={<TimeImportPage />} />
+        <Route path="pengaturan" element={<TimeSettingsPage />} />
+      </Route>
+      {/* Time Management V1 — Cuti & Lembur (menu existing) */}
+      <Route path="/modules/leave_overtime" element={<LeaveOvertimeModuleLayout />}>
+        <Route index element={<LeaveOvertimeOverviewPage />} />
+        <Route path="cuti" element={<LeaveRequestsPage />} />
+        <Route path="lembur" element={<OvertimePage />} />
+        <Route path="saldo" element={<LeaveBalancesPage />} />
+        <Route path="persetujuan" element={<LeaveOvertimeApprovalsPage />} />
+      </Route>
       <Route path="/modules/:moduleKey" element={<ModulePlaceholderPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Route>
