@@ -66,8 +66,8 @@ MODULES: List[dict] = [
     {"key": "hr_core", "name": "HR Core", "description": "Struktur organisasi, master data, pengguna, audit.", "is_core": True, "icon": "Building2", "sort_order": 1, "status": "available"},
     {"key": "employee_core", "name": "Data Karyawan", "description": "Data induk karyawan, kontrak, sertifikasi.", "is_core": False, "icon": "Users", "sort_order": 2, "status": "available"},
     {"key": "recruitment", "name": "Rekrutmen", "description": "Lowongan, pelamar, tahapan seleksi.", "is_core": False, "icon": "UserPlus", "sort_order": 3, "status": "planned"},
-    {"key": "attendance", "name": "Absensi", "description": "Kehadiran, shift, face & fingerprint.", "is_core": False, "icon": "Clock", "sort_order": 4, "status": "planned"},
-    {"key": "leave_overtime", "name": "Cuti & Lembur", "description": "Pengajuan cuti, izin dan lembur.", "is_core": False, "icon": "CalendarDays", "sort_order": 5, "status": "planned"},
+    {"key": "attendance", "name": "Absensi", "description": "Shift, jadwal kerja, absensi GPS, koreksi, rekap, dan persetujuan.", "is_core": False, "icon": "Clock", "sort_order": 4, "status": "available"},
+    {"key": "leave_overtime", "name": "Cuti & Lembur", "description": "Pengajuan cuti, izin, sakit, dan lembur dengan saldo berbasis buku besar.", "is_core": False, "icon": "CalendarDays", "sort_order": 5, "status": "available"},
     {"key": "performance", "name": "Kinerja / KPI", "description": "Penilaian kinerja dan KPI.", "is_core": False, "icon": "Target", "sort_order": 6, "status": "planned"},
     {"key": "payroll", "name": "Payroll", "description": "Penggajian bulanan, BPJS, PPh 21 metode TER.", "is_core": False, "icon": "Wallet", "sort_order": 7, "status": "available"},
     {"key": "mobilization", "name": "Mobilisasi", "description": "Penempatan proyek, mobilisasi & demobilisasi.", "is_core": False, "icon": "Plane", "sort_order": 8, "status": "planned"},
@@ -124,6 +124,9 @@ def default_role_permissions() -> Dict[str, List[str]]:
         + ["user:view", "user:create", "user:edit", "audit_log:view", "settings:view",
            "approval_workflow:view", "policy:view", "module:view",
            "attendance:view", "leave:view", "mobilization:view", "performance:view",
+           # Time Management V1 — HR Admin mengelola shift, jadwal, absensi, cuti & lembur
+           "attendance:create", "attendance:edit", "attendance:delete", "attendance:export",
+           "leave:create", "leave:edit", "leave:delete", "leave:export",
            "payroll:view", "payroll:create", "payroll:edit", "payroll:export",
            "payroll_component:view", "payroll_component:create", "payroll_component:edit",
            "payroll_component:delete",
@@ -160,14 +163,18 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "division:view", "position:view", "project:view", "document:view",
         "certification:view", "contract:view",
         "leave:view", "leave:approve", "attendance:view", "attendance:approve",
+        "attendance:create", "leave:create",
         "performance:view", "performance:approve", "mobilization:view",
         "mobilization:approve", "finance_request:view", "finance_request:approve",
+        "attendance:export", "leave:export",
         "payslip:view_own",
     ]
 
     supervisor = [
         "dashboard:view", "employee:view", "leave:view", "leave:approve",
         "attendance:view", "attendance:approve", "performance:view",
+        # Time Management V1 — supervisor juga karyawan (absen & ajukan sendiri)
+        "attendance:create", "leave:create",
         "mobilization:view", "document:view", "project:view", "certification:view",
         "payslip:view_own",
     ]
@@ -175,6 +182,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
     employee = [
         "dashboard:view", "document:view", "document:create",
         "leave:view", "leave:create", "attendance:view",
+        # Time Management V1 — absen masuk/pulang & pengajuan koreksi absensi sendiri
+        "attendance:create",
         "finance_request:view", "finance_request:create", "performance:view",
         "payslip:view_own",
     ]

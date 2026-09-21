@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.db import close_db, ensure_indexes, get_db, warm_pool
 from app.routers import (
     approvals,
+    attendance,
     audit_logs,
     auth,
     certifications,
@@ -19,14 +20,18 @@ from app.routers import (
     dashboard,
     documents,
     employees,
+    leave,
     master,
+    overtime,
     payroll,
     policies,
     recruitment,
     recruitment_pipeline,
     recruitment_conversion,
     reminders,
+    schedules,
     settings_mail,
+    time_core,
     users,
 )
 
@@ -103,6 +108,12 @@ api.include_router(recruitment.router)
 api.include_router(recruitment_pipeline.router)
 api.include_router(recruitment_conversion.router)
 api.include_router(settings_mail.router)
+# Time Management V1
+api.include_router(time_core.router)
+api.include_router(schedules.router)
+api.include_router(attendance.router)
+api.include_router(leave.router)
+api.include_router(overtime.router)
 
 app.include_router(api)
 

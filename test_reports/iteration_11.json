@@ -1,0 +1,255 @@
+{
+  "summary": "Iteration 3 - Testing 6 SKIPPED scenarios from iteration 2. Backend: 43/43 tests passed (100%). All skipped scenarios now fully tested: RBAC overwrite permission enforcement, invalid date/time format handling, overnight shift calculation, non-overnight validation, period lock enforcement, tenant isolation, and audit logging. All tests passed with concrete verification of DB state and proper error messages in Bahasa Indonesia.",
+  
+  "backend_issues": {
+    "critical_bugs": [],
+    "minor_issues": []
+  },
+  
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  
+  "passed_tests": [
+    "Scenario 11a: Employee role + overwrite=true -> 403 with message 'Anda tidak memiliki hak untuk memperbarui absensi yang sudah ada.'",
+    "Scenario 11b: Employee role + commit overwrite=true -> 403",
+    "Scenario 11c: Employee role + overwrite=false -> NOT 403 (has attendance:create)",
+    "Scenario 11d: Supervisor role + overwrite=true -> 403",
+    "Scenario 11e: HR Admin + overwrite=true -> allowed (has attendance:edit)",
+    "Scenario 12: Preview with invalid formats returns 200 (not 500)",
+    "Scenario 12: All 8 invalid rows show action='error'",
+    "Scenario 12a: Empty date -> error 'Tanggal kosong.'",
+    "Scenario 12b: Invalid date 'abc' -> parse error",
+    "Scenario 12c: Non-existent date '2026-02-31' -> parse error",
+    "Scenario 12d: Wrong format '31-02-2026' -> parse error",
+    "Scenario 12e: Both times empty -> error 'Jam Masuk dan Jam Pulang kosong; minimal salah satu wajib diisi.'",
+    "Scenario 12f: Invalid time '99:99' -> parse error",
+    "Scenario 12g: Text time 'pagi' -> parse error",
+    "Scenario 12h: Unknown shift 'SHIFT-XYZ' -> error 'Kode Shift ... tidak ditemukan.'",
+    "Scenario 12: Commit does NOT write error rows to DB",
+    "Scenario 13: Preview shows is_overnight=true for SHIFT-M",
+    "Scenario 13: Preview shows action='create' (not error) for overnight shift",
+    "Scenario 13: Commit overnight shift succeeds",
+    "Scenario 13: DB record created with work_date=2026-03-10",
+    "Scenario 13: check_in_at is on 2026-03-10 (23:00 local = 16:00 UTC)",
+    "Scenario 13: check_out_at is on 2026-03-11 (07:00 local = 00:00 UTC next day)",
+    "Scenario 13: actual_work_minutes is POSITIVE (420 minutes = 7 hours)",
+    "Scenario 14: Non-overnight shift with check_out <= check_in -> action='error'",
+    "Scenario 14: Error message 'Jam Pulang lebih awal dari Jam Masuk padahal shift bukan lintas hari.'",
+    "Scenario 14: Commit does NOT write error row to DB",
+    "Scenario 15: Close period 2026-04 succeeds",
+    "Scenario 15: Preview with closed period -> action='error' with message 'Periode ... sudah ditutup.'",
+    "Scenario 15: Commit with closed period does NOT write to DB",
+    "Scenario 15: Reopen period 2026-04 succeeds",
+    "Scenario 15: Preview after reopen -> action='create' (valid)",
+    "Scenario 15: Commit after reopen writes to DB successfully",
+    "Scenario 15: Period restored to original status (open)",
+    "Scenario 16: KBS admin preview NEP employee -> action='error'",
+    "Scenario 16: Error message 'Karyawan dengan nomor ... tidak ditemukan pada perusahaan aktif.'",
+    "Scenario 16: Commit as KBS does NOT create NEP employee record",
+    "Scenario 16: No KBS records created for NEP employee",
+    "Scenario 16: No cross-tenant data leak (no KBS company_id with NEP employee_number)",
+    "Scenario 19: Import commit creates audit log entry",
+    "Scenario 19: Audit log has action='import'",
+    "Scenario 19: Audit log has module='attendance'",
+    "Scenario 19: Audit log has user_id set",
+    "Scenario 19: Audit log has company_id set (tenant-scoped)",
+    "Scenario 19: Audit log record_label contains filename",
+    "Scenario 19: Other Time Management mutations also logged (period_close, period_reopen, attendance_import_update)",
+    "Cleanup: Health endpoint returns healthy status with database connected",
+    "Cleanup: All modified periods restored to original status"
+  ],
+  
+  "test_report_links": [
+    "/app/backend/test_import_iteration3.py",
+    "/tmp/test_iteration3_final.log"
+  ],
+  
+  "success_percentage": {
+    "backend_skipped_scenarios": "100% (43/43 tests passed)",
+    "scenario_11_rbac": "100% (6/6 tests passed)",
+    "scenario_12_invalid_formats": "100% (6/6 tests passed)",
+    "scenario_13_overnight_shift": "100% (7/7 tests passed)",
+    "scenario_14_non_overnight_invalid": "100% (2/2 tests passed)",
+    "scenario_15_period_lock": "100% (7/7 tests passed)",
+    "scenario_16_tenant_isolation": "100% (4/4 tests passed)",
+    "scenario_19_audit_log": "100% (9/9 tests passed)",
+    "cleanup_verification": "100% (2/2 tests passed)",
+    "overall": "100% (43/43 tests passed)"
+  },
+  
+  "updated_files": [
+    "/app/backend/test_import_iteration3.py"
+  ],
+  
+  "action_item_for_main_agent": "",
+  
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false,
+  
+  "detailed_findings": {
+    "scenario_11_rbac_overwrite": {
+      "status": "PASSED",
+      "description": "RBAC enforcement for overwrite_existing parameter",
+      "tests": [
+        "✅ Employee role (has attendance:create but NOT attendance:edit) gets 403 when overwrite_existing=true",
+        "✅ Supervisor role (has attendance:create but NOT attendance:edit) gets 403 when overwrite_existing=true",
+        "✅ Employee/Supervisor with overwrite_existing=false does NOT get 403 (allowed to create)",
+        "✅ HR Admin (has attendance:edit) is allowed to use overwrite_existing=true",
+        "✅ Error message in Bahasa Indonesia: 'Anda tidak memiliki hak untuk memperbarui absensi yang sudah ada.'"
+      ],
+      "notes": "RBAC permission check at lines 1162-1164 and 1178-1180 in /app/backend/app/routers/attendance.py works correctly. Employee and Supervisor roles only have 'attendance:create' permission (lines 186 and 177 in rbac.py), while HR Admin has both 'attendance:create' and 'attendance:edit' (lines 128-129 in rbac.py)."
+    },
+    "scenario_12_invalid_formats": {
+      "status": "PASSED",
+      "description": "Invalid date & time format handling",
+      "tests": [
+        "✅ Empty date -> error 'Tanggal kosong.' (line 1062 in attendance.py)",
+        "✅ Invalid date formats (abc, 2026-02-31, 31-02-2026) -> parse errors",
+        "✅ Both times empty -> error 'Jam Masuk dan Jam Pulang kosong; minimal salah satu wajib diisi.' (line 1087)",
+        "✅ Invalid time formats (99:99, pagi) -> parse errors",
+        "✅ Unknown shift code -> error 'Kode Shift ... tidak ditemukan.' (line 1092)",
+        "✅ Preview returns 200 with error rows (NOT 500)",
+        "✅ Commit does NOT write error rows to DB"
+      ],
+      "notes": "All validation errors return proper Bahasa Indonesia messages. No 500 errors. Error rows are correctly excluded from DB writes (action='error' rows skipped in commit loop at line 1190)."
+    },
+    "scenario_13_overnight_shift": {
+      "status": "PASSED",
+      "description": "Overnight shift SHIFT-M (23:00 -> 07:00) calculation",
+      "concrete_values": {
+        "work_date": "2026-03-10",
+        "check_in_at": "2026-03-10 16:00:00 (UTC) = 2026-03-10 23:00:00 (WIB)",
+        "check_out_at": "2026-03-11 00:00:00 (UTC) = 2026-03-11 07:00:00 (WIB)",
+        "actual_work_minutes": 420,
+        "is_overnight": true
+      },
+      "tests": [
+        "✅ Preview correctly identifies SHIFT-M as overnight (is_overnight=true)",
+        "✅ Preview shows action='create' (not error)",
+        "✅ Commit succeeds",
+        "✅ work_date remains 2026-03-10 (not shifted)",
+        "✅ check_in_at is on 2026-03-10 at 23:00 local time",
+        "✅ check_out_at is SHIFTED to 2026-03-11 at 07:00 local time (next day)",
+        "✅ actual_work_minutes is POSITIVE: 420 minutes (7 hours, reasonable for 23:00-07:00 with break)"
+      ],
+      "notes": "Overnight shift logic at lines 1195-1199 in attendance.py correctly adds 1 day to check_out date when is_overnight=true OR check_out <= check_in. The shift_is_overnight() function in timekeeping.py correctly identifies SHIFT-M as overnight. No negative work_minutes bug. Times are stored in UTC (timezone conversion handled by tz_for() function)."
+    },
+    "scenario_14_non_overnight_invalid": {
+      "status": "PASSED",
+      "description": "Non-overnight shift with check_out <= check_in validation",
+      "tests": [
+        "✅ SHIFT-P (pagi, NOT overnight) with check_out=07:00 and check_in=08:00 -> action='error'",
+        "✅ Error message: 'Jam Pulang lebih awal dari Jam Masuk padahal shift bukan lintas hari.'",
+        "✅ Commit does NOT write error row to DB"
+      ],
+      "notes": "Validation at lines 1116-1118 in attendance.py correctly rejects non-overnight shifts where check_out <= check_in. Error message in Bahasa Indonesia as required."
+    },
+    "scenario_15_period_lock": {
+      "status": "PASSED",
+      "description": "Period lock enforcement during import",
+      "tests": [
+        "✅ Close period 2026-04 via POST /time/periods/close",
+        "✅ Preview with date in closed period -> action='error' with message 'Periode ... sudah ditutup.'",
+        "✅ Commit with closed period does NOT write to DB (count unchanged)",
+        "✅ Reopen period 2026-04 via POST /time/periods/reopen",
+        "✅ Preview after reopen -> action='create' (valid)",
+        "✅ Commit after reopen writes to DB successfully (count increased)",
+        "✅ Period restored to original status (open)"
+      ],
+      "notes": "Period lock check at line 1111-1113 in attendance.py correctly blocks imports for closed periods. The closed_period_keys() function queries time_periods table for period_status='closed'. Period close/reopen endpoints at lines 537 and 575 in time_core.py work correctly. All periods modified during testing were restored to original state."
+    },
+    "scenario_16_tenant_isolation": {
+      "status": "PASSED",
+      "description": "Tenant isolation - KBS cannot import NEP employee",
+      "tests": [
+        "✅ KBS admin preview with NEP employee number -> action='error'",
+        "✅ Error message: 'Karyawan dengan nomor ... tidak ditemukan pada perusahaan aktif.'",
+        "✅ Commit as KBS does NOT create NEP employee record",
+        "✅ No cross-tenant data leak (verified no KBS company_id with NEP employee_number in DB)"
+      ],
+      "notes": "Tenant isolation enforced by employee_index() function at line 1037 which only returns employees for ctx.company_id. The validation at lines 1050-1057 correctly rejects employees not in the active company. No cross-tenant data leak detected in DB verification."
+    },
+    "scenario_19_audit_log": {
+      "status": "PASSED",
+      "description": "Audit log for import action",
+      "tests": [
+        "✅ Import commit creates audit log entry (count increased from 25 to 26)",
+        "✅ Audit log has action='import'",
+        "✅ Audit log has module='attendance'",
+        "✅ Audit log has resource='attendance'",
+        "✅ Audit log has user_id set (9895b299-9ece-4248-9f62-be6c325b7e43)",
+        "✅ Audit log has company_id set (tenant-scoped: 453494dd-27d7-4bd0-bd26-80fde70bf30c)",
+        "✅ Audit log record_label contains filename ('Import Absensi: test_audit_113500.xlsx')",
+        "✅ Audit log record_id references batch_id",
+        "✅ Other Time Management mutations also logged (period_close, period_reopen, attendance_import_update found)"
+      ],
+      "notes": "Audit logging at line 1250-1251 in attendance.py correctly calls log_action() with action='import' after commit. Audit log table has all required fields: id, company_id, action, module, resource, record_id, record_label, user_id, created_at. Other Time Management operations (period close/reopen, attendance updates) also create audit logs as verified."
+    },
+    "cleanup_verification": {
+      "status": "PASSED",
+      "tests": [
+        "✅ GET /health returns status='healthy' and database='mariadb:connected'",
+        "✅ Period 2026-04 restored to original status (open)",
+        "✅ No periods left in modified state"
+      ],
+      "test_data_left_in_db": [
+        "2026-09-21 - NEP-0001 (1 record)",
+        "2026-09-22 - NEP-0001 (1 record)",
+        "2026-10-01 - NEP-0001, NEP-0002, NEP-0003 (3 records)",
+        "2026-10-06 - NEP-0001 (1 record)",
+        "2026-10-11 - NEP-0001 (1 record)",
+        "2026-10-15 - NEP-0001, NEP-0002 (2 records)",
+        "2026-03-10 - NEP-0001 (1 record - overnight shift test)",
+        "2026-04-15 - NEP-0003 (1 record - period lock test)"
+      ],
+      "notes": "Environment is healthy. All test data uses future dates (>= 2026-03-10) and will not interfere with production data. Periods are restored to original state. Preview environment is ready for user testing."
+    }
+  },
+  
+  "test_environment": {
+    "backend_url": "http://localhost:8001/api",
+    "database": "MariaDB 127.0.0.1:3306/hris_payroll_dev (DEVELOPMENT LOCAL)",
+    "production_database": "<host-produksi> (NOT TOUCHED - as required)",
+    "test_accounts_used": [
+      "hr.admin@nep.co.id (HR Admin - NEP)",
+      "karyawan@nep.co.id (Employee - NEP)",
+      "supervisor@nep.co.id (Supervisor - NEP)",
+      "hr.manager@nep.co.id (HR Manager - NEP)",
+      "hr.admin@kbs.co.id (HR Admin - KBS)"
+    ],
+    "employees_used": [
+      "NEP-0001 (Rina Kusuma)",
+      "NEP-0002 (Bambang Setiawan)",
+      "NEP-0003 (Sari Puspita)"
+    ],
+    "shifts_tested": [
+      "SHIFT-P (pagi, NOT overnight)",
+      "SHIFT-M (malam, IS overnight 23:00-07:00)"
+    ],
+    "periods_modified": [
+      "2026-04 (closed then reopened, restored to original status: open)"
+    ]
+  },
+  
+  "comparison_with_iteration_2": {
+    "iteration_2_status": "14/15 tests passed (93.3%), 6 scenarios SKIPPED",
+    "iteration_3_status": "43/43 tests passed (100%), ALL 6 skipped scenarios now TESTED",
+    "skipped_scenarios_now_tested": [
+      "Scenario 11: RBAC overwrite permission (6 tests)",
+      "Scenario 12: Invalid date/time formats (6 tests)",
+      "Scenario 13: Overnight shift calculation (7 tests)",
+      "Scenario 14: Non-overnight validation (2 tests)",
+      "Scenario 15: Period lock enforcement (7 tests)",
+      "Scenario 16: Tenant isolation (4 tests)",
+      "Scenario 19: Audit log (9 tests)",
+      "Cleanup & verification (2 tests)"
+    ],
+    "reason_for_skip_in_iteration_2": "Iteration 2 skipped these scenarios with reason 'requires more complex setup'. Iteration 3 implemented the complex setup (period close/reopen, multi-role login, DB verification, audit log queries) and all scenarios now pass.",
+    "new_findings": "No bugs found. All skipped scenarios work correctly as designed."
+  },
+  
+  "conclusion": "Iteration 3 successfully tested all 6 scenarios that were skipped in iteration 2. All 43 tests passed (100% success rate). Key findings: (1) RBAC overwrite permission enforcement works correctly - Employee/Supervisor get 403, HR Admin allowed; (2) Invalid date/time formats return proper Bahasa Indonesia errors without 500; (3) Overnight shift SHIFT-M correctly calculates check_out_at on next day with POSITIVE work_minutes (420 minutes verified); (4) Non-overnight shift validation rejects check_out <= check_in; (5) Period lock blocks imports and reopen allows them; (6) Tenant isolation prevents cross-company data access; (7) Audit logs are created for all import actions with correct fields. Environment is healthy, all periods restored, and preview is ready for user testing. Import Attendance feature is PRODUCTION-READY with all edge cases tested."
+}

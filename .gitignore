@@ -31,3 +31,9 @@ Thumbs.db
 .emergent/
 frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/.cache/default-development/1.pack
+
+# Time Management V1 dev env safety
+.env.*.bak
+*.env.bak
+.env.production.bak
+.local-data/

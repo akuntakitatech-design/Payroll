@@ -25,7 +25,9 @@ MASTERS: Dict[str, Dict[str, Any]] = {
         "resource": "work_location",
         "collection": "work_locations",
         "label": "Lokasi Kerja",
-        "fields": ["code", "name", "branch_id", "address", "latitude", "longitude", "radius_meter", "location_type", "timezone", "notes"],
+        "fields": ["code", "name", "branch_id", "address", "latitude", "longitude", "radius_meter", "location_type", "timezone", "notes",
+                   # Absensi: konfigurasi geofence per lokasi kerja (kolom sudah ada di DB).
+                   "geofence_enabled", "attendance_location_policy", "gps_accuracy_max_meter"],
         "required": ["code", "name"],
         "unique": ["code"],
         "search": ["code", "name", "address"],
@@ -151,11 +153,11 @@ MASTERS: Dict[str, Dict[str, Any]] = {
 MASTER_ORDER: List[str] = list(MASTERS.keys())
 
 NUMERIC_FIELDS = {
-    "latitude", "longitude", "radius_meter", "level", "min_salary", "max_salary",
+    "latitude", "longitude", "radius_meter", "gps_accuracy_max_meter", "level", "min_salary", "max_salary",
     "duration_months", "max_extension", "validity_months", "reminder_days",
     "contract_value", "max_size_mb",
 }
 BOOLEAN_FIELDS = {
     "is_head_office", "is_supervisory", "is_permanent", "requires_contract",
-    "is_extendable", "is_mandatory", "has_expiry",
+    "is_extendable", "is_mandatory", "has_expiry", "geofence_enabled",
 }
