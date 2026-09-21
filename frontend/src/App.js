@@ -30,6 +30,9 @@ import EmployeeSalariesPage from "@/pages/EmployeeSalariesPage";
 import MyPayslipsPage from "@/pages/MyPayslipsPage";
 import MailSettingsPage from "@/pages/MailSettingsPage";
 import ModulePlaceholderPage from "@/pages/ModulePlaceholderPage";
+import RecruitmentDashboardPage from "@/pages/recruitment/RecruitmentDashboardPage";
+import CandidatesPage from "@/pages/recruitment/CandidatesPage";
+import CandidateDetailPage from "@/pages/recruitment/CandidateDetailPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import { Loader2 } from "lucide-react";
 
@@ -100,6 +103,10 @@ const AppRoutes = () => (
       <Route path="/audit-logs" element={<AuditLogPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/profile" element={<ProfilePage />} />
+      {/* Rekrutmen V1 — route spesifik harus sebelum placeholder generik */}
+      <Route path="/modules/recruitment" element={<RecruitmentDashboardPage />} />
+      <Route path="/modules/recruitment/candidates" element={<CandidatesPage />} />
+      <Route path="/modules/recruitment/candidates/:candidateId" element={<CandidateDetailPage />} />
       <Route path="/modules/:moduleKey" element={<ModulePlaceholderPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Route>

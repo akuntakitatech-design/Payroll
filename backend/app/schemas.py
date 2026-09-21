@@ -459,3 +459,142 @@ class ContractRenewRequest(BaseModel):
 
 class EmployeeImportCommit(BaseModel):
     rows: List[Dict[str, Any]]
+
+
+# ==========================================================================
+# Rekrutmen V1 — Tahap A (kandidat, screening, riwayat status)
+# company_id / stage_status / screening_* TIDAK diterima dari payload;
+# semuanya ditentukan server dari konteks tenant dan state machine.
+# ==========================================================================
+class CandidateBase(BaseModel):
+    # identitas
+    nik: Optional[str] = None
+    birth_place: Optional[str] = None
+    birth_date: Optional[str] = None
+    gender: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    # lamaran
+    position_id: Optional[str] = None
+    department_id: Optional[str] = None
+    work_location_id: Optional[str] = None
+    project_id: Optional[str] = None
+    applied_position_title: Optional[str] = None
+    source: Optional[str] = None
+    source_detail: Optional[str] = None
+    applied_at: Optional[str] = None
+    expected_salary: Optional[float] = Field(default=None, ge=0)
+    available_from: Optional[str] = None
+    # pendidikan & pengalaman
+    last_education: Optional[str] = None
+    major: Optional[str] = None
+    institution: Optional[str] = None
+    graduation_year: Optional[int] = Field(default=None, ge=1950, le=2100)
+    last_company: Optional[str] = None
+    last_position: Optional[str] = None
+    experience_years: Optional[float] = Field(default=None, ge=0, le=60)
+    notes: Optional[str] = None
+
+
+class CandidateCreate(CandidateBase):
+    full_name: str = Field(min_length=2, max_length=255)
+    candidate_number: Optional[str] = Field(default=None, max_length=64)
+
+
+class CandidateUpdate(CandidateBase):
+    full_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    candidate_number: Optional[str] = Field(default=None, max_length=64)
+
+
+class CandidateStageChange(BaseModel):
+    stage_status: str
+    notes: Optional[str] = None
+
+
+class CandidateScreening(BaseModel):
+    screening_result: str  # passed | failed
+    screening_score: Optional[int] = Field(default=None, ge=0, le=100)
+    screening_notes: Optional[str] = None
+    screening_recommendation: Optional[str] = None  # recommended | consider | not_recommended
+
+
+# ==========================================================================
+# Rekrutmen V1 — Tahap B (interview, approval, offering)
+# ==========================================================================
+class InterviewCreate(BaseModel):
+    interview_type: str  # key dari katalog INTERVIEW_TYPES
+    interview_type_label: Optional[str] = Field(default=None, max_length=255)  # untuk "other"
+    scheduled_date: str  # YYYY-MM-DD
+    start_time: Optional[str] = Field(default=None, max_length=8)  # HH:MM
+    end_time: Optional[str] = Field(default=None, max_length=8)
+    interviewer_user_id: str
+    interview_mode: str = "onsite"  # onsite | online
+    location: Optional[str] = Field(default=None, max_length=255)
+    meeting_link: Optional[str] = Field(default=None, max_length=512)
+    notes: Optional[str] = None
+
+
+class InterviewUpdate(BaseModel):
+    interview_type: Optional[str] = None
+    interview_type_label: Optional[str] = Field(default=None, max_length=255)
+    scheduled_date: Optional[str] = None
+    start_time: Optional[str] = Field(default=None, max_length=8)
+    end_time: Optional[str] = Field(default=None, max_length=8)
+    interviewer_user_id: Optional[str] = None
+    interview_mode: Optional[str] = None
+    location: Optional[str] = Field(default=None, max_length=255)
+    meeting_link: Optional[str] = Field(default=None, max_length=512)
+    notes: Optional[str] = None
+
+
+class InterviewComplete(BaseModel):
+    result: str  # passed | considered | failed
+    score: Optional[int] = Field(default=None, ge=0, le=100)
+    recommendation: Optional[str] = None  # hire | consider | no_hire
+    interviewer_notes: Optional[str] = None
+
+
+class InterviewCancel(BaseModel):
+    reason: Optional[str] = None
+
+
+class ApprovalSubmit(BaseModel):
+    notes: Optional[str] = None
+
+
+class ApprovalDecide(BaseModel):
+    decision: str  # approved | rejected
+    notes: Optional[str] = None
+
+
+class OfferingBase(BaseModel):
+    position_id: Optional[str] = None
+    department_id: Optional[str] = None
+    work_location_id: Optional[str] = None
+    project_id: Optional[str] = None
+    employment_status_id: Optional[str] = None
+    start_date: Optional[str] = None
+    basic_salary: Optional[float] = Field(default=None, ge=0)
+    allowances: Optional[List[Dict[str, Any]]] = None  # [{"name": str, "amount": float}]
+    probation_months: Optional[int] = Field(default=None, ge=0, le=24)
+    notes: Optional[str] = None
+
+
+class OfferingCreate(OfferingBase):
+    pass
+
+
+class OfferingUpdate(OfferingBase):
+    pass
+
+
+class OfferingRespond(BaseModel):
+    response: str  # accepted | declined
+    response_notes: Optional[str] = None
+    responded_at: Optional[str] = None  # YYYY-MM-DD (tanggal konfirmasi kandidat)
+
+
+class OfferingCancel(BaseModel):
+    reason: Optional[str] = None

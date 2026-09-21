@@ -22,6 +22,8 @@ from app.routers import (
     master,
     payroll,
     policies,
+    recruitment,
+    recruitment_pipeline,
     reminders,
     settings_mail,
     users,
@@ -96,6 +98,8 @@ api.include_router(policies.router)
 api.include_router(audit_logs.router)
 api.include_router(dashboard.router)
 api.include_router(payroll.router)
+api.include_router(recruitment.router)
+api.include_router(recruitment_pipeline.router)
 api.include_router(settings_mail.router)
 
 app.include_router(api)
