@@ -1,0 +1,10 @@
+[mysqld]
+datadir=/app/.local-data/mariadb/data
+bind-address=127.0.0.1
+port=3306
+socket=/app/.local-data/mariadb/mariadb.sock
+pid-file=/app/.local-data/mariadb/mariadb.pid
+log-error=/app/.local-data/mariadb/mariadb.err
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+skip-name-resolve

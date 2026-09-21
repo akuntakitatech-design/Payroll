@@ -1,23 +1,44 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { Building2, Eye, EyeOff, Loader2, ShieldCheck, Users, Layers } from "lucide-react";
+import { Building2, Eye, EyeOff, Loader2, ShieldCheck, Users, Layers, ChevronDown, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { errorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
-
-const DEMO_ACCOUNTS = [
-  { email: "superadmin@hris.id", label: "Super Admin", desc: "Akses seluruh perusahaan" },
-  { email: "hr.multi@hris.id", label: "HR Multi Perusahaan", desc: "Uji pemilih perusahaan" },
-  { email: "hr.admin@nep.co.id", label: "HR Admin", desc: "Kelola master data" },
-  { email: "finance@nep.co.id", label: "Finance", desc: "Payroll & keuangan" },
-  { email: "karyawan@nep.co.id", label: "Karyawan", desc: "Akses terbatas" },
-];
 
 const DEMO_PASSWORD = "Hris#2026";
+
+const DEMO_GROUPS = [
+  {
+    company: "Akses Global",
+    accounts: [
+      { email: "superadmin@hris.id", name: "Super Administrator", role: "System Administrator" },
+      { email: "hr.multi@hris.id", name: "Laila Fitriani", role: "Group HR Business Partner" },
+    ],
+  },
+  {
+    company: "PT Nusantara Energi Prima (NEP)",
+    accounts: [
+      { email: "owner@nep.co.id", name: "Bapak Hendra Wijaya", role: "Direktur Utama" },
+      { email: "hr.manager@nep.co.id", name: "Dewi Kartika", role: "HR Manager" },
+      { email: "hr.admin@nep.co.id", name: "Siti Rahmawati", role: "HR Administrator" },
+      { email: "finance@nep.co.id", name: "Agus Prasetyo", role: "Finance Manager" },
+      { email: "manager@nep.co.id", name: "Rudi Hartono", role: "Operation Manager" },
+      { email: "supervisor@nep.co.id", name: "Bambang Setiawan", role: "Site Supervisor" },
+      { email: "karyawan@nep.co.id", name: "Rina Kusuma", role: "Staff Administrasi" },
+    ],
+  },
+  {
+    company: "PT Karya Bangun Sejahtera (KBS)",
+    accounts: [
+      { email: "owner@kbs.co.id", name: "Ibu Maria Tanujaya", role: "Direktur" },
+      { email: "hr.admin@kbs.co.id", name: "Yusuf Maulana", role: "HR Administrator" },
+      { email: "karyawan@kbs.co.id", name: "Andi Saputra", role: "Teknisi" },
+    ],
+  },
+];
 
 const LoginPage = () => {
   const { login, session, loading } = useAuth();
@@ -27,12 +48,22 @@ const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showDemo, setShowDemo] = useState(false);
 
   useEffect(() => {
     document.title = "Masuk · HRIS & Payroll Suite";
   }, []);
 
   if (!loading && session) return <Navigate to="/" replace />;
+
+  const fillDemo = (demoEmail) => {
+    setEmail(demoEmail);
+    setPassword(DEMO_PASSWORD);
+    setError("");
+    toast.info("Kredensial demo terisi", {
+      description: `${demoEmail} · tekan "Masuk" untuk melanjutkan.`,
+    });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -55,12 +86,6 @@ const LoginPage = () => {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const fillDemo = (demoEmail) => {
-    setEmail(demoEmail);
-    setPassword(DEMO_PASSWORD);
-    setError("");
   };
 
   return (
@@ -176,30 +201,68 @@ const LoginPage = () => {
             </Button>
           </form>
 
-          <Card className="border-border bg-card p-4" data-testid="login-demo-accounts">
-            <p className="text-sm font-semibold">Akun demo</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Klik salah satu untuk mengisi form. Kata sandi semua akun demo:{" "}
-              <span className="font-medium text-foreground">{DEMO_PASSWORD}</span>
-            </p>
-            <div className="mt-3 space-y-1.5">
-              {DEMO_ACCOUNTS.map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  onClick={() => fillDemo(acc.email)}
-                  data-testid={`login-demo-${acc.email}`}
-                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium">{acc.label}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{acc.email}</span>
+          {/* Demo account picker */}
+          <div className="rounded-xl border border-border bg-card">
+            <button
+              type="button"
+              onClick={() => setShowDemo((v) => !v)}
+              aria-expanded={showDemo}
+              data-testid="demo-accounts-toggle"
+              className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">Coba dengan akun demo</span>
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${showDemo ? "rotate-180" : ""}`}
+              />
+            </button>
+
+            {showDemo && (
+              <div className="space-y-4 border-t border-border px-4 py-4" data-testid="demo-accounts-panel">
+                <p className="text-xs text-muted-foreground">
+                  Klik salah satu akun untuk mengisi formulir secara otomatis. Kata sandi semua akun demo:{" "}
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground">
+                    {DEMO_PASSWORD}
                   </span>
-                  <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">{acc.desc}</span>
-                </button>
-              ))}
-            </div>
-          </Card>
+                </p>
+
+                <div className="max-h-72 space-y-4 overflow-y-auto pr-1">
+                  {DEMO_GROUPS.map((group) => (
+                    <div key={group.company} className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {group.company}
+                      </p>
+                      <div className="space-y-1.5">
+                        {group.accounts.map((acct) => (
+                          <button
+                            key={acct.email}
+                            type="button"
+                            onClick={() => fillDemo(acct.email)}
+                            data-testid={`demo-account-${acct.email}`}
+                            className="flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                              <UserRound className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium text-foreground">{acct.name}</span>
+                              <span className="block truncate text-xs text-muted-foreground">{acct.email}</span>
+                            </span>
+                            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                              {acct.role}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>
