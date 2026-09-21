@@ -42,7 +42,7 @@ TRANSITIONS: Dict[str, Set[str]] = {
     "approved": {"offering"},
     "rejected": set(),  # final pada Tahap B (resubmit = backlog)
     "offering": {"offering_accepted", "offering_declined", "approved"},  # approved = offering dibatalkan
-    "offering_accepted": set(),  # -> hired pada Tahap C
+    "offering_accepted": {"hired"},  # Tahap C: hanya lewat endpoint konversi
     "offering_declined": {"offering"},  # offering versi baru dikirim
 }
 
@@ -51,7 +51,7 @@ TRANSITIONS: Dict[str, Set[str]] = {
 ENDPOINT_ONLY: Set[str] = {
     "screening_passed", "screening_failed",
     "interview_scheduled", "interview_done", "awaiting_approval", "approved", "rejected",
-    "offering", "offering_accepted", "offering_declined",
+    "offering", "offering_accepted", "offering_declined", "hired",
 }
 
 # Status pipeline yang dianggap "kandidat aktif" (masih berjalan).

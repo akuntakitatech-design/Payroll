@@ -263,3 +263,16 @@ Test: `tests/smoke_recruitment_b.py` 79/79 PASS; testing agent iteration_9 backe
 Data preview (NEP, `tests/seed_preview_recruitment_b.py`): Bagus (offering diterima), Andini (interview berjalan), Dimas (menunggu Direksi), Raka (ditolak), Maya (offering v1 ditolak, v2 draft).
 Backlog Tahap B: resubmit approval setelah rejected; approver_type=supervisor; Tahap C (konversi karyawan).
 TIDAK: commit/push/PR/merge/deploy; Payroll/BPJS/PPh21/Auth tidak disentuh.
+
+## Phase: Rekrutmen V1 — Tahap C: Jadikan Karyawan (Status: IMPLEMENTED — smoke 43/43, menunggu review preview)
+Lingkungan sama (APP_ENV=development, MariaDB DEVELOPMENT `default`, R2 dev). Kandidat `offering_accepted` -> Karyawan (struktur Data Karyawan existing, tanpa tabel baru).
+Skema: `employees.candidate_id` (fk) + UNIQUE (company_id, candidate_id); kolom `candidates.employee_id/converted_at/converted_by` sudah ada dari blueprint. Transisi `offering_accepted -> hired` hanya via endpoint konversi (ENDPOINT_ONLY).
+Backend baru: `app/routers/recruitment_conversion.py` — GET `/api/recruitment/candidates/{id}/convert-preview` (mapping identitas/pekerjaan/pendidikan, field wajib kurang, peringatan, nik_conflict, blockers) dan POST `/api/recruitment/candidates/{id}/convert` (201).
+Otorisasi: recruitment:edit + modul employee_core aktif + employee:create; tenant dari AuthContext (company_id payload diabaikan).
+Idempotent tanpa transaksi lintas tabel (adapter tidak menyediakan): (1) klaim conditional-update kandidat offering_accepted & employee_id NULL -> hired+converted_*; (2) buat employee dengan candidate_id (UNIQUE DB menolak duplikat); (3) tautkan employee_id. Gagal di (2) -> klaim dikompensasi; gagal di (3) -> self-heal lewat employees.candidate_id.
+Employee number: helper bersama `app/core/employee_numbering.py` (dipindah apa adanya dari routers/employees.py; alias dipertahankan). Gaji offering TIDAK ditulis ke employee_salaries/payroll.
+Read-only hired: PUT/DELETE/status/screening/interview/approval/offering ditolak 4xx (guard stage existing); dokumen pelamar hired -> 409 di documents.py (upload/ubah/hapus).
+History `candidate_converted` (offering_accepted -> hired); audit `candidate_converted_to_employee` + `employee_created_from_recruitment`.
+Frontend: `components/recruitment/ConvertEmployeeDialog.jsx` (dialog Preview Data Karyawan + HiredPanel "Sudah menjadi Karyawan" + Buka Data Karyawan); CandidateDetailPage: tombol Jadikan Karyawan, panel hired, dokumen read-only.
+Test: `tests/smoke_recruitment_c.py` 43/43 PASS (draft 422, offering sent 422, permission 403, tenant 404, NIK duplikat 409 + existing_employee, 3 request konkuren [201,409,409], retry 409, satu karyawan, read-only, history/audit, format override 422). Data SMOKE-C dibersihkan. Testing agent penuh + regresi UI belum dijalankan (dijeda user).
+Demo dev: Bagus Prakoso -> NEP-0006 (hired), panel + Buka Data Karyawan diverifikasi screenshot.

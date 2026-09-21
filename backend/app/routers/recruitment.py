@@ -172,6 +172,8 @@ async def _enrich(company_id: str, items: List[Dict[str, Any]]) -> List[Dict[str
         item["can_schedule_interview"] = stage in INTERVIEW_ALLOWED_STAGES
         item["can_submit_approval"] = stage == "interview_done"
         item["can_create_offering"] = stage in OFFERING_ALLOWED_STAGES
+        item["can_convert"] = stage == "offering_accepted" and not item.get("employee_id")
+        item["is_hired"] = stage == "hired"
         item["screening_result_label"] = SCREENING_RESULTS.get(item.get("screening_result") or "", {}).get("label")
         item["screening_recommendation_label"] = SCREENING_RECOMMENDATIONS.get(
             item.get("screening_recommendation") or ""

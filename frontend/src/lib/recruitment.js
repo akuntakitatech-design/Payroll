@@ -57,6 +57,7 @@ export const HISTORY_ACTION_LABELS = {
   offering_accepted: "Offering diterima",
   offering_declined: "Offering ditolak",
   offering_cancelled: "Offering dibatalkan",
+  candidate_converted: "Jadikan Karyawan",
 };
 
 /** Ubah nilai form (string) menjadi payload angka/kosong yang bersih. */

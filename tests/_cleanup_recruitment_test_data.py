@@ -26,6 +26,10 @@ try:
                 print(f"  {table}: -{cur.rowcount}")
             cur.execute(f"DELETE FROM candidates WHERE id IN ({ph})", ids)
             print(f"  candidates: -{cur.rowcount}")
+            cur.execute(f"DELETE FROM employees WHERE candidate_id IN ({ph})", ids)
+            print(f"  employees (hasil konversi uji): -{cur.rowcount}")
+        cur.execute("DELETE FROM employees WHERE full_name LIKE %s", (pattern,))
+        print(f"  employees (nama uji): -{cur.rowcount}")
     conn.commit()
     print("cleaned", len(ids))
 finally:

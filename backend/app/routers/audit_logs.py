@@ -33,6 +33,8 @@ ACTION_LABELS = {
     "offering_accept": "Offering Diterima",
     "offering_decline": "Offering Ditolak",
     "offering_cancel": "Batalkan Offering",
+    "candidate_converted_to_employee": "Kandidat Menjadi Karyawan",
+    "employee_created_from_recruitment": "Karyawan Dibuat dari Rekrutmen",
     "upload": "Unggah",
     "activate": "Aktifkan Modul",
     "deactivate": "Nonaktifkan Modul",
