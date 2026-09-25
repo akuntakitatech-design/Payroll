@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LogOut, Menu, User, KeyRound, ChevronDown } from "lucide-react";
+import { LogOut, Menu, User, KeyRound, ChevronDown, Gauge } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { initials } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -14,13 +14,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import CompanySwitcher from "./CompanySwitcher";
-import { SidebarContent } from "./Sidebar";
+import { SidebarContent, usePlatformMode } from "./Sidebar";
 import GlobalSearch from "./GlobalSearch";
 import NotificationBell from "./NotificationBell";
 import ReadOnlyPill from "./ReadOnlyPill";
 
 const ROLE_LABELS = {
-  super_admin: "Super Admin",
+  super_admin: "Platform Admin",
+  tenant_admin: "Tenant Admin",
   company_owner: "Pemilik Perusahaan",
   hr_admin: "HR Admin",
   hr_manager: "HR Manager",
@@ -31,8 +32,9 @@ const ROLE_LABELS = {
 };
 
 const Topbar = () => {
-  const { user, roleKeys, logout } = useAuth();
+  const { user, roleKeys, logout, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
+  const platformMode = usePlatformMode();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = async () => {
@@ -65,20 +67,31 @@ const Topbar = () => {
         </SheetContent>
       </Sheet>
 
-      <div className="shrink-0" data-testid="topbar-company-selector">
-        <CompanySwitcher />
-      </div>
+      {platformMode ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2" data-testid="topbar-platform-context">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-border bg-primary-soft px-2.5 py-1 text-[12px] font-semibold text-primary">
+            <Gauge className="h-3.5 w-3.5" /> Konsol Platform
+          </span>
+          <span className="hidden truncate text-[12px] text-ink-3 md:inline">Pengelolaan tenant, masa layanan, dan branding platform</span>
+        </div>
+      ) : (
+        <>
+          <div className="shrink-0" data-testid="topbar-company-selector">
+            <CompanySwitcher />
+          </div>
 
-      <span className="hidden h-6 w-px bg-border lg:inline-block" aria-hidden="true" />
+          <span className="hidden h-6 w-px bg-border lg:inline-block" aria-hidden="true" />
 
-      {/* Pencarian global mengambil sisa ruang */}
-      <div className="flex min-w-0 flex-1 items-center justify-end md:justify-start">
-        <GlobalSearch />
-      </div>
+          {/* Pencarian global mengambil sisa ruang */}
+          <div className="flex min-w-0 flex-1 items-center justify-end md:justify-start">
+            <GlobalSearch />
+          </div>
+        </>
+      )}
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
         <ReadOnlyPill />
-        <NotificationBell />
+        {!platformMode && <NotificationBell />}
 
         <span className="hidden h-6 w-px bg-border sm:inline-block" aria-hidden="true" />
 
@@ -112,6 +125,13 @@ const Topbar = () => {
               <p className="truncate text-xs font-normal text-muted-foreground">{user?.email}</p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            {isSuperAdmin && (
+              <DropdownMenuItem asChild data-testid="user-menu-platform">
+                <Link to="/platform" className="flex items-center gap-2">
+                  <Gauge className="h-4 w-4" /> Konsol Platform
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem asChild data-testid="user-menu-profile">
               <Link to="/profile" className="flex items-center gap-2">
                 <User className="h-4 w-4" /> Profil Saya

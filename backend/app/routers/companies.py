@@ -1,14 +1,20 @@
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 
 from ..core.audit import log_action
+from ..core.branding_assets import is_tenant_logo_path, read_image_upload, tenant_logo_path
+from ..core.storage import StorageError, delete_object, get_object, put_object
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, get_auth_optional_company, require_permission, require_super_admin
 from ..core.rbac import MODULES
+from ..core.tenant_subscription import SUBSCRIPTION_FIELDS
 from ..schemas import CompanyCreate, CompanySettingsUpdate, CompanyUpdate, ModuleToggleRequest
 
 router = APIRouter(tags=["Perusahaan"])
+
+# Identitas & status tenant: hanya Platform Admin yang boleh mengubah.
+TENANT_IDENTITY_FIELDS = ("name", "legal_name", "status")
 
 DEFAULT_SETTINGS = {
     "employee_id_prefix": "EMP",
@@ -158,18 +164,107 @@ async def current_company(ctx: AuthContext = Depends(get_auth)):
 
 @router.put("/companies/current")
 async def update_current_company(
-    payload: CompanyUpdate, ctx: AuthContext = Depends(require_permission("company", "edit"))
+    payload: CompanyUpdate,
+    request: Request,
+    ctx: AuthContext = Depends(require_permission("company", "edit")),
 ):
     db = get_db()
+    # Masa layanan (subscription) hanya dikelola Platform Admin lewat Platform -> Tenant Management.
+    # Percobaan langsung lewat endpoint tenant ditolak tegas (bukan diabaikan diam-diam).
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    if isinstance(raw, dict) and any(k in raw for k in SUBSCRIPTION_FIELDS):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Masa layanan tenant hanya dapat diubah oleh Platform Admin (Platform > Tenant Management).",
+        )
     patch = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    # Logo tenant hanya lewat upload (POST /companies/current/logo) - tidak menerima URL manual.
+    patch.pop("logo_url", None)
+    patch.pop("logo_path", None)
     if not patch:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
     before = await db.companies.find_one({"id": ctx.company_id}, NO_ID)
+    # Identitas & status tenant hanya boleh diubah Platform Admin (Platform -> Tenant Management).
+    # Field profil operasional (alamat, NPWP, logo, zona waktu, dst.) tetap dikelola tenant.
+    if not ctx.is_platform_admin:
+        locked = [k for k in TENANT_IDENTITY_FIELDS if k in patch and patch[k] != (before or {}).get(k)]
+        if locked:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Nama tenant, nama badan hukum, dan status tenant hanya dapat diubah oleh Platform Admin.",
+            )
+        for k in TENANT_IDENTITY_FIELDS:
+            patch.pop(k, None)
     patch.update(audit_fields(ctx.user_id, creating=False))
     await db.companies.update_one({"id": ctx.company_id}, {"$set": patch})
     after = serialize(await db.companies.find_one({"id": ctx.company_id}, NO_ID))
     await log_action(ctx, "update", "company", ctx.company_id, after.get("name"), before=before, after=after)
     return after
+
+
+# ------------------------------------------------------------- tenant logo
+# Semua endpoint logo tenant bekerja pada ctx.company_id (tenant aktif hasil token),
+# TIDAK menerima company_id dari klien -> Tenant A tidak mungkin membaca/mengubah logo Tenant B.
+@router.get("/companies/current/logo")
+async def get_current_company_logo(ctx: AuthContext = Depends(get_auth)):
+    db = get_db()
+    company = await db.companies.find_one({"id": ctx.company_id}, NO_ID)
+    path = (company or {}).get("logo_path")
+    if not path or not is_tenant_logo_path(ctx.company_id, path):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Perusahaan belum mengunggah logo.")
+    try:
+        data, content_type = get_object(path)
+    except StorageError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.post("/companies/current/logo")
+async def upload_current_company_logo(
+    file: UploadFile = File(...), ctx: AuthContext = Depends(require_permission("company", "edit"))
+):
+    db = get_db()
+    data, ext, mime = await read_image_upload(file)
+    before = await db.companies.find_one({"id": ctx.company_id}, NO_ID) or {}
+    old_path = before.get("logo_path")
+    path = tenant_logo_path(ctx.company_id, ext)
+    try:
+        put_object(path, data, mime)
+    except StorageError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
+    version = new_id()[:8]
+    patch = {"logo_path": path, "logo_url": f"/api/companies/current/logo?v={version}"}
+    patch.update(audit_fields(ctx.user_id, creating=False))
+    await db.companies.update_one({"id": ctx.company_id}, {"$set": patch})
+    if old_path and old_path != path and is_tenant_logo_path(ctx.company_id, old_path):
+        delete_object(old_path)
+    await log_action(ctx, "replace_logo" if old_path else "upload_logo", "company", ctx.company_id,
+                     before.get("name"), before={"logo_path": old_path},
+                     after={"logo_path": path, "size": len(data), "content_type": mime})
+    after = serialize(await db.companies.find_one({"id": ctx.company_id}, NO_ID))
+    return {"message": "Logo perusahaan berhasil disimpan.", "company": after}
+
+
+@router.delete("/companies/current/logo")
+async def delete_current_company_logo(ctx: AuthContext = Depends(require_permission("company", "edit"))):
+    db = get_db()
+    before = await db.companies.find_one({"id": ctx.company_id}, NO_ID) or {}
+    old_path = before.get("logo_path")
+    if not old_path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Perusahaan belum mengunggah logo.")
+    await db.companies.update_one(
+        {"id": ctx.company_id},
+        {"$set": {"logo_path": None, "logo_url": None, **audit_fields(ctx.user_id, creating=False)}},
+    )
+    if is_tenant_logo_path(ctx.company_id, old_path):
+        delete_object(old_path)
+    await log_action(ctx, "delete_logo", "company", ctx.company_id, before.get("name"),
+                     before={"logo_path": old_path}, after={"logo_path": None})
+    after = serialize(await db.companies.find_one({"id": ctx.company_id}, NO_ID))
+    return {"message": "Logo perusahaan dihapus. Placeholder default akan ditampilkan.", "company": after}
 
 
 @router.put("/companies/current/settings")

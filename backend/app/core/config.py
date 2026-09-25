@@ -67,6 +67,10 @@ class Settings:
     LOGIN_MAX_ATTEMPTS: int = int(os.environ.get("LOGIN_MAX_ATTEMPTS", "8"))
     LOGIN_LOCK_MINUTES: int = int(os.environ.get("LOGIN_LOCK_MINUTES", "10"))
 
+    # Tenant subscription: nilai awal grace period (hari) saat Platform Admin mengatur periode
+    # tanpa mengisi grace. Nilai final tetap DISIMPAN per tenant (companies.grace_period_days).
+    TENANT_DEFAULT_GRACE_PERIOD_DAYS: int = int(os.environ.get("TENANT_DEFAULT_GRACE_PERIOD_DAYS", "7"))
+
     # Cloudflare R2 (S3 compatible) object storage
     R2_ACCOUNT_ID: str = os.environ.get("R2_ACCOUNT_ID", "")
     R2_ACCESS_KEY_ID: str = os.environ.get("R2_ACCESS_KEY_ID", "")

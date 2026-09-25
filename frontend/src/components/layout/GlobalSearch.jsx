@@ -25,11 +25,14 @@ import {
  */
 const GlobalSearch = () => {
   const navigate = useNavigate();
-  const { can, hasModule } = useAuth();
+  const { can, hasModule, isSuperAdmin } = useAuth();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  const groups = useMemo(() => filterNav({ can, hasModule }), [can, hasModule]);
+  const groups = useMemo(
+    () => filterNav({ can, hasModule, isPlatformAdmin: isSuperAdmin }),
+    [can, hasModule, isSuperAdmin]
+  );
 
   useEffect(() => {
     const onKeyDown = (event) => {

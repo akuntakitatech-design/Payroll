@@ -23,6 +23,7 @@ export const Field = ({ field, value, onChange, error }) => {
     "data-testid": `field-${field.name}`,
     "aria-invalid": !!error,
     "aria-describedby": error ? `${id}-error` : undefined,
+    ...(field.disabled ? { disabled: true } : {}),
   };
 
   let control;

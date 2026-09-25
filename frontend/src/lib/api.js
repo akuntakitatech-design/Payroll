@@ -21,6 +21,19 @@ export const setUnauthorizedHandler = (fn) => {
   onUnauthorized = fn;
 };
 
+// Tenant dinonaktifkan Platform Admin / masa layanan berakhir -> sesi diakhiri dengan pesan yang jelas.
+export const FLASH_KEY = "hris_login_flash";
+let onTenantInactive = null;
+export const setTenantInactiveHandler = (fn) => {
+  onTenantInactive = fn;
+};
+
+// Akun masih memakai password sementara -> arahkan ke halaman wajib ganti password.
+let onPasswordChangeRequired = null;
+export const setPasswordChangeRequiredHandler = (fn) => {
+  onPasswordChangeRequired = fn;
+};
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -28,6 +41,26 @@ api.interceptors.response.use(
     const url = error?.config?.url || "";
     if (status === 401 && !url.includes("/auth/login")) {
       if (onUnauthorized) onUnauthorized();
+    }
+    if (status === 403 && error?.response?.headers?.["x-password-change-required"] === "true") {
+      if (onPasswordChangeRequired) onPasswordChangeRequired();
+    }
+    const tenantStatus = error?.response?.headers?.["x-tenant-status"];
+    if (status === 403 && (tenantStatus === "inactive" || tenantStatus === "expired") && !url.includes("/auth/login")) {
+      const detail = error?.response?.data?.detail;
+      try {
+        sessionStorage.setItem(
+          FLASH_KEY,
+          typeof detail === "string"
+            ? detail
+            : tenantStatus === "expired"
+              ? "Masa layanan tenant telah berakhir. Silakan hubungi administrator platform."
+              : "Tenant Anda sedang dinonaktifkan."
+        );
+      } catch {
+        /* ignore */
+      }
+      if (onTenantInactive) onTenantInactive();
     }
     return Promise.reject(error);
   }
