@@ -468,6 +468,10 @@ File: `frontend/src/pages/EmployeeMigrationPage.jsx` (untracked).
 
 ---
 
+## PR GitHub (atas instruksi user)
+- Draft **PR #13** `[WIP] Upgrade 01B–01E` : branch `feature/upgrade-01b-01e-employee-core` → `main` (dibuat dari origin/main + tree 01B–01E; exclude .env.example, test_reports/, memory/; host server disensor). Belum di-merge; tidak ada deploy.
+- Branch kerja lokal tetap `feature/upgrade-01e-employee-migration`. Jika ada perubahan 01E-B lanjutan, push ke branch PR #13 hanya atas instruksi user.
+
 ## 3) Next Actions (immediate)
 Status saat ini: **01E-A DONE (checkpoint)** + **01E-B IN PROGRESS**.
 
