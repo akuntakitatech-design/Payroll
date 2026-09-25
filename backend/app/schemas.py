@@ -214,6 +214,10 @@ class EmployeeCreate(BaseModel):
     bpjs_kesehatan_number: Optional[str] = None
     bpjs_tk_number: Optional[str] = None
     notes: Optional[str] = None
+    # Upgrade 01C - Profile 360
+    domicile_address: Optional[str] = None
+    province: Optional[str] = None
+    postal_code: Optional[str] = None
 
 
 class EmployeeUpdate(BaseModel):
@@ -250,6 +254,10 @@ class EmployeeUpdate(BaseModel):
     bpjs_kesehatan_number: Optional[str] = None
     bpjs_tk_number: Optional[str] = None
     notes: Optional[str] = None
+    # Upgrade 01C - Profile 360
+    domicile_address: Optional[str] = None
+    province: Optional[str] = None
+    postal_code: Optional[str] = None
     status: Optional[str] = None
 
 

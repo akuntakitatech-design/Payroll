@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from ..core.audit import log_action
+from ..core.employee_status import ensure_default_statuses
 from ..core.config import settings
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
 from ..core.deps import AuthContext, require_platform_admin
@@ -268,9 +269,13 @@ async def create_tenant(payload: TenantCreate, ctx: AuthContext = Depends(requir
         # Reuse helper existing: modul inti aktif + pengaturan default tenant.
         await seed_company_modules(tenant_id, [], ctx.user_id)
         await ensure_company_settings(tenant_id, ctx.user_id)
+        # Upgrade 01B: 3 status karyawan default (Aktif/Standby/Tidak Aktif) dibuat
+        # eksplisit saat provisioning (bukan lewat AUTO_SEED saat startup).
+        await ensure_default_statuses(tenant_id, ctx.user_id)
     except Exception as exc:  # noqa: BLE001 - kompensasi lalu teruskan error
         await db.company_modules.delete_many({"company_id": tenant_id})
         await db.company_settings.delete_many({"company_id": tenant_id})
+        await db.employee_business_statuses.delete_many({"company_id": tenant_id})
         if "membership" in written:
             await db.user_company_roles.delete_many({"id": membership["id"]})
         if "user" in written:

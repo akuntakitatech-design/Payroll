@@ -7,8 +7,17 @@ from ..core.db import DESCENDING
 from ..core.db import NO_ID, get_db, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.rbac import MODULES, RESOURCES
+from ..core.sensitive import mask_for_audit
 
 router = APIRouter(prefix="/audit-logs", tags=["Audit Log"])
+
+
+def _mask_row(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Upgrade 01C: data sensitif karyawan juga dimasking saat DIBACA (termasuk log lama)."""
+    for k in ("before_value", "after_value"):
+        if isinstance(r.get(k), dict):
+            r[k] = mask_for_audit(r[k])
+    return r
 
 ACTION_LABELS = {
     "login": "Login",
@@ -130,6 +139,7 @@ async def list_audit_logs(
         .to_list(limit)
     )
     for r in rows:
+        _mask_row(r)
         r["action_label"] = ACTION_LABELS.get(r.get("action"), r.get("action"))
         res = RESOURCES.get(r.get("resource"))
         r["resource_label"] = res[0] if res else r.get("resource")
@@ -158,4 +168,4 @@ async def export_audit_logs(
     rows = serialize_list(
         await db.audit_logs.find(query, NO_ID).sort("created_at", DESCENDING).to_list(min(5000, limit))
     )
-    return {"items": rows, "total": len(rows), "generated_at": datetime.now(timezone.utc)}
+    return {"items": [_mask_row(r) for r in rows], "total": len(rows), "generated_at": datetime.now(timezone.utc)}

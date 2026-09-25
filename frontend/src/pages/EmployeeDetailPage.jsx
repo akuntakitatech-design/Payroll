@@ -16,6 +16,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Upload,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
@@ -25,7 +26,21 @@ import PageHeader, { PageBody } from "@/components/common/PageHeader";
 import DataTable, { TableCard } from "@/components/common/DataTable";
 import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
-import StatusBadge, { ExpiryBadge } from "@/components/common/StatusBadge";
+import { ExpiryBadge } from "@/components/common/StatusBadge";
+import { EmployeeStatusBadge } from "@/components/employees/EmployeeStatusBadge";
+import ChangeStatusDialog from "@/components/employees/ChangeStatusDialog";
+import {
+  BankTaxTab,
+  BpjsTab,
+  EmploymentTab,
+  FamilyTab,
+  HistoryTab,
+  PersonalTab,
+  ProfileHeaderCard,
+  SectionEditDialog,
+  SummaryTab,
+} from "@/components/employees/ProfileSections";
+import { AssignmentTab } from "@/components/employees/AssignmentSection";
 import DocumentPreviewDialog from "@/components/common/DocumentPreview";
 import ContractRenewDialog from "@/components/payroll/ContractRenewDialog";
 import { SalaryEditorDialog } from "@/pages/EmployeeSalariesPage";
@@ -79,7 +94,12 @@ const LABELS = {
 const EmployeeDetailPage = () => {
   const { employeeId } = useParams();
   const navigate = useNavigate();
-  const { can, hasModule } = useAuth();
+  const { can, hasModule, company } = useAuth();
+  // Upgrade 01C - edit per bagian profil
+  const [editSection, setEditSection] = useState(null);
+  // tab aktif dikontrol agar tetap di tab yang sama setelah data dimuat ulang (mis. setelah aksi Penempatan)
+  const [tab, setTab] = useState("summary");
+  useEffect(() => setTab("summary"), [employeeId]);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -103,6 +123,9 @@ const EmployeeDetailPage = () => {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadError, setUploadError] = useState("");
   const [uploading, setUploading] = useState(false);
+  // Upgrade 01B - Ubah Status + Riwayat Status
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0);
   const fileInput = useRef(null);
 
   const load = useCallback(async () => {
@@ -356,7 +379,7 @@ const EmployeeDetailPage = () => {
     }
   };
 
-  if (loading) {
+  if (loading && (!data || data.employee?.id !== employeeId)) {
     return (
       <PageBody>
         <Skeleton className="h-24 w-full" />
@@ -608,107 +631,93 @@ const EmployeeDetailPage = () => {
             <Button variant="outline" onClick={() => navigate("/employees")} data-testid="employee-back-button">
               <ArrowLeft className="mr-2 h-4 w-4" /> Kembali
             </Button>
-            <StatusBadge status={employee.status} className="self-center" />
+            <EmployeeStatusBadge
+              name={employee.current_employee_status_name}
+              category={employee.current_employee_status_category}
+              archived={employee.status === "archived"}
+              className="self-center"
+              testId="employee-detail-status-badge"
+            />
+            {can("employee_status", "change") && employee.status !== "archived" && (
+              <Button variant="outline" onClick={() => setChangeOpen(true)} data-testid="employee-detail-change-status-button">
+                <UserCheck className="mr-2 h-4 w-4" /> Ubah Status
+              </Button>
+            )}
           </div>
         }
       />
+      <ChangeStatusDialog
+        open={changeOpen}
+        onOpenChange={setChangeOpen}
+        employee={employee}
+        onChanged={() => {
+          setHistoryKey((k) => k + 1);
+          load();
+        }}
+      />
       <PageBody>
-        <Tabs defaultValue="summary">
-          <TabsList data-testid="employee-tabs">
-            <TabsTrigger value="summary" data-testid="tab-summary">
-              Ringkasan
-            </TabsTrigger>
-            <TabsTrigger value="contracts" data-testid="tab-contracts">
-              Kontrak ({data.contracts.length})
-            </TabsTrigger>
-            <TabsTrigger value="certifications" data-testid="tab-certifications">
-              Sertifikasi ({data.certifications.length})
-            </TabsTrigger>
-            <TabsTrigger value="documents" data-testid="tab-documents">
-              Dokumen ({data.documents.length})
-            </TabsTrigger>
-            {payrollVisible && (
-              <TabsTrigger value="payroll" data-testid="tab-payroll">
-                Gaji & Pajak
-              </TabsTrigger>
-            )}
-          </TabsList>
+        <ProfileHeaderCard employee={employee} canEdit={can("employee", "edit")} onChanged={load} />
+        <SectionEditDialog
+          section={editSection}
+          employee={employee}
+          catalog={catalog}
+          onOpenChange={(v) => !v && setEditSection(null)}
+          onSaved={() => {
+            setHistoryKey((k) => k + 1);
+            load();
+          }}
+        />
+        <Tabs value={tab} onValueChange={setTab} className="mt-4">
+          <div className="-mx-1 overflow-x-auto px-1 pb-1">
+            <TabsList className="inline-flex h-auto w-max flex-nowrap justify-start" data-testid="employee-tabs">
+              <TabsTrigger value="summary" data-testid="tab-summary">Ringkasan</TabsTrigger>
+              <TabsTrigger value="personal" data-testid="tab-personal">Data Pribadi</TabsTrigger>
+              <TabsTrigger value="family" data-testid="tab-family">Keluarga</TabsTrigger>
+              <TabsTrigger value="employment" data-testid="tab-employment">Kepegawaian</TabsTrigger>
+              <TabsTrigger value="placement" data-testid="tab-placement">Penempatan Saat Ini</TabsTrigger>
+              <TabsTrigger value="bank" data-testid="tab-bank">Bank &amp; Pajak</TabsTrigger>
+              <TabsTrigger value="bpjs" data-testid="tab-bpjs">BPJS</TabsTrigger>
+              <TabsTrigger value="documents" data-testid="tab-documents">Dokumen ({data.documents.length})</TabsTrigger>
+              <TabsTrigger value="contracts" data-testid="tab-contracts">Kontrak ({data.contracts.length})</TabsTrigger>
+              <TabsTrigger value="certifications" data-testid="tab-certifications">Sertifikasi ({data.certifications.length})</TabsTrigger>
+              <TabsTrigger value="history" data-testid="tab-history">Riwayat</TabsTrigger>
+              {payrollVisible && (
+                <TabsTrigger value="payroll" data-testid="tab-payroll">Gaji &amp; Payroll</TabsTrigger>
+              )}
+            </TabsList>
+          </div>
 
-          <TabsContent value="summary" className="mt-4 space-y-4">
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <InfoCard title="Data Pribadi">
-                <InfoRow label="Nama Lengkap" value={employee.full_name} testId="detail-full-name" />
-                <InfoRow label="NIK Karyawan" value={employee.employee_number} />
-                <InfoRow label="Nomor KTP" value={employee.nik} />
-                <InfoRow label="Jenis Kelamin" value={LABELS.gender[employee.gender]} />
-                <InfoRow
-                  label="Tempat / Tanggal Lahir"
-                  value={
-                    employee.birth_date
-                      ? `${employee.birth_place || "-"}, ${formatDate(employee.birth_date)}`
-                      : employee.birth_place
-                  }
-                />
-                <InfoRow label="Status Pernikahan" value={LABELS.marital_status[employee.marital_status]} />
-                <InfoRow label="Pendidikan" value={LABELS.education[employee.education]} />
-                <InfoRow label="Email" value={employee.email} />
-                <InfoRow label="Nomor HP" value={employee.phone} />
-                <InfoRow label="Alamat" value={employee.address} />
-              </InfoCard>
-
-              <InfoCard title="Penempatan Organisasi">
-                <InfoRow label="Status Kepegawaian" value={employee.employment_status_name} />
-                <InfoRow label="Tanggal Masuk" value={employee.join_date ? formatDate(employee.join_date) : null} />
-                <InfoRow label="Cabang" value={employee.branch_name} />
-                <InfoRow label="Lokasi Kerja" value={employee.work_location_name} />
-                <InfoRow label="Departemen" value={employee.department_name} testId="detail-department" />
-                <InfoRow label="Divisi" value={employee.division_name} />
-                <InfoRow label="Jabatan" value={employee.position_name} />
-                <InfoRow label="Grade / Level" value={employee.job_grade_name} />
-                <InfoRow label="Cost Center" value={employee.cost_center_name} />
-                <InfoRow label="Proyek" value={employee.project_name} />
-              </InfoCard>
-
-              <InfoCard title="Bank & Jaminan Sosial">
-                <InfoRow label="Bank" value={employee.bank_name} />
-                <InfoRow label="Nomor Rekening" value={employee.bank_account_number} />
-                <InfoRow label="Nama Pemilik Rekening" value={employee.bank_account_name} />
-                <InfoRow label="NPWP" value={employee.npwp} />
-                <InfoRow label="BPJS Kesehatan" value={employee.bpjs_kesehatan_number} />
-                <InfoRow label="BPJS Ketenagakerjaan" value={employee.bpjs_tk_number} />
-              </InfoCard>
-
-              <InfoCard title="Kontrak Aktif & Kontak Darurat">
-                {employee.active_contract ? (
-                  <>
-                    <InfoRow label="Nomor Kontrak" value={employee.active_contract.contract_number} />
-                    <InfoRow label="Tipe Kontrak" value={employee.active_contract.contract_type_name} />
-                    <InfoRow
-                      label="Berakhir"
-                      value={
-                        employee.active_contract.end_date
-                          ? formatDate(employee.active_contract.end_date)
-                          : "Tanpa batas waktu"
-                      }
-                    />
-                    <div className="py-2">
-                      <ExpiryBadge
-                        state={employee.active_contract.state}
-                        daysLeft={employee.active_contract.days_left}
-                        testId="detail-contract-badge"
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <p className="py-2 text-sm text-muted-foreground">
-                    Belum ada kontrak kerja tercatat untuk karyawan ini.
-                  </p>
-                )}
-                <InfoRow label="Kontak Darurat" value={employee.emergency_contact_name} />
-                <InfoRow label="Telepon Darurat" value={employee.emergency_contact_phone} />
-                <InfoRow label="Catatan" value={employee.notes} />
-              </InfoCard>
-            </div>
+          <TabsContent value="summary" className="mt-4">
+            <SummaryTab employee={employee} documents={data.documents} contracts={data.contracts} />
+          </TabsContent>
+          <TabsContent value="personal" className="mt-4">
+            <PersonalTab employee={employee} catalog={catalog} onEdit={can("employee", "edit") ? () => setEditSection("personal") : undefined} />
+          </TabsContent>
+          <TabsContent value="family" className="mt-4">
+            <FamilyTab employeeId={employee.id} canEdit={can("employee", "edit")} catalog={catalog} />
+          </TabsContent>
+          <TabsContent value="employment" className="mt-4">
+            <EmploymentTab employee={employee} company={company} onEdit={can("employee", "edit") ? () => setEditSection("employment") : undefined} />
+          </TabsContent>
+          <TabsContent value="placement" className="mt-4">
+            <AssignmentTab
+              employee={employee}
+              company={company}
+              catalog={catalog}
+              canEdit={can("employee", "edit")}
+              canChangeStatus={can("employee_status", "change")}
+              onChanged={load}
+            />
+          </TabsContent>
+          <TabsContent value="bank" className="mt-4">
+            <BankTaxTab employee={employee} salaryInfo={salaryInfo} payrollVisible={payrollVisible}
+              onEdit={can("employee", "edit") ? () => setEditSection("bank_tax") : undefined} />
+          </TabsContent>
+          <TabsContent value="bpjs" className="mt-4">
+            <BpjsTab employee={employee} onEdit={can("employee", "edit") ? () => setEditSection("bpjs") : undefined} />
+          </TabsContent>
+          <TabsContent value="history" className="mt-4">
+            <HistoryTab employeeId={employee.id} refreshKey={historyKey} />
           </TabsContent>
 
           <TabsContent value="contracts" className="mt-4 space-y-3">
@@ -877,7 +886,8 @@ const EmployeeDetailPage = () => {
                       }`}
                       testId="salary-ptkp"
                     />
-                    <InfoRow label="NPWP" value={salaryInfo.employee?.npwp || "Belum ada"} />
+                    {/* Upgrade 01C: nilai sensitif memakai data profil (sudah dimasking server-side sesuai hak employee:edit) */}
+                    <InfoRow label="NPWP" value={employee.npwp || "Belum ada"} />
                     <InfoRow
                       label="BPJS Kesehatan"
                       value={salaryInfo.salary.bpjs_kesehatan_enrolled ? "Terdaftar" : "Tidak"}
@@ -893,8 +903,8 @@ const EmployeeDetailPage = () => {
                     <InfoRow
                       label="Rekening"
                       value={
-                        salaryInfo.employee?.bank_account_number
-                          ? `${salaryInfo.employee.bank_name || ""} ${salaryInfo.employee.bank_account_number}`.trim()
+                        employee.bank_account_number
+                          ? `${employee.bank_name || ""} ${employee.bank_account_number}`.trim()
                           : "-"
                       }
                     />

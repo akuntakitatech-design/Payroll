@@ -54,6 +54,7 @@ export const Field = ({ field, value, onChange, error }) => {
       <Select
         value={value ? String(value) : "__empty__"}
         onValueChange={(v) => onChange(field.name, v === "__empty__" ? "" : v)}
+        disabled={!!field.disabled}
       >
         <SelectTrigger data-testid={`field-${field.name}`} id={id}>
           <SelectValue placeholder={field.placeholder || "Pilih…"} />

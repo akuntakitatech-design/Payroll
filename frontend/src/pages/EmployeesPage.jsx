@@ -7,8 +7,9 @@ import {
   FileSpreadsheet,
   Pencil,
   Plus,
-  Power,
+  RotateCcw,
   Trash2,
+  UserCheck,
   UserRound,
   Users,
 } from "lucide-react";
@@ -27,7 +28,10 @@ import DataTable, {
 } from "@/components/common/DataTable";
 import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
-import StatusBadge, { ExpiryBadge } from "@/components/common/StatusBadge";
+import { ExpiryBadge } from "@/components/common/StatusBadge";
+import { EmployeeStatusBadge } from "@/components/employees/EmployeeStatusBadge";
+import ChangeStatusDialog from "@/components/employees/ChangeStatusDialog";
+import { STATUS_CATEGORIES } from "@/lib/employeeStatus";
 import { Button } from "@/components/ui/button";
 
 const StatTile = ({ label, value, hint, icon: Icon, tone = "default", testId }) => {
@@ -62,7 +66,7 @@ const EmployeesPage = () => {
 
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [filters, setFilters] = useState({ department_id: "", status: "", project_id: "" });
+  const [filters, setFilters] = useState({ department_id: "", status: "", project_id: "", employee_status_id: "", status_category: "" });
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
 
@@ -73,6 +77,8 @@ const EmployeesPage = () => {
   const [confirm, setConfirm] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [selected, setSelected] = useState([]);
+  const [statusMasters, setStatusMasters] = useState([]);
+  const [changeTarget, setChangeTarget] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 350);
@@ -112,6 +118,9 @@ const EmployeesPage = () => {
       ]);
       setStats(statsRes.data);
       setCatalog(catalogRes.data);
+      // Upgrade 01B: opsi filter Status Karyawan (tenant-scoped di server)
+      const st = await api.get("/employee-statuses");
+      setStatusMasters(st.data.items || []);
     } catch (err) {
       /* stats/catalog bersifat pelengkap, daftar utama tetap tampil */
     }
@@ -210,6 +219,7 @@ const EmployeesPage = () => {
         const res = await api.post("/employees", payload);
         toast.success(`Karyawan "${res.data.full_name}" berhasil ditambahkan (${res.data.employee_number}).`);
       } else {
+        delete payload.project_id; // Upgrade 01D: project hanya lewat aksi Penempatan di Profile 360
         await api.put(`/employees/${dialog.row.id}`, payload);
         toast.success("Data karyawan berhasil diperbarui.");
       }
@@ -230,13 +240,10 @@ const EmployeesPage = () => {
         const res = await api.delete(`/employees/${confirm.row.id}`);
         toast.success(res.data.message);
       } else {
-        const nextStatus = confirm.row.status === "active" ? "inactive" : "active";
-        await api.patch(`/employees/${confirm.row.id}/status`, { status: nextStatus });
-        toast.success(
-          nextStatus === "active"
-            ? `${confirm.row.full_name} kembali diaktifkan.`
-            : `${confirm.row.full_name} dinonaktifkan.`
-        );
+        // Upgrade 01B: hanya PULIHKAN dari arsip (lifecycle teknis). Aktif/nonaktif
+        // bisnis wajib lewat "Ubah Status" agar riwayat tercatat.
+        await api.patch(`/employees/${confirm.row.id}/status`, { status: "active" });
+        toast.success(`${confirm.row.full_name} dipulihkan dari arsip.`);
       }
       setConfirm(null);
       load();
@@ -310,7 +317,18 @@ const EmployeesPage = () => {
         );
       },
     },
-    { key: "status", header: "Status", render: (row) => <StatusBadge status={row.status} /> },
+    {
+      key: "status",
+      header: "Status Karyawan",
+      render: (row) => (
+        <EmployeeStatusBadge
+          name={row.current_employee_status_name}
+          category={row.current_employee_status_category}
+          archived={row.status === "archived"}
+          testId={`employee-status-badge-${row.id}`}
+        />
+      ),
+    },
     {
       key: "actions",
       header: "",
@@ -334,12 +352,19 @@ const EmployeesPage = () => {
               onSelect: () => openEdit(row),
               testId: `employee-edit-${row.id}`,
             },
-            can("employee", "edit") && {
-              key: "status",
-              label: row.status === "active" ? "Nonaktifkan" : "Aktifkan",
-              icon: Power,
-              onSelect: () => setConfirm({ type: "status", row }),
-              testId: `employee-status-${row.id}`,
+            can("employee_status", "change") && row.status !== "archived" && {
+              key: "change-status",
+              label: "Ubah Status",
+              icon: UserCheck,
+              onSelect: () => setChangeTarget(row),
+              testId: `employee-change-status-${row.id}`,
+            },
+            can("employee", "edit") && row.status === "archived" && {
+              key: "restore",
+              label: "Pulihkan dari Arsip",
+              icon: RotateCcw,
+              onSelect: () => setConfirm({ type: "restore", row }),
+              testId: `employee-restore-${row.id}`,
             },
             can("employee", "delete") && {
               key: "delete",
@@ -364,18 +389,30 @@ const EmployeesPage = () => {
         title="Data Karyawan"
         subtitle="Data induk karyawan, penempatan organisasi, kontrak kerja, dan sertifikasi."
         actions={
-          can("employee", "create") && (
+          (can("employee", "create") || can("employee", "import")) && (
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => navigate("/employees/import")}
-                data-testid="employees-import-excel"
-              >
-                <FileSpreadsheet className="mr-1.5 h-4 w-4" /> Impor Excel
-              </Button>
-              <Button onClick={openCreate} data-testid="page-header-primary-action">
-                <Plus className="mr-1.5 h-4 w-4" /> Tambah Karyawan
-              </Button>
+              {can("employee", "import") ? (
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/employees/migration")}
+                  data-testid="employees-migration"
+                >
+                  <FileSpreadsheet className="mr-1.5 h-4 w-4" /> Impor & Migrasi
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/employees/import")}
+                  data-testid="employees-import-excel"
+                >
+                  <FileSpreadsheet className="mr-1.5 h-4 w-4" /> Impor Excel
+                </Button>
+              )}
+              {can("employee", "create") && (
+                <Button onClick={openCreate} data-testid="page-header-primary-action">
+                  <Plus className="mr-1.5 h-4 w-4" /> Tambah Karyawan
+                </Button>
+              )}
             </div>
           )
         }
@@ -428,7 +465,7 @@ const EmployeesPage = () => {
           activeFilterCount={Object.values(filters).filter(Boolean).length + (debounced ? 1 : 0)}
           onReset={() => {
             setSearch("");
-            setFilters({ department_id: "", status: "", project_id: "" });
+            setFilters({ department_id: "", status: "", project_id: "", employee_status_id: "", status_category: "" });
             setPage(1);
           }}
         >
@@ -455,7 +492,29 @@ const EmployeesPage = () => {
             testId="filter-project"
           />
           <FilterSelect
-            label="Status"
+            label="Status Karyawan"
+            value={filters.employee_status_id}
+            onChange={(v) => {
+              setFilters((p) => ({ ...p, employee_status_id: v }));
+              setPage(1);
+            }}
+            options={statusMasters.map((s) => ({ value: s.id, label: s.name }))}
+            allLabel="Semua status karyawan"
+            testId="filter-employee-status"
+          />
+          <FilterSelect
+            label="Kategori Status"
+            value={filters.status_category}
+            onChange={(v) => {
+              setFilters((p) => ({ ...p, status_category: v }));
+              setPage(1);
+            }}
+            options={STATUS_CATEGORIES}
+            allLabel="Semua kategori"
+            testId="filter-status-category"
+          />
+          <FilterSelect
+            label="Status Sistem"
             value={filters.status}
             onChange={(v) => {
               setFilters((p) => ({ ...p, status: v }));
@@ -466,7 +525,7 @@ const EmployeesPage = () => {
               { value: "inactive", label: "Nonaktif" },
               { value: "archived", label: "Diarsipkan" },
             ]}
-            allLabel="Semua status"
+            allLabel="Semua status sistem"
             testId="filter-status"
           />
         </FilterBar>
@@ -515,7 +574,15 @@ const EmployeesPage = () => {
         onOpenChange={(v) => !v && setDialog(null)}
         title={dialog?.mode === "edit" ? "Ubah Data Karyawan" : "Tambah Karyawan"}
         description="Isi data pribadi dan penempatan organisasi. Nomor karyawan dibuat otomatis bila dibiarkan kosong."
-        fields={fields}
+        fields={
+          dialog?.mode === "edit"
+            ? fields.map((f) =>
+                f.name === "project_id"
+                  ? { ...f, disabled: true, hint: "Ubah project lewat Profil Karyawan > Penempatan (Pindah Penempatan) agar riwayat tercatat." }
+                  : f
+              )
+            : fields
+        }
         values={values}
         errors={errors}
         onChange={onChange}
@@ -531,19 +598,27 @@ const EmployeesPage = () => {
         title={
           confirm?.type === "delete"
             ? "Hapus data karyawan?"
-            : confirm?.row?.status === "active"
-            ? "Nonaktifkan karyawan ini?"
-            : "Aktifkan kembali karyawan ini?"
+            : "Pulihkan karyawan dari arsip?"
         }
         description={
           confirm?.type === "delete"
             ? `Data "${confirm?.row?.full_name}" akan dihapus dari daftar. Karyawan yang masih memiliki kontrak kerja tidak dapat dihapus.`
-            : `Status karyawan "${confirm?.row?.full_name}" akan diubah. Riwayat kontrak dan dokumen tetap tersimpan.`
+            : `"${confirm?.row?.full_name}" akan dipulihkan dari arsip dengan status karyawan terakhirnya. Riwayat kontrak dan dokumen tetap tersimpan.`
         }
         destructive={confirm?.type === "delete"}
-        confirmLabel={confirm?.type === "delete" ? "Hapus karyawan" : "Ubah status"}
+        confirmLabel={confirm?.type === "delete" ? "Hapus karyawan" : "Pulihkan"}
         loading={confirmLoading}
         onConfirm={runConfirm}
+      />
+
+      <ChangeStatusDialog
+        open={!!changeTarget}
+        onOpenChange={(v) => !v && setChangeTarget(null)}
+        employee={changeTarget}
+        onChanged={() => {
+          load();
+          loadSide();
+        }}
       />
     </>
   );

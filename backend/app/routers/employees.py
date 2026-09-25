@@ -14,6 +14,9 @@ from ..core.audit import log_action
 from ..core.db import NO_ID, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.employee_numbering import next_employee_number
+from ..core import employee_status as emp_status
+from ..core import assignment as asg
+from ..core.sensitive import EMPLOYEE_SENSITIVE_FIELDS, apply_employee_masking, can_view_sensitive
 from ..core.expiry import expiry_state
 from ..core.policy import resolve_config
 from ..core.repo import TenantRepository
@@ -26,6 +29,14 @@ from ..schemas import (
 )
 
 logger = logging.getLogger(__name__)
+# Upgrade 01C - label audit untuk edit per bagian Profile 360
+PROFILE_SECTIONS = {
+    "personal": "Data pribadi diubah",
+    "employment": "Data kepegawaian diubah",
+    "bank_tax": "Data bank & pajak diubah",
+    "bpjs": "Data BPJS diubah",
+}
+
 router = APIRouter(prefix="/employees", tags=["Karyawan"])
 
 # FK field -> (collection, label)
@@ -135,9 +146,27 @@ async def _enrich(company_id: str, items: List[Dict[str, Any]], horizon_days: in
         ).to_list(500)
     }
 
+    status_ids = {i.get("current_employee_status_id") for i in items if i.get("current_employee_status_id")}
+    status_map = {
+        s["id"]: s
+        for s in await db.employee_business_statuses.find(
+            {"company_id": company_id, "id": {"$in": list(status_ids)}}, NO_ID
+        ).to_list(1000)
+    } if status_ids else {}
+
     for item in items:
         for field in REF_FIELDS:
             item[f"{field[:-3]}_name"] = maps.get(field, {}).get(item.get(field))
+        # Upgrade 01B: status bisnis saat ini (terpisah dari employment_status & legacy status)
+        bs = status_map.get(item.get("current_employee_status_id")) or {}
+        item["current_employee_status_name"] = bs.get("name")
+        item["current_employee_status_code"] = bs.get("code")
+        item["current_employee_status_category"] = bs.get("system_category")
+        item["current_employee_status_category_label"] = emp_status.category_label(bs.get("system_category"))
+        # Upgrade 01C: foto profil disajikan lewat proxy API tenant-aware (storage key tidak diekspos)
+        photo_path = item.pop("photo_path", None)
+        item["photo_url"] = (f"/api/employees/{item['id']}/photo?v={item.get('photo_version') or ''}"
+                             if photo_path else None)
         contract = latest.get(item["id"])
         if contract:
             state = expiry_state(contract.get("end_date"), horizon_days)
@@ -242,6 +271,8 @@ async def list_employees(
     project_id: Optional[str] = None,
     employment_status_id: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
+    employee_status_id: Optional[str] = None,
+    status_category: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
     ctx: AuthContext = Depends(require_permission("employee", "view")),
@@ -257,10 +288,28 @@ async def list_employees(
     ):
         if value:
             filters[key] = value
+    # Upgrade 01B: filter Status Karyawan / Kategori Status (server-side, tenant-scoped)
+    if employee_status_id:
+        filters["current_employee_status_id"] = employee_status_id
+    if status_category:
+        if status_category not in emp_status.CATEGORIES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Kategori status tidak dikenal.")
+        cat_ids = [
+            s["id"] for s in await ctx.tdb.employee_business_statuses.find(
+                {"company_id": ctx.company_id, "system_category": status_category}, NO_ID
+            ).to_list(1000)
+        ]
+        if employee_status_id:
+            if employee_status_id not in cat_ids:
+                cat_ids = []
+            filters["current_employee_status_id"] = {"$in": cat_ids}
+        else:
+            filters["current_employee_status_id"] = {"$in": cat_ids}
     repo = TenantRepository("employees", ctx.company_id)
     result = await repo.list(
         q=q,
-        search_fields=SEARCH_FIELDS,
+        # 01C carry-over: user tanpa employee:edit tidak boleh mencari berdasarkan NIK (cegah oracle nilai tersamar)
+        search_fields=SEARCH_FIELDS if can_view_sensitive(ctx) else [f for f in SEARCH_FIELDS if f != "nik"],
         filters=filters,
         page=page,
         limit=limit,
@@ -269,7 +318,8 @@ async def list_employees(
     )
     reminder = await resolve_config(ctx.company_id, "contract.expiry_reminder_days")
     horizon = int(reminder.get("value") or 30)
-    result["items"] = await _enrich(ctx.company_id, result["items"], horizon)
+    # Upgrade 01C: data sensitif dimasking server-side untuk user tanpa employee:edit
+    result["items"] = apply_employee_masking(ctx, await _enrich(ctx.company_id, result["items"], horizon))
     return result
 
 
@@ -291,8 +341,16 @@ async def create_employee(
     if data.get("nik"):
         await repo.ensure_unique("nik", data["nik"], label="Nomor KTP")
 
+    # Upgrade 01B: karyawan baru otomatis mendapat status bisnis default tenant
+    status_row = await emp_status.prepare_new_employee(ctx.company_id, data)
     created = await repo.create(data, ctx.user_id)
+    await emp_status.record_initial_history(
+        ctx.company_id, created, status_row, "SYSTEM", ctx.user_id,
+        ctx.user.get("full_name") if ctx.user else None, "Status awal karyawan baru",
+    )
     await log_action(ctx, "create", "employee", created["id"], created.get("full_name"), after=created)
+    # Upgrade 01D: karyawan baru dengan project -> assignment ACTIVE pertama
+    await asg.create_initial_for_new_employee(ctx.company_id, created, "EMPLOYEE_CREATE", ctx.user_id, emp_status.today_local())
     return created
 
 
@@ -355,8 +413,33 @@ async def get_employee(
             d["document_type_name"] = doc_type_names.get(d.get("document_type_id"))
             d.update(expiry_state(d.get("expiry_date"), horizon))
 
+    # Upgrade 01C: atasan HANYA dari relasi existing positions.reports_to_position_id
+    # (tanpa field/relasi baru). Nama atasan hanya diisi bila tepat satu karyawan aktif
+    # memegang posisi atasan tersebut; selain itu UI menampilkan "-".
+    enriched["supervisor_position_name"] = None
+    enriched["supervisor_name"] = None
+    if employee.get("position_id"):
+        pos = await db.positions.find_one({"company_id": cid, "id": employee["position_id"]}, NO_ID)
+        sup_pos_id = (pos or {}).get("reports_to_position_id")
+        if sup_pos_id:
+            sup_pos = await db.positions.find_one({"company_id": cid, "id": sup_pos_id}, NO_ID)
+            enriched["supervisor_position_name"] = (sup_pos or {}).get("name")
+            holders = await db.employees.find(
+                {"company_id": cid, "position_id": sup_pos_id, "status": "active", "id": {"$ne": employee_id}},
+                {"_id": 0, "full_name": 1},
+            ).to_list(2)
+            if len(holders) == 1:
+                enriched["supervisor_name"] = holders[0].get("full_name")
+
+    # Upgrade 01D: ringkasan assignment ACTIVE (detail + riwayat lewat GET /employees/{id}/assignments)
+    active = await asg.active_assignment(cid, employee_id)
+    enriched["current_assignment"] = (
+        {k: active.get(k) for k in ("id", "start_date", "source", "reason", "project_id", "work_location_id")}
+        if active else None
+    )
+
     return {
-        "employee": enriched,
+        "employee": apply_employee_masking(ctx, [enriched])[0],
         "contracts": contracts,
         "certifications": certifications,
         "documents": documents,
@@ -368,14 +451,42 @@ async def get_employee(
 async def update_employee(
     employee_id: str,
     payload: EmployeeUpdate,
+    section: Optional[str] = Query(None, description="Upgrade 01C: bagian profil yang diedit (untuk audit)"),
     ctx: AuthContext = Depends(require_permission("employee", "edit")),
 ):
     data = payload.model_dump(exclude_unset=True)
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
+    if section is not None and section not in PROFILE_SECTIONS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Bagian profil tidak dikenal.")
+    # Upgrade 01C: tolak nilai hasil masking agar tidak tersimpan sebagai data asli
+    for f in EMPLOYEE_SENSITIVE_FIELDS:
+        if isinstance(data.get(f), str) and "*" in data[f]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Nilai data sensitif tidak valid (mengandung karakter masking).")
     await _validate_refs(ctx.company_id, data)
     repo = TenantRepository("employees", ctx.company_id)
-    await repo.get(employee_id)
+    current = await repo.get(employee_id)
+    # Upgrade 01B: status tidak boleh diubah lewat Edit Karyawan (agar riwayat selalu
+    # tercatat). Status bisnis -> "Ubah Status"; arsip/pulihkan -> PATCH /status.
+    if "status" in data:
+        if data["status"] not in (None, current.get("status")):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Status karyawan tidak dapat diubah dari form Edit. Gunakan aksi 'Ubah Status'.",
+            )
+        data.pop("status")
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
+    # Upgrade 01D: project hanya berubah lewat aksi Penempatan (Tetapkan/Pindah/Akhiri) agar riwayat tercatat.
+    if "project_id" in data:
+        if (data["project_id"] or None) != (current.get("project_id") or None):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Project tidak dapat diubah dari form Edit. Gunakan aksi 'Tetapkan/Pindah Penempatan'.",
+            )
+        data.pop("project_id")
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
     if data.get("employee_number"):
         await repo.ensure_unique(
             "employee_number", data["employee_number"], exclude_id=employee_id, label="NIK karyawan"
@@ -383,9 +494,17 @@ async def update_employee(
     if data.get("nik"):
         await repo.ensure_unique("nik", data["nik"], exclude_id=employee_id, label="Nomor KTP")
     before, after = await repo.update(employee_id, data, ctx.user_id)
+    # Upgrade 01D: koreksi field organisasi dicerminkan ke assignment ACTIVE (bukan pindah penempatan)
+    mirror = {f: data[f] for f in asg.MIRROR_FIELDS if f in data}
+    if mirror:
+        active = await asg.active_assignment(ctx.company_id, employee_id)
+        if active:
+            await TenantRepository(asg.TABLE, ctx.company_id).update(active["id"], mirror, ctx.user_id)
     await log_action(
-        ctx, "update", "employee", employee_id, after.get("full_name"), before=before, after=after
+        ctx, "update", "employee", employee_id, after.get("full_name"), before=before, after=after,
+        notes=PROFILE_SECTIONS.get(section) if section else None,
     )
+    after.pop("photo_path", None)  # Upgrade 01C: storage key tidak diekspos
     return after
 
 
@@ -402,8 +521,28 @@ async def change_status(
         )
     repo = TenantRepository("employees", ctx.company_id)
     employee = await repo.get(employee_id)
-    before, after = await repo.set_status(employee_id, payload.status, ctx.user_id)
-    action = "activate" if payload.status == "active" else "deactivate"
+    current = employee.get("status")
+    if current == "deleted":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Data tidak ditemukan pada perusahaan aktif Anda.")
+    # Upgrade 01B: endpoint ini hanya untuk siklus teknis ARSIP / PULIHKAN.
+    # Aktif <-> nonaktif bisnis wajib lewat POST /employees/{id}/status-change (riwayat + audit).
+    if payload.status == "archived":
+        if current == "archived":
+            return employee
+        new_legacy, action = "archived", "archive"
+    elif current == "archived":
+        bs = None
+        if employee.get("current_employee_status_id"):
+            bs = await ctx.tdb.employee_business_statuses.find_one(
+                {"company_id": ctx.company_id, "id": employee["current_employee_status_id"]}, NO_ID)
+        new_legacy = emp_status.legacy_for(bs["system_category"]) if bs else payload.status
+        action = "restore"
+    else:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Perubahan aktif/nonaktif karyawan dilakukan melalui aksi 'Ubah Status' agar riwayat tercatat.",
+        )
+    before, after = await repo.set_status(employee_id, new_legacy, ctx.user_id)
     await log_action(
         ctx, action, "employee", employee_id, employee.get("full_name"), before=before, after=after
     )
@@ -589,7 +728,15 @@ async def import_commit(
             if data.get("nik"):
                 await repo.ensure_unique("nik", data["nik"], label="Nomor KTP")
 
+            # Upgrade 01B: template Excel TIDAK berubah; status bisnis = default tenant.
+            data.pop("status", None)
+            status_row = await emp_status.prepare_new_employee(cid, data)
             employee = await repo.create(data, ctx.user_id)
+            await asg.create_initial_for_new_employee(cid, employee, "IMPORT", ctx.user_id, emp_status.today_local())  # 01D
+            await emp_status.record_initial_history(
+                cid, employee, status_row, "IMPORT", ctx.user_id,
+                ctx.user.get("full_name") if ctx.user else None, "Status awal dari impor Excel",
+            )
 
             if basic_salary or ptkp_status:
                 sal_repo = TenantRepository("employee_salaries", cid)

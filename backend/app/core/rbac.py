@@ -8,7 +8,7 @@ by the seeder.
 """
 from typing import Dict, List
 
-ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "view_own"]
+ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "view_own", "manage", "change", "import"]
 
 ACTION_LABELS = {
     "view": "Lihat",
@@ -19,6 +19,11 @@ ACTION_LABELS = {
     "export": "Ekspor",
     "config": "Konfigurasi",
     "view_own": "Lihat Milik Sendiri",
+    # Upgrade 01B - Status Karyawan
+    "manage": "Kelola",
+    "change": "Ubah Status",
+    # Upgrade 01E - impor/migrasi massal Excel (hak khusus, tidak otomatis dari create/edit)
+    "import": "Impor Massal",
 }
 
 # resource_key -> (label_id, module_key, [allowed actions])
@@ -46,7 +51,11 @@ RESOURCES: Dict[str, tuple] = {
     "audit_log": ("Audit Log", "hr_core", ["view", "export"]),
     "settings": ("Pengaturan Sistem", "hr_core", ["view", "config"]),
     # Future modules - permissions prepared, business logic intentionally not built yet
-    "employee": ("Data Karyawan", "employee_core", ["view", "create", "edit", "delete", "export"]),
+    # Upgrade 01E: `import` = impor/migrasi massal Excel (bukan turunan create/edit).
+    "employee": ("Data Karyawan", "employee_core", ["view", "create", "edit", "delete", "export", "import"]),
+    # Upgrade 01B: manage = kelola Master Status Karyawan; change = Ubah Status karyawan.
+    # Lihat status & riwayat mengikuti employee:view.
+    "employee_status": ("Status Karyawan", "employee_core", ["manage", "change"]),
     "certification": ("Sertifikasi Karyawan", "employee_core", ["view", "create", "edit", "delete", "export"]),
     "recruitment": ("Rekrutmen", "recruitment", ["view", "create", "edit", "delete", "approve", "export"]),
     "contract": ("Kontrak Kerja", "employee_core", ["view", "create", "edit", "delete", "approve"]),
@@ -142,9 +151,16 @@ def default_role_permissions() -> Dict[str, List[str]]:
            "payroll_component:delete",
            "employee_salary:view", "employee_salary:create", "employee_salary:edit",
            "employee_salary:export", "payslip:view_own"]
+        # Upgrade 01B - kelola Master Status Karyawan & Ubah Status
+        + ["employee_status:manage", "employee_status:change"]
+        # Upgrade 01E - impor massal karyawan
+        + ["employee:import"]
     )
+    # hr_manager mewarisi hr_admin; hak Status Karyawan 01B dan impor massal 01E hanya untuk
+    # Tenant Admin / Company Owner / HR Admin (keputusan user) -> dikeluarkan.
+    _hr_manager_excluded = {"employee_status:manage", "employee_status:change", "employee:import"}
 
-    hr_manager = hr_admin + [
+    hr_manager = [k for k in hr_admin if k not in _hr_manager_excluded] + [
         "approval_workflow:create", "approval_workflow:edit", "approval_workflow:delete",
         "approval_workflow:config", "policy:create", "policy:edit", "policy:delete",
         "policy:config", "audit_log:export", "settings:config", "company:edit",

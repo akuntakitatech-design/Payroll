@@ -21,6 +21,7 @@ import json
 import logging
 import re
 import uuid
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -149,6 +150,20 @@ TENANT_COLLECTIONS = [
     "leave_ledger",
     "leave_balances",
     "overtime_requests",
+    # ------------------------------------------------------------------
+    # Upgrade 01B - Status Karyawan (status bisnis tenant) + riwayatnya.
+    # Terpisah dari `employment_statuses` (status hubungan kerja: PKWT/PKWTT).
+    # ------------------------------------------------------------------
+    "employee_business_statuses",
+    "employee_status_history",
+    # Upgrade 01C - anggota keluarga karyawan (repeatable, bukan kolom anak_1/anak_2)
+    "employee_family_members",
+    # Upgrade 01D - penempatan karyawan (current + riwayat)
+    "employee_assignments",
+    # Upgrade 01E - migrasi/impor Excel karyawan (metadata batch + hasil analisis per karyawan).
+    # Tidak menyimpan file Excel mentah; nilai sensitif di hasil analisis selalu dimasking.
+    "employee_import_batches",
+    "employee_import_rows",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
@@ -266,6 +281,13 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "notes": "t", "user_id": "fk", "is_demo_data": "b",
         # Rekrutmen Tahap C: jejak asal karyawan (kandidat) — unik per perusahaan
         "candidate_id": "fk",
+        # Upgrade 01B: status bisnis saat ini -> employee_business_statuses.id
+        # (field legacy `status` active/inactive/archived tetap dipertahankan).
+        "current_employee_status_id": "fk",
+        # Upgrade 01C - Profile 360 (alamat KTP = `address`, email pribadi = `email`)
+        "domicile_address": "t", "province": "s", "postal_code": "s32",
+        # Upgrade 01C - foto profil (object storage tenant-aware, disajikan lewat proxy API)
+        "photo_path": "s512", "photo_version": "s32",
     },
     "employee_contracts": {
         "employee_id": "fk", "contract_type_id": "fk", "contract_number": "s", "start_date": "s32",
@@ -361,6 +383,50 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         # approval (Tahap B): ronde approval aktif; naik bila kelak ada resubmit
         "approval_round": "i",
         "notes": "t", "is_demo_data": "b",
+    },
+    # Upgrade 01B - master status bisnis per tenant. system_category terkunci:
+    # ACTIVE | STANDBY | INACTIVE (UI: AKTIF | STANDBY | TIDAK AKTIF).
+    "employee_business_statuses": {
+        **MASTER, "system_category": "s32", "is_active": "b", "is_default": "b", "sort_order": "i",
+    },
+    # Upgrade 01B - riwayat perubahan status karyawan (append-only).
+    # source: MANUAL | LEGACY_BASELINE | IMPORT | SYSTEM
+    "employee_status_history": {
+        "employee_id": "fk", "previous_status_id": "fk", "new_status_id": "fk",
+        "previous_category": "s32", "new_category": "s32", "effective_date": "s32",
+        "reason": "s512", "notes": "t", "source": "s32", "changed_by": "fk", "changed_by_name": "s",
+        "legacy_status_before": "s64", "legacy_status_after": "s64",
+    },
+    # Upgrade 01C - anggota keluarga (repeatable). relationship: SUAMI|ISTRI|ANAK|AYAH|IBU|SAUDARA|LAINNYA
+    "employee_family_members": {
+        "employee_id": "fk", "relationship": "s32", "full_name": "s", "nik": "s64",
+        "birth_place": "s", "birth_date": "s32", "gender": "s64", "occupation": "s",
+        "is_emergency_contact": "b", "phone": "s64", "notes": "t",
+    },
+    # Upgrade 01D - penempatan. assignment_status: ACTIVE | ENDED (kolom `status` generik tetap 'active').
+    # source: LEGACY_BASELINE | MANUAL | TRANSFER | EMPLOYEE_CREATE | IMPORT | RECRUITMENT
+    "employee_assignments": {
+        "employee_id": "fk", "project_id": "fk", "work_location_id": "fk", "branch_id": "fk",
+        "department_id": "fk", "division_id": "fk", "position_id": "fk", "cost_center_id": "fk",
+        "start_date": "s32", "end_date": "s32", "assignment_status": "s32", "source": "s32",
+        "reason": "s512", "notes": "t", "end_reason": "s512", "end_notes": "t", "ended_by": "fk",
+        "previous_assignment_id": "fk",
+    },
+    # Upgrade 01E - batch impor. batch_status: ANALYZED | COMMITTING | COMMITTED | PARTIAL | FAILED | CANCELLED
+    "employee_import_batches": {
+        "batch_number": "s64", "batch_status": "s32", "file_name": "s", "file_hash": "s64", "file_size": "i",
+        "mapping_version": "s64", "total_employees": "i", "count_new": "i", "count_update": "i",
+        "count_unchanged": "i", "count_conflict": "i", "count_error": "i", "committed_count": "i",
+        "failed_count": "i", "skipped_count": "i", "uploaded_by": "fk", "uploaded_by_name": "s",
+        "analyzed_at": "dt", "committed_at": "dt", "committed_by": "fk", "committed_by_name": "s",
+        "duplicate_of_batch_id": "fk", "warnings": "j", "notes": "t",
+    },
+    # Upgrade 01E - hasil analisis per karyawan (business key = nomor karyawan).
+    # row_class: NEW | UPDATE | UNCHANGED | CONFLICT | ERROR ; commit_status: PENDING | COMMITTED | FAILED | SKIPPED
+    "employee_import_rows": {
+        "batch_id": "fk", "employee_number": "s64", "employee_id": "fk", "full_name": "s", "row_class": "s32",
+        "commit_status": "s32", "source_rows": "j", "changes": "j", "errors": "j", "warnings": "j",
+        "change_signature": "s64", "commit_error": "t", "committed_at": "dt", "seq": "i",
     },
     "candidate_status_history": {
         "candidate_id": "fk", "action": "s64", "from_status": "s64", "to_status": "s64",
@@ -562,6 +628,7 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "approval_steps": [("ix_steps_workflow", ["company_id", "workflow_id", "step_order"], False)],
     "documents": [("ix_documents_owner", ["company_id", "owner_type", "owner_id"], False)],
     "employees": [
+        ("ix_employee_current_status", ["company_id", "current_employee_status_id"], False),
         ("ix_employee_number", ["company_id", "employee_number"], False),
         ("ix_employee_name", ["company_id", "full_name"], False),
         ("ix_employee_department", ["company_id", "department_id"], False),
@@ -595,6 +662,26 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("ix_candidate_nik", ["company_id", "nik"], False),
         ("ix_candidate_name", ["company_id", "full_name"], False),
         ("ix_candidate_employee", ["company_id", "employee_id"], False),
+    ],
+    "employee_business_statuses": [
+        ("ux_employee_business_status_code", ["company_id", "code"], True),
+    ],
+    "employee_status_history": [
+        ("ix_employee_status_history", ["company_id", "employee_id", "created_at"], False),
+    ],
+    "employee_family_members": [
+        ("ix_employee_family_employee", ["company_id", "employee_id"], False),
+    ],
+    "employee_assignments": [
+        ("ix_employee_assignment_employee", ["company_id", "employee_id", "assignment_status"], False),
+    ],
+    "employee_import_batches": [
+        ("ix_employee_import_batch_recent", ["company_id", "created_at"], False),
+        ("ix_employee_import_batch_hash", ["company_id", "file_hash"], False),
+    ],
+    "employee_import_rows": [
+        ("ix_employee_import_row_batch", ["company_id", "batch_id", "seq"], False),
+        ("ix_employee_import_row_class", ["company_id", "batch_id", "row_class"], False),
     ],
     "candidate_status_history": [
         ("ix_candidate_history", ["company_id", "candidate_id", "changed_at"], False),
@@ -1626,3 +1713,45 @@ def audit_fields(user_id: Optional[str], creating: bool = True) -> Dict[str, Any
     if creating:
         return {"created_at": ts, "updated_at": ts, "created_by": user_id, "updated_by": user_id}
     return {"updated_at": ts, "updated_by": user_id}
+
+
+# ---------------------------------------------------------------- transaksi
+class _TxWriter:
+    """Penulis multi-tabel dalam SATU transaksi DB (dipakai alur yang wajib atomik,
+    mis. Ubah Status Karyawan: employee + riwayat + audit). Jika satu langkah gagal,
+    seluruh perubahan di-rollback oleh ``transaction()``."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def select_one_for_update(self, table_name: str, flt: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        table = get_table(table_name)
+        res = await self.conn.execute(
+            sa.select(table).where(compile_filter(table, flt)).limit(1).with_for_update()
+        )
+        row = res.fetchone()
+        return _row_to_doc(row) if row is not None else None
+
+    async def insert(self, table_name: str, doc: Dict[str, Any]) -> str:
+        table = get_table(table_name)
+        if not doc.get("id"):
+            doc["id"] = new_id()
+        await self.conn.execute(sa.insert(table).values(**_doc_to_row(table, doc)))
+        return doc["id"]
+
+    async def update(self, table_name: str, flt: Dict[str, Any], values: Dict[str, Any]) -> int:
+        table = get_table(table_name)
+        row = {k: v for k, v in _doc_to_row(table, values).items() if k in values}
+        res = await self.conn.execute(sa.update(table).where(compile_filter(table, flt)).values(**row))
+        return res.rowcount or 0
+
+
+@asynccontextmanager
+async def transaction():
+    if read_only_enabled():
+        raise ReadOnlyError("multi-tabel", "transaction")
+    try:
+        async with get_engine().begin() as conn:
+            yield _TxWriter(conn)
+    except IntegrityError as exc:
+        raise _duplicate_http(exc) from exc
