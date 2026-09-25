@@ -33,6 +33,7 @@ import {
   MailCheck,
   Palette,
   Gauge,
+  UserCheck,
 } from "lucide-react";
 
 /**
@@ -76,6 +77,7 @@ export const NAV_GROUPS = [
     label: "Data Referensi",
     items: [
       { key: "employment-statuses", label: "Status Kepegawaian", to: "/setup/employment-statuses", icon: IdCard, resource: "employment_status", action: "view" },
+      { key: "employee-statuses", label: "Status Karyawan", to: "/setup/employee-statuses", icon: UserCheck, resource: "employee", action: "view" },
       { key: "contract-types", label: "Tipe Kontrak", to: "/setup/contract-types", icon: FileSignature, resource: "contract_type", action: "view" },
       { key: "certification-types", label: "Tipe Sertifikasi", to: "/setup/certification-types", icon: Award, resource: "certification_type", action: "view" },
       { key: "document-types", label: "Tipe Dokumen", to: "/setup/document-types", icon: FileText, resource: "document_type", action: "view" },

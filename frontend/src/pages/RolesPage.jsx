@@ -19,8 +19,10 @@ const ACTION_LABELS = {
   approve: "Setujui",
   export: "Ekspor",
   config: "Konfigurasi",
+  manage: "Kelola",
+  change: "Ubah Status",
 };
-const ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config"];
+const ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "manage", "change"];
 
 const RolesPage = () => {
   const { can, isSuperAdmin } = useAuth();

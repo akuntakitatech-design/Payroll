@@ -365,6 +365,9 @@ async def convert_candidate(candidate_id: str, payload: CandidateConvertInput, c
         data["candidate_id"] = candidate_id
         if data.get("nik"):
             await repo.ensure_unique("nik", data["nik"], label="Nomor KTP")
+        # Upgrade 01B: status bisnis default tenant untuk karyawan hasil konversi
+        from ..core import employee_status as emp_status
+        status_row = await emp_status.prepare_new_employee(ctx.company_id, data)
         employee = await repo.create(data, ctx.user_id)
     except Exception as exc:
         # kompensasi: lepaskan klaim agar kandidat bisa dicoba lagi
@@ -385,6 +388,14 @@ async def convert_candidate(candidate_id: str, payload: CandidateConvertInput, c
     )
     note = f"Dikonversi menjadi karyawan {employee.get('employee_number')} (offering v{offering.get('version')})"
     await _add_history(ctx, candidate_id, "candidate_converted", "offering_accepted", "hired", note)
+    # Riwayat awal status bisnis (setelah karyawan tertaut ke kandidat)
+    await emp_status.record_initial_history(
+        ctx.company_id, employee, status_row, "SYSTEM", ctx.user_id,
+        ctx.user.get("full_name") if ctx.user else None, "Status awal dari konversi kandidat",
+    )
+    # Upgrade 01D: karyawan hasil konversi dengan project -> assignment ACTIVE pertama
+    from ..core import assignment as asg
+    await asg.create_initial_for_new_employee(ctx.company_id, employee, "RECRUITMENT", ctx.user_id, emp_status.today_local())
     await log_action(ctx, "candidate_converted_to_employee", RES_CANDIDATE, candidate_id, candidate.get("full_name"),
                      before=candidate, after={**claimed, "employee_id": employee["id"]}, module=MODULE, notes=note)
     await log_action(ctx, "employee_created_from_recruitment", "employee", employee["id"], employee.get("full_name"),

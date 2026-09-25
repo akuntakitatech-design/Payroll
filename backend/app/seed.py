@@ -1388,6 +1388,12 @@ async def run_seed() -> Dict[str, Any]:
     from .seed_time import seed_time_management
 
     await seed_time_management(company_ids)
+    # Upgrade 01B — status karyawan default + baseline (hanya saat seed EKSPLISIT)
+    from .core.employee_status import backfill_company, ensure_default_statuses
+
+    for cid in (company_ids.values() if isinstance(company_ids, dict) else company_ids):
+        await ensure_default_statuses(cid)
+        await backfill_company(cid)
     return {"companies": company_ids, "password": DEMO_PASSWORD, "users": [u[0] for u in DEMO_USERS]}
 
 

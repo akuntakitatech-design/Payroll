@@ -20,6 +20,10 @@ from app.routers import (
     contracts,
     dashboard,
     documents,
+    employee_assignment,
+    employee_import,
+    employee_profile,
+    employee_status,
     employees,
     leave,
     master,
@@ -111,6 +115,10 @@ api.include_router(users.router)
 api.include_router(approvals.router)
 api.include_router(documents.router)
 api.include_router(employees.router)
+api.include_router(employee_status.router)  # Upgrade 01B
+api.include_router(employee_profile.router)  # Upgrade 01C
+api.include_router(employee_assignment.router)  # Upgrade 01D
+api.include_router(employee_import.router)  # Upgrade 01E
 api.include_router(contracts.router)
 api.include_router(certifications.router)
 api.include_router(reminders.router)

@@ -11,6 +11,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import CompanyProfilePage from "@/pages/CompanyProfilePage";
 import SetupHubPage from "@/pages/SetupHubPage";
 import MasterDataPage from "@/pages/MasterDataPage";
+import EmployeeStatusMasterPage from "@/pages/EmployeeStatusMasterPage";
 import ModuleActivationPage from "@/pages/ModuleActivationPage";
 import PoliciesPage from "@/pages/PoliciesPage";
 import ApprovalWorkflowPage from "@/pages/ApprovalWorkflowPage";
@@ -29,6 +30,7 @@ import AuditLogPage from "@/pages/AuditLogPage";
 import SettingsPage from "@/pages/SettingsPage";
 import ProfilePage from "@/pages/ProfilePage";
 import EmployeeImportPage from "@/pages/EmployeeImportPage";
+import EmployeeMigrationPage from "@/pages/EmployeeMigrationPage";
 import PayrollRunsPage from "@/pages/PayrollRunsPage";
 import PayrollRunDetailPage from "@/pages/PayrollRunDetailPage";
 import PayrollComponentsPage from "@/pages/PayrollComponentsPage";
@@ -127,6 +129,7 @@ const AppRoutes = () => (
       {MASTER_ROUTES.map((path) => (
         <Route key={path} path={`/setup/${path}`} element={<MasterDataPage resourcePath={path} />} />
       ))}
+      <Route path="/setup/employee-statuses" element={<EmployeeStatusMasterPage />} />
       <Route path="/setup/modules" element={<ModuleActivationPage />} />
       <Route path="/setup/policies" element={<PoliciesPage />} />
       <Route path="/setup/approval-workflows" element={<ApprovalWorkflowPage />} />
@@ -139,6 +142,7 @@ const AppRoutes = () => (
       <Route path="/documents" element={<DocumentsPage />} />
       <Route path="/employees" element={<EmployeesPage />} />
       <Route path="/employees/import" element={<EmployeeImportPage />} />
+      <Route path="/employees/migration" element={<EmployeeMigrationPage />} />
       <Route path="/employees/:employeeId" element={<EmployeeDetailPage />} />
       <Route path="/payroll/runs" element={<PayrollRunsPage />} />
       <Route path="/payroll/runs/:runId" element={<PayrollRunDetailPage />} />
