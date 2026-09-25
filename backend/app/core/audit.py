@@ -35,11 +35,14 @@ async def log_action(
     module: Optional[str] = None,
     company_id: Optional[str] = None,
     notes: Optional[str] = None,
+    platform_scope: bool = False,
 ) -> Dict[str, Any]:
     db = get_db()
+    # platform_scope=True: aksi level platform (mis. branding) TIDAK dicatat di tenant
+    # aktif Platform Admin agar tidak muncul di audit log tenant mana pun.
     entry = {
         "id": new_id(),
-        "company_id": company_id or (ctx.company_id if ctx else None),
+        "company_id": None if platform_scope else (company_id or (ctx.company_id if ctx else None)),
         "user_id": ctx.user_id if ctx else None,
         "user_name": ctx.user.get("full_name") if ctx else None,
         "user_email": ctx.user.get("email") if ctx else None,

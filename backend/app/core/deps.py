@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .db import NO_ID, get_db
 from .rbac import WILDCARD, resource_module
+from .tenant_subscription import subscription_info, tenant_block_reason
 from .security import decode_token
 from .tenancy import TenantDatabase, get_tenant_db
 
@@ -68,6 +69,11 @@ class AuthContext:
 
     def has_module(self, module_key: str) -> bool:
         return module_key in self.modules
+
+    @property
+    def is_platform_admin(self) -> bool:
+        """Alias eksplisit: Platform Admin = role global `super_admin`."""
+        return self.is_super_admin
 
     @property
     def ip(self) -> Optional[str]:
@@ -131,16 +137,78 @@ async def company_modules(company_id: Optional[str]) -> Set[str]:
 
 
 async def accessible_companies(user_id: str) -> List[Dict[str, Any]]:
+    """Tenant yang boleh dimasuki user.
+
+    - Platform Admin: semua tenant kecuali `archived` (termasuk tenant nonaktif,
+      agar Platform Admin tetap dapat meninjau datanya).
+    - User tenant: hanya tenant tempat ia menjadi anggota, berstatus operasional `active`,
+      DAN masa layanannya belum EXPIRED (GRACE masih boleh). Tenant yang diblokir
+      tidak muncul di pemilih perusahaan dan tidak dapat dimasuki.
+    Setiap item dilengkapi `subscription` (status masa layanan yang dihitung).
+    """
     db = get_db()
     info = await effective_permissions(user_id, None)
     if info["is_super_admin"]:
-        return await db.companies.find({"status": {"$ne": "archived"}}, NO_ID).sort("name", 1).to_list(500)
+        rows = await db.companies.find({"status": {"$ne": "archived"}}, NO_ID).sort("name", 1).to_list(500)
+        return [with_subscription(c) for c in rows]
     ids = sorted({m["company_id"] for m in info["memberships"] if m.get("company_id")})
     if not ids:
         return []
-    return await db.companies.find(
-        {"id": {"$in": ids}, "status": {"$ne": "archived"}}, NO_ID
+    rows = await db.companies.find(
+        {"id": {"$in": ids}, "status": "active"}, NO_ID
     ).sort("name", 1).to_list(500)
+    return [with_subscription(c) for c in rows if tenant_block_reason(c) is None]
+
+
+def with_subscription(company: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Lampirkan status masa layanan (dihitung, tidak disimpan) ke dokumen tenant."""
+    if company is not None:
+        company["subscription"] = subscription_info(company)
+    return company
+
+
+TENANT_INACTIVE_HEADER = {"X-Tenant-Status": "inactive"}
+TENANT_EXPIRED_HEADER = {"X-Tenant-Status": "expired"}
+
+
+def tenant_inactive_error(company: Optional[Dict[str, Any]]) -> HTTPException:
+    name = (company or {}).get("name") or "Tenant"
+    return HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        f"{name} sedang dinonaktifkan oleh Platform Admin. Operasional dihentikan sementara; "
+        "seluruh data tetap tersimpan dan akan tersedia kembali setelah tenant diaktifkan.",
+        headers=TENANT_INACTIVE_HEADER,
+    )
+
+
+def tenant_expired_error(company: Optional[Dict[str, Any]]) -> HTTPException:
+    name = (company or {}).get("name") or "Tenant"
+    return HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        f"Masa layanan tenant telah berakhir. Silakan hubungi administrator platform. "
+        f"({name}: seluruh data tetap tersimpan dan langsung dapat digunakan kembali setelah masa layanan diperpanjang.)",
+        headers=TENANT_EXPIRED_HEADER,
+    )
+
+
+def tenant_block_error(company: Optional[Dict[str, Any]]) -> Optional[HTTPException]:
+    """Aturan final: diblokir bila status operasional != active ATAU masa layanan EXPIRED."""
+    reason = tenant_block_reason(company)
+    if reason == "inactive":
+        return tenant_inactive_error(company)
+    if reason == "expired":
+        return tenant_expired_error(company)
+    return None
+
+
+# Endpoint yang tetap boleh diakses saat akun masih memakai password sementara.
+PASSWORD_CHANGE_ALLOWED_PATHS = frozenset(
+    {
+        "/api/auth/me",
+        "/api/auth/change-password",
+        "/api/auth/logout",
+    }
+)
 
 
 async def _base_auth(
@@ -184,6 +252,15 @@ async def _base_auth(
     if user.get("status") != "active":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Akun Anda tidak aktif. Hubungi administrator.")
 
+    # Password sementara (akun baru / hasil reset): wajib ganti password dulu.
+    # Ditegakkan di backend, bukan hanya redirect UI.
+    if user.get("must_change_password") and request.url.path not in PASSWORD_CHANGE_ALLOWED_PATHS:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Anda wajib mengganti password sementara sebelum menggunakan aplikasi.",
+            headers={"X-Password-Change-Required": "true"},
+        )
+
     # Gelombang 2: izin bergantung pada daftar peran hasil gelombang 1.
     info = await _permissions_from_memberships(memberships, company_id)
 
@@ -198,6 +275,13 @@ async def _base_auth(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Perusahaan tidak ditemukan.")
         if company.get("status") == "archived":
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Perusahaan ini sudah diarsipkan.")
+        # Soft-disable tenant / masa layanan EXPIRED: user tenant tidak dapat menjalankan
+        # operasional apa pun. Platform Admin tetap boleh masuk (review, support, perpanjangan).
+        if not info["is_super_admin"]:
+            blocked = tenant_block_error(company)
+            if blocked:
+                raise blocked
+        with_subscription(company)
 
     modules: Set[str] = set()
     if company_id:
@@ -260,6 +344,21 @@ def require_super_admin():
     async def _dep(ctx: AuthContext = Depends(get_auth_optional_company)) -> AuthContext:
         if not ctx.is_super_admin:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Super Admin yang dapat melakukan ini.")
+        return ctx
+
+    return _dep
+
+
+def require_platform_admin():
+    """Hanya Platform Admin (role global `super_admin`).
+    Tidak memerlukan tenant aktif; dicek di backend, bukan hanya disembunyikan di UI."""
+
+    async def _dep(ctx: AuthContext = Depends(get_auth_optional_company)) -> AuthContext:
+        if not ctx.is_platform_admin:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Hanya Platform Admin yang dapat mengelola tenant.",
+            )
         return ctx
 
     return _dep

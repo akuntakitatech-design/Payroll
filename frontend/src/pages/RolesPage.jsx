@@ -65,7 +65,11 @@ const RolesPage = () => {
   }, [load]);
 
   const isWildcard = selected.has("*:*");
-  const locked = !canConfig || (activeRole?.key === "super_admin" && !isSuperAdmin);
+  const locked =
+    !canConfig ||
+    (activeRole?.key === "super_admin" && !isSuperAdmin) ||
+    // Peran global/sistem berlaku untuk semua tenant: hanya Platform Admin yang boleh mengubah.
+    (activeRole && activeRole.editable === false);
 
   const grouped = useMemo(() => {
     const byModule = {};
@@ -236,8 +240,10 @@ const RolesPage = () => {
                   <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-border bg-secondary px-3 py-2 text-xs text-secondary-foreground">
                     <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     {activeRole?.key === "super_admin"
-                      ? "Hak akses Super Admin hanya dapat diubah oleh Super Admin."
-                      : "Anda hanya dapat melihat matriks hak akses. Perubahan dilakukan oleh HR Manager atau Pemilik Perusahaan."}
+                      ? "Hak akses Platform Admin hanya dapat diubah oleh Platform Admin."
+                      : activeRole?.editable === false
+                        ? "Peran sistem/global berlaku untuk semua tenant, sehingga hanya dapat diubah oleh Platform Admin. Buat peran khusus tenant bila membutuhkan hak akses berbeda."
+                        : "Anda hanya dapat melihat matriks hak akses. Perubahan dilakukan oleh HR Manager atau Pemilik Perusahaan."}
                   </p>
                 )}
                 {isWildcard && (

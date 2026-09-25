@@ -31,6 +31,8 @@ import {
   Coins,
   Percent,
   MailCheck,
+  Palette,
+  Gauge,
 } from "lucide-react";
 
 /**
@@ -38,6 +40,14 @@ import {
  * The backend enforces the same rules - the UI only hides what is irrelevant.
  */
 export const NAV_GROUPS = [
+  {
+    key: "platform",
+    label: "Platform",
+    items: [
+      // Khusus Platform Admin (backend tetap menolak 403 untuk selain itu).
+      { key: "platform-console", label: "Konsol Platform", to: "/platform", icon: Gauge, resource: null, platformOnly: true },
+    ],
+  },
   {
     key: "overview",
     label: "Ringkasan",
@@ -236,12 +246,30 @@ export const MODULE_INFO = {
   },
 };
 
-export const filterNav = ({ can, hasModule }) =>
+/** Sidebar khusus Platform Admin (mode platform: /platform/*). */
+export const PLATFORM_NAV = [
+  {
+    key: "platform-main",
+    label: "Konsol Platform",
+    items: [
+      { key: "platform-dashboard", label: "Platform Dashboard", to: "/platform", icon: Gauge, end: true },
+      { key: "platform-tenants", label: "Tenant Registry", to: "/platform/tenants", icon: Building2 },
+    ],
+  },
+  {
+    key: "platform-settings",
+    label: "Pengaturan Platform",
+    items: [{ key: "platform-branding", label: "Branding Platform", to: "/platform/branding", icon: Palette }],
+  },
+];
+
+export const filterNav = ({ can, hasModule, isPlatformAdmin = false }) =>
   NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter(
       (item) =>
         !item.hidden &&
+        (!item.platformOnly || isPlatformAdmin) &&
         (!item.resource || can(item.resource, item.action || "view")) &&
         hasModule(item.module)
     ),

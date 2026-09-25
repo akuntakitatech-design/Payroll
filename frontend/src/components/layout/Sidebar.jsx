@@ -1,9 +1,11 @@
 import React from "react";
-import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Building2 } from "lucide-react";
+import { NavLink, useLocation } from "react-router-dom";
+import { ArrowLeftRight, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-import { filterNav } from "@/lib/nav";
+import { filterNav, PLATFORM_NAV } from "@/lib/nav";
+import { PlatformLogo, useBranding } from "@/lib/branding";
+import { logoVersion, TenantLogo } from "@/components/common/TenantLogo";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -16,7 +18,7 @@ const NavItem = ({ item, collapsed, onNavigate }) => {
   const content = (
     <NavLink
       to={item.to}
-      end={item.to === "/" || item.to === "/setup"}
+      end={item.end || item.to === "/" || item.to === "/setup"}
       onClick={onNavigate}
       data-testid={`sidebar-nav-item-${item.key}`}
       className={({ isActive }) =>
@@ -53,32 +55,51 @@ const NavItem = ({ item, collapsed, onNavigate }) => {
   );
 };
 
+export const usePlatformMode = () => {
+  const { isSuperAdmin } = useAuth();
+  const { pathname } = useLocation();
+  return isSuperAdmin && pathname.startsWith("/platform");
+};
+
 export const SidebarContent = ({ collapsed = false, onNavigate }) => {
-  const { can, hasModule, company } = useAuth();
-  const groups = filterNav({ can, hasModule });
+  const { can, hasModule, company, isSuperAdmin } = useAuth();
+  const { branding } = useBranding();
+  const platformMode = usePlatformMode();
+  const groups = platformMode ? PLATFORM_NAV : filterNav({ can, hasModule, isPlatformAdmin: isSuperAdmin });
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col bg-card">
-        {/* Identitas produk */}
+      <div className="flex h-full flex-col bg-card" data-testid={platformMode ? "sidebar-platform-mode" : "sidebar-tenant-mode"}>
+        {/* Identitas: mode platform = logo PLATFORM; mode tenant = logo & nama TENANT */}
         <div
           className={cn(
             "flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4",
             collapsed && "justify-center px-2"
           )}
+          data-testid="sidebar-identity"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
-            <Building2 className="h-4 w-4" strokeWidth={2} />
-          </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="text-[13.5px] font-bold leading-tight tracking-[-0.01em] text-ink-1">
-                HRIS &amp; Payroll
-              </p>
-              <p className="truncate text-[11px] leading-tight text-ink-3">
-                {company?.code ? `Perusahaan ${company.code}` : "Multi Perusahaan"}
-              </p>
-            </div>
+          {platformMode ? (
+            <PlatformLogo variant={collapsed ? "mark" : "full"} size="sm" testId="sidebar-platform-logo" />
+          ) : (
+            <>
+              <TenantLogo
+                size="sm"
+                hasLogo={!!company?.logo_path}
+                version={logoVersion(company)}
+                name={company?.name}
+                testId="sidebar-tenant-logo"
+              />
+              {!collapsed && (
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-bold leading-tight tracking-[-0.01em] text-ink-1" data-testid="sidebar-tenant-name">
+                    {company?.name || branding.app_name}
+                  </p>
+                  <p className="truncate text-[11px] leading-tight text-ink-3" data-testid="sidebar-tenant-code">
+                    {company?.code ? `Kode ${company.code}` : branding.subtitle}
+                  </p>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -100,6 +121,28 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
             ))}
           </nav>
         </ScrollArea>
+
+        {!collapsed && (
+          <div className="shrink-0 border-t border-border px-4 py-3">
+            {platformMode ? (
+              company ? (
+                <NavLink
+                  to="/"
+                  onClick={onNavigate}
+                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-ink-2 transition-colors duration-150 hover:bg-accent hover:text-ink-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid="sidebar-open-tenant-context"
+                >
+                  <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">Buka konteks tenant: {company.code}</span>
+                </NavLink>
+              ) : null
+            ) : (
+              <p className="flex items-center gap-1.5 text-[11px] text-ink-3" data-testid="sidebar-powered-by">
+                Powered by <span className="font-semibold text-ink-2">{branding.app_name}</span>
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );

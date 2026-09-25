@@ -12,7 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 
 const ROLE_LABELS = {
-  super_admin: "Super Admin",
+  super_admin: "Platform Admin",
+  tenant_admin: "Tenant Admin",
   company_owner: "Pemilik Perusahaan",
   hr_admin: "HR Admin",
   hr_manager: "HR Manager",
@@ -23,7 +24,7 @@ const ROLE_LABELS = {
 };
 
 const ProfilePage = () => {
-  const { user, company, companies, roleKeys } = useAuth();
+  const { user, company, companies, roleKeys, refreshSession } = useAuth();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
@@ -53,6 +54,7 @@ const ProfilePage = () => {
     try {
       await api.post("/auth/change-password", { current_password: current, new_password: next });
       toast.success("Kata sandi berhasil diperbarui.");
+      refreshSession();
       setCurrent("");
       setNext("");
       setConfirmPwd("");

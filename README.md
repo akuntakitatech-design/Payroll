@@ -352,7 +352,7 @@ Buka `http://localhost:3000`, login dengan salah satu akun demo di atas. Dokumen
 |----------|------|------------|
 | `DATABASE_URL` | backend | Connection string MariaDB, mis. `mysql://user:pass@host:3306/hris_payroll` (alternatif: `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`) |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL` | backend | Kredensial Cloudflare R2 untuk penyimpanan dokumen |
-| `AUTO_SEED` | backend | `true` = isi data demo saat startup (idempoten) |
+| `AUTO_SEED` | backend | Default `false`: startup tidak mengubah data bisnis. `true` = isi data demo saat startup (idempoten), hanya untuk demo/lokal. Seed eksplisit: `python -m app.seed` |
 | `CORS_ORIGINS` | backend | Daftar origin dipisah koma, atau `*` |
 | `JWT_SECRET` | backend | Secret penandatanganan JWT (wajib diganti di produksi) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_DAYS` | backend | Umur token (default 720 / 14) |
@@ -387,7 +387,7 @@ Buat resource **MariaDB** di project. Catat *internal URL*-nya, bentuknya
 DATABASE_URL=mysql://USER:PASS@<host-internal-mariadb>:3306/<db>
 JWT_SECRET=<acak panjang>
 CORS_ORIGINS=https://hris.akuntakita.com
-AUTO_SEED=true
+AUTO_SEED=false
 MAX_UPLOAD_MB=15
 R2_ACCOUNT_ID=<cloudflare account id>
 R2_ACCESS_KEY_ID=<r2 access key>

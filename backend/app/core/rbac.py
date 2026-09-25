@@ -76,8 +76,9 @@ MODULES: List[dict] = [
 ]
 
 ROLES: List[dict] = [
-    {"key": "super_admin", "name": "Super Admin", "description": "Akses penuh seluruh sistem dan semua perusahaan.", "is_system": True, "scope": "global", "sort_order": 1},
-    {"key": "company_owner", "name": "Pemilik Perusahaan", "description": "Akses penuh dalam satu perusahaan.", "is_system": True, "scope": "company", "sort_order": 2},
+    {"key": "super_admin", "name": "Platform Admin", "description": "Admin Platform KelolaKita (di atas tenant): kelola tenant, tunjuk Tenant Admin, akses semua tenant.", "is_system": True, "scope": "global", "sort_order": 1},
+    {"key": "tenant_admin", "name": "Tenant Admin", "description": "Administrator dalam satu tenant: pengguna, peran tenant, master, karyawan, proyek, dan modul. Tidak dapat membuat/mengubah tenant.", "is_system": True, "scope": "company", "sort_order": 2},
+    {"key": "company_owner", "name": "Pemilik Perusahaan", "description": "Akses penuh dalam satu perusahaan.", "is_system": True, "scope": "company", "sort_order": 3},
     {"key": "hr_admin", "name": "HR Admin", "description": "Mengelola master data, karyawan dan dokumen.", "is_system": True, "scope": "company", "sort_order": 3},
     {"key": "hr_manager", "name": "HR Manager", "description": "Menyetujui proses HR dan mengatur kebijakan.", "is_system": True, "scope": "company", "sort_order": 4},
     {"key": "finance", "name": "Finance", "description": "Payroll, permintaan keuangan dan ekspor data.", "is_system": True, "scope": "company", "sort_order": 5},
@@ -87,6 +88,15 @@ ROLES: List[dict] = [
 ]
 
 WILDCARD = "*:*"
+
+# ---------------------------------------------------------------- tenant
+# Hierarki: PLATFORM KELOLAKITA -> TENANT (= tabel `companies`) -> TENANT ADMIN
+# -> USER TENANT -> DATA TENANT (semua tabel bisnis ber-`company_id`).
+# Platform Admin = role global `super_admin` (user_company_roles.company_id NULL).
+PLATFORM_ADMIN_ROLE = "super_admin"
+TENANT_ADMIN_ROLE = "tenant_admin"
+# Siklus hidup tenant hanya milik Platform Admin; tidak boleh diberikan ke peran tenant.
+PLATFORM_ONLY_PERMISSIONS = {"company:create", "company:delete"}
 
 MASTER_RESOURCES = [
     "branch", "work_location", "department", "division", "position", "job_grade",
@@ -190,6 +200,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
 
     return {
         "super_admin": [WILDCARD],
+        "tenant_admin": sorted(k for k in all_permission_keys() if k not in PLATFORM_ONLY_PERMISSIONS),
         "company_owner": [WILDCARD],
         "hr_admin": sorted(set(hr_admin)),
         "hr_manager": sorted(set(hr_manager)),

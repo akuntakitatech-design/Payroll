@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const ROLE_LABELS = {
-  super_admin: "Super Admin",
+  super_admin: "Platform Admin",
+  tenant_admin: "Tenant Admin",
   company_owner: "Pemilik Perusahaan",
   hr_admin: "HR Admin",
   hr_manager: "HR Manager",
@@ -308,7 +309,7 @@ const UsersPage = () => {
                 <Pencil className="mr-2 h-4 w-4" /> Ubah data &amp; peran
               </DropdownMenuItem>
             )}
-            {can("user", "edit") && companies.length > 1 && (
+            {can("user", "edit") && isSuperAdmin && companies.length > 1 && (
               <DropdownMenuItem
                 onClick={() => {
                   setGrantUser(row);

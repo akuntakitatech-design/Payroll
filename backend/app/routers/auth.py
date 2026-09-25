@@ -13,6 +13,8 @@ from ..core.deps import (
     company_modules,
     effective_permissions,
     get_auth_optional_company,
+    tenant_block_error,
+    with_subscription,
 )
 from ..core.policy import POLICY_GROUPS
 from ..core.rbac import RESOURCES, WILDCARD
@@ -49,6 +51,11 @@ async def build_session(user: Dict[str, Any], company_id: Optional[str]) -> Dict
     modules = await company_modules(company_id)
     db = get_db()
     company = await db.companies.find_one({"id": company_id}, NO_ID) if company_id else None
+    if company and not info["is_super_admin"]:
+        blocked = tenant_block_error(company)  # nonaktif ATAU masa layanan EXPIRED
+        if blocked:
+            raise blocked
+    with_subscription(company)
     return {
         "access_token": create_access_token(user["id"], company_id),
         "refresh_token": create_refresh_token(user["id"]),
@@ -122,6 +129,27 @@ async def login(payload: LoginRequest, request: Request):
     companies = await accessible_companies(user["id"])
     company_id = payload.company_id
     allowed_ids = [c["id"] for c in companies]
+    if not allowed_ids:
+        # User tenant yang seluruh tenant-nya diblokir: dinonaktifkan Platform Admin
+        # atau masa layanannya EXPIRED. Tampilkan alasan yang jelas (bukan error generik).
+        info = await effective_permissions(user["id"], None)
+        member_ids = sorted({m["company_id"] for m in info["memberships"] if m.get("company_id")})
+        if member_ids and not info["is_super_admin"]:
+            members = await db.companies.find({"id": {"$in": member_ids}}, NO_ID).sort("name", 1).to_list(500)
+            blocked_company, blocked = None, None
+            for c in members:
+                err = tenant_block_error(c)
+                if err:
+                    blocked_company, blocked = c, err
+                    break
+            if blocked:
+                reason = (blocked.headers or {}).get("X-Tenant-Status", "blocked")
+                await log_auth_event(
+                    "login_blocked", user, email, ip, ua,
+                    company_id=(blocked_company or {}).get("id"),
+                    notes="Masa layanan tenant berakhir" if reason == "expired" else "Tenant nonaktif",
+                )
+                raise blocked
     if company_id and company_id not in allowed_ids:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Anda tidak memiliki akses ke perusahaan tersebut.")
     if not company_id:
@@ -225,9 +253,14 @@ async def change_password(payload: ChangePasswordRequest, ctx: AuthContext = Dep
     full = await db.users.find_one({"id": ctx.user_id})
     if not verify_password(payload.current_password, full.get("password_hash", "")):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kata sandi saat ini tidak sesuai.")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Kata sandi baru harus berbeda dari kata sandi saat ini."
+        )
     await db.users.update_one(
         {"id": ctx.user_id},
-        {"$set": {"password_hash": hash_password(payload.new_password), "updated_at": now()}},
+        {"$set": {"password_hash": hash_password(payload.new_password), "must_change_password": False,
+                  "updated_at": now()}},
     )
     await log_action(ctx, "change_password", "user", record_id=ctx.user_id, record_label=ctx.user.get("email"))
     return {"message": "Kata sandi berhasil diperbarui."}

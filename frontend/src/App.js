@@ -3,8 +3,10 @@ import "@/App.css";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { BrandingProvider } from "@/lib/branding";
 import AppShell from "@/components/layout/AppShell";
 import LoginPage from "@/pages/LoginPage";
+import ChangePasswordRequiredPage from "@/pages/ChangePasswordRequiredPage";
 import DashboardPage from "@/pages/DashboardPage";
 import CompanyProfilePage from "@/pages/CompanyProfilePage";
 import SetupHubPage from "@/pages/SetupHubPage";
@@ -13,6 +15,11 @@ import ModuleActivationPage from "@/pages/ModuleActivationPage";
 import PoliciesPage from "@/pages/PoliciesPage";
 import ApprovalWorkflowPage from "@/pages/ApprovalWorkflowPage";
 import UsersPage from "@/pages/UsersPage";
+import TenantsPage from "@/pages/platform/TenantsPage";
+import PlatformDashboardPage from "@/pages/platform/PlatformDashboardPage";
+import TenantDetailPage from "@/pages/platform/TenantDetailPage";
+import PlatformBrandingPage from "@/pages/platform/PlatformBrandingPage";
+import EmptyState from "@/components/common/EmptyState";
 import RolesPage from "@/pages/RolesPage";
 import DocumentsPage from "@/pages/DocumentsPage";
 import EmployeesPage from "@/pages/EmployeesPage";
@@ -51,7 +58,7 @@ import OvertimePage from "@/pages/leave/OvertimePage";
 import LeaveBalancesPage from "@/pages/leave/LeaveBalancesPage";
 import LeaveOvertimeApprovalsPage from "@/pages/leave/LeaveOvertimeApprovalsPage";
 import NotFoundPage from "@/pages/NotFoundPage";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldAlert } from "lucide-react";
 
 const FullPageLoader = () => (
   <div className="flex min-h-screen items-center justify-center bg-background">
@@ -66,6 +73,25 @@ const ProtectedRoute = ({ children }) => {
   const location = useLocation();
   if (loading) return <FullPageLoader />;
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  // Password sementara: wajib ganti password sebelum menggunakan aplikasi (backend juga menolak 403).
+  if (session.user?.must_change_password) return <Navigate to="/change-password" replace />;
+  return children;
+};
+
+/** Halaman /platform/* hanya untuk Platform Admin (backend juga menolak 403). */
+const PlatformRoute = ({ children }) => {
+  const { isSuperAdmin } = useAuth();
+  if (!isSuperAdmin) {
+    return (
+      <div className="px-4 py-10 sm:px-6" data-testid="platform-forbidden">
+        <EmptyState
+          icon={ShieldAlert}
+          title="Khusus Platform Admin"
+          description="Halaman ini hanya dapat diakses oleh Platform Admin. Anda tetap dapat menggunakan dashboard tenant Anda."
+        />
+      </div>
+    );
+  }
   return children;
 };
 
@@ -87,6 +113,7 @@ const MASTER_ROUTES = [
 const AppRoutes = () => (
   <Routes>
     <Route path="/login" element={<LoginPage />} />
+    <Route path="/change-password" element={<ChangePasswordRequiredPage />} />
     <Route
       element={
         <ProtectedRoute>
@@ -103,6 +130,10 @@ const AppRoutes = () => (
       <Route path="/setup/modules" element={<ModuleActivationPage />} />
       <Route path="/setup/policies" element={<PoliciesPage />} />
       <Route path="/setup/approval-workflows" element={<ApprovalWorkflowPage />} />
+      <Route path="/platform" element={<PlatformRoute><PlatformDashboardPage /></PlatformRoute>} />
+      <Route path="/platform/tenants" element={<PlatformRoute><TenantsPage /></PlatformRoute>} />
+      <Route path="/platform/tenants/:tenantId" element={<PlatformRoute><TenantDetailPage /></PlatformRoute>} />
+      <Route path="/platform/branding" element={<PlatformRoute><PlatformBrandingPage /></PlatformRoute>} />
       <Route path="/users" element={<UsersPage />} />
       <Route path="/roles" element={<RolesPage />} />
       <Route path="/documents" element={<DocumentsPage />} />
@@ -152,10 +183,12 @@ const AppRoutes = () => (
 function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-        <Toaster />
-      </AuthProvider>
+      <BrandingProvider>
+        <AuthProvider>
+          <AppRoutes />
+          <Toaster />
+        </AuthProvider>
+      </BrandingProvider>
     </BrowserRouter>
   );
 }

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="KelolaKita">
+  <rect x="2" y="4" width="56" height="56" rx="14" fill="#0d7768"/>
+  <path d="M21 17h7v12.2L38.6 17h8.6L35.3 30.2 48 47h-8.7l-9.1-12.3-2.2 2.4V47h-7V17z" fill="#ffffff"/>
+  <circle cx="56" cy="8" r="6" fill="#e5484d" stroke="#ffffff" stroke-width="3"/>
+</svg>

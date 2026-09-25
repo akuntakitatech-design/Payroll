@@ -14,6 +14,7 @@ from app.routers import (
     attendance,
     audit_logs,
     auth,
+    branding,
     certifications,
     companies,
     contracts,
@@ -24,6 +25,7 @@ from app.routers import (
     master,
     overtime,
     payroll,
+    platform,
     policies,
     recruitment,
     recruitment_pipeline,
@@ -63,14 +65,23 @@ async def root_plain():
 @api.get("/system/mode")
 async def system_mode():
     """Info mode operasi + status koneksi eksternal (dipakai banner di UI)."""
+    from urllib.parse import urlsplit
+
     from app.core.storage import storage_configured
 
+    host = (urlsplit(settings.R2_ENDPOINT_URL).hostname or "") if settings.R2_ENDPOINT_URL else ""
+    if not storage_configured():
+        storage_label = "not-configured"
+    elif host in ("127.0.0.1", "localhost"):
+        storage_label = "s3-staging-local"
+    else:
+        storage_label = "cloudflare-r2"
     return {
         "environment": os.environ.get("APP_ENV", "production"),
         "read_only": bool(settings.READ_ONLY),
         "database": "mariadb",
-        "storage": "cloudflare-r2" if storage_configured() else "not-configured",
-        "auto_seed": os.environ.get("AUTO_SEED", "true").lower() == "true",
+        "storage": storage_label,
+        "auto_seed": os.environ.get("AUTO_SEED", "false").lower() == "true",
         "message": (
             "Terhubung ke database & storage PRODUKSI dalam mode HANYA-BACA. "
             "Data yang tampil adalah data asli; semua perubahan dinonaktifkan."
@@ -92,6 +103,9 @@ async def health():
 
 api.include_router(auth.router)
 api.include_router(companies.router)
+api.include_router(platform.router)
+api.include_router(branding.router)
+api.include_router(branding.public_router)
 api.include_router(master.router)
 api.include_router(users.router)
 api.include_router(approvals.router)
@@ -143,6 +157,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Tenant-Status"],
 )
 
 
@@ -164,7 +179,10 @@ async def validation_handler(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(StarletteHTTPException)
 async def http_handler(request: Request, exc: StarletteHTTPException):
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    # Teruskan header dari HTTPException (mis. X-Tenant-Status saat tenant nonaktif).
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": exc.detail}, headers=getattr(exc, "headers", None)
+    )
 
 
 async def _wait_for_database() -> None:
@@ -211,7 +229,7 @@ async def on_startup():
         from app.core.storage import check_storage
 
         check_storage()
-        logger.info("Object storage (Cloudflare R2) siap.")
+        logger.info("Object storage siap (endpoint sesuai konfigurasi R2_ENDPOINT_URL).")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Object storage belum siap: %s", exc)
 
@@ -228,7 +246,9 @@ async def on_startup():
         except Exception as exc:  # noqa: BLE001
             logger.warning("Penjadwal pengingat belum siap: %s", exc)
 
-    if not settings.READ_ONLY and os.environ.get("AUTO_SEED", "true").lower() == "true":
+    # AUTO_SEED default = false: startup TIDAK boleh membuat/mengubah data bisnis.
+    # Seed data demo hanya dijalankan secara eksplisit (AUTO_SEED=true, atau `python -m app.seed`).
+    if not settings.READ_ONLY and os.environ.get("AUTO_SEED", "false").lower() == "true":
         try:
             from app.seed import run_seed
 

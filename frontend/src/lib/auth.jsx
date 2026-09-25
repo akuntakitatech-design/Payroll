@@ -1,5 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, errorMessage, REFRESH_KEY, setUnauthorizedHandler, TOKEN_KEY } from "@/lib/api";
+import {
+  api,
+  errorMessage,
+  REFRESH_KEY,
+  setPasswordChangeRequiredHandler,
+  setTenantInactiveHandler,
+  setUnauthorizedHandler,
+  TOKEN_KEY,
+} from "@/lib/api";
 
 const AuthContext = createContext(null);
 
@@ -89,6 +97,23 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     refreshSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Tenant dinonaktifkan Platform Admin saat sesi berjalan -> akhiri sesi (pesan ditampilkan di halaman login).
+    setTenantInactiveHandler(() => persist(null));
+  }, [persist]);
+
+  useEffect(() => {
+    // Password direset Platform Admin saat sesi berjalan -> tandai sesi agar diarahkan ke /change-password.
+    setPasswordChangeRequiredHandler(() => {
+      setSession((prev) => {
+        if (!prev || prev.user?.must_change_password) return prev;
+        const next = { ...prev, user: { ...prev.user, must_change_password: true } };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+        return next;
+      });
+    });
   }, []);
 
   const login = useCallback(

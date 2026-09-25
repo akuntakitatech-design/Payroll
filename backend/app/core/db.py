@@ -83,6 +83,9 @@ GLOBAL_COLLECTIONS = [
     "modules",
     "user_company_roles",
     "role_permissions",
+    # Tenant Foundation Final - pengaturan global platform (branding KelolaKita).
+    # Key/value JSON; bukan data tenant sehingga tidak memakai company_id.
+    "platform_settings",
 ]
 
 TENANT_COLLECTIONS = [
@@ -184,6 +187,12 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "address": "t", "city": "s", "province": "s", "postal_code": "s64", "phone": "s64",
         "email": "s", "website": "s", "logo_url": "t", "timezone": "s64", "currency": "s64",
         "fiscal_year_start_month": "i",
+        # Tenant Foundation - masa berlaku layanan (additive, nullable; status dihitung, tidak disimpan)
+        "subscription_start_date": "s32", "subscription_end_date": "s32", "grace_period_days": "i",
+        "subscription_notes": "t",
+        # Tenant Foundation Final - PIC tenant (email utama tenant = kolom existing `email`)
+        # dan kunci objek logo tenant di storage (logo_url existing tetap dipakai untuk tampilan).
+        "pic_name": "s", "pic_phone": "s64", "logo_path": "s512",
     },
     "users": {
         "email": "s", "full_name": "s", "password_hash": "s", "phone": "s64", "job_title": "s",
@@ -199,6 +208,7 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
     "modules": {"key": "s64", "name": "s", "description": "t", "is_core": "b", "icon": "s64", "sort_order": "i"},
     "user_company_roles": {"user_id": "fk", "role_key": "s64"},
     "role_permissions": {"role_key": "s64", "permission_key": "s"},
+    "platform_settings": {"key": "s64", "value": "j"},
     "company_settings": {
         "employee_id_prefix": "s64", "employee_id_next_number": "i", "date_format": "s64",
         "number_format": "s64", "default_language": "s64", "week_start": "s64",
@@ -533,6 +543,7 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
 INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "users": [("uq_users_email", ["email"], True)],
     "companies": [("uq_companies_code", ["code"], True)],
+    "platform_settings": [("uq_platform_settings_key", ["key"], True)],
     "roles": [("uq_roles_key", ["key"], True)],
     "permissions": [("uq_permissions_key", ["key"], True)],
     "modules": [("uq_modules_key", ["key"], True)],

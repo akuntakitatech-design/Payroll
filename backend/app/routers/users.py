@@ -5,6 +5,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from ..core.audit import log_action
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
+from ..core.rbac import PLATFORM_ADMIN_ROLE, PLATFORM_ONLY_PERMISSIONS, WILDCARD
 from ..core.security import hash_password
 from ..schemas import RoleCreate, RolePermissionUpdate, RoleUpdate, UserCreate, UserUpdate
 
@@ -17,10 +18,52 @@ def _public(user: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in user.items() if k not in PUBLIC_EXCLUDE}
 
 
+# ------------------------------------------------------- tenant isolation (roles)
+# Peran global (company_id NULL, termasuk peran sistem) berlaku untuk SEMUA tenant,
+# sehingga hanya Platform Admin yang boleh mengubahnya. Peran buatan tenant
+# (company_id = tenant) hanya terlihat & dapat dikelola di tenant tersebut.
+def _role_visible(ctx: AuthContext, role: Dict[str, Any]) -> bool:
+    return role.get("company_id") in (None, ctx.company_id)
+
+
+def _guard_role_change(ctx: AuthContext, role: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not role or not _role_visible(ctx, role):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Peran tidak ditemukan.")
+    if role.get("company_id") is None and not ctx.is_platform_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Peran sistem/global berlaku untuk semua tenant dan hanya dapat diubah oleh Platform Admin. "
+            "Buat peran khusus tenant bila membutuhkan hak akses berbeda.",
+        )
+    return role
+
+
+async def _is_platform_user(user_id: str) -> bool:
+    db = get_db()
+    rows = await db.user_company_roles.find(
+        {"user_id": user_id, "role_key": PLATFORM_ADMIN_ROLE, "status": "active"}, NO_ID
+    ).to_list(10)
+    return any(r.get("company_id") is None for r in rows)
+
+
+async def _guard_platform_user(ctx: AuthContext, user_id: str) -> None:
+    if not ctx.is_platform_admin and await _is_platform_user(user_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Akun Platform Admin hanya dapat dikelola oleh Platform Admin."
+        )
+
+
+async def _has_other_tenant_membership(ctx: AuthContext, user_id: str) -> bool:
+    """True bila akun juga aktif di tenant lain (akun login bersifat global)."""
+    db = get_db()
+    rows = await db.user_company_roles.find({"user_id": user_id, "status": "active"}, NO_ID).to_list(500)
+    return any(r.get("company_id") not in (None, ctx.company_id) for r in rows)
+
+
 async def _assignable_role_keys(ctx: AuthContext) -> List[str]:
     db = get_db()
-    rows = await db.roles.find({"status": "active"}, NO_ID).sort("sort_order", 1).to_list(100)
-    keys = [r["key"] for r in rows]
+    rows = await db.roles.find({"status": "active"}, NO_ID).sort("sort_order", 1).to_list(500)
+    keys = [r["key"] for r in rows if _role_visible(ctx, r)]
     if not ctx.is_super_admin:
         keys = [k for k in keys if k != "super_admin"]
     return keys
@@ -160,6 +203,9 @@ async def get_user(user_id: str, ctx: AuthContext = Depends(require_permission("
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pengguna tidak ditemukan.")
     rows = await db.user_company_roles.find({"user_id": user_id, "status": "active"}, NO_ID).to_list(500)
+    if not ctx.is_platform_admin:
+        # Isolasi tenant: keanggotaan user di tenant lain tidak ditampilkan.
+        rows = [r for r in rows if r.get("company_id") == ctx.company_id]
     out = _public(user)
     out["role_keys"] = sorted({r["role_key"] for r in rows if r.get("company_id") == ctx.company_id})
     out["memberships"] = serialize_list(rows)
@@ -181,8 +227,20 @@ async def update_user(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Pengguna ini bukan anggota perusahaan aktif Anda."
         )
+    await _guard_platform_user(ctx, user_id)
 
     data = payload.model_dump(exclude_none=True)
+    # Akun yang juga dipakai di tenant lain: Tenant Admin hanya boleh mengatur PERAN
+    # di tenant-nya. Data akun global (password, status, profil) hanya oleh Platform Admin.
+    account_fields = [
+        k for k in data if k != "role_keys" and (k == "password" or data[k] != (before or {}).get(k))
+    ]
+    if account_fields and not ctx.is_platform_admin and await _has_other_tenant_membership(ctx, user_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Akun ini juga terdaftar di tenant lain. Tenant Admin hanya dapat mengatur peran di tenant ini; "
+            "perubahan data akun (kata sandi, status, profil) dilakukan oleh Platform Admin.",
+        )
     role_keys = data.pop("role_keys", None)
     new_password = data.pop("password", None)
     if new_password:
@@ -238,6 +296,7 @@ async def remove_user_from_company(
     user = serialize(await db.users.find_one({"id": user_id}, NO_ID))
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pengguna tidak ditemukan.")
+    await _guard_platform_user(ctx, user_id)
     result = await db.user_company_roles.delete_many({"user_id": user_id, "company_id": ctx.company_id})
     if result.deleted_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pengguna ini bukan anggota perusahaan aktif Anda.")
@@ -260,15 +319,13 @@ async def grant_company_access(
     role_keys = payload.get("role_keys") or []
     if not target_company or not role_keys:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Perusahaan dan peran wajib dipilih.")
-    if not ctx.is_super_admin:
-        allowed = await db.user_company_roles.count_documents(
-            {"user_id": ctx.user_id, "company_id": target_company, "status": "active"}
+    # Akses lintas tenant = kewenangan platform. Tenant Admin tidak dapat
+    # memberikan (atau memindahkan) akses ke tenant lain.
+    if not ctx.is_platform_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Pemberian akses ke tenant lain hanya dapat dilakukan oleh Platform Admin.",
         )
-        if not allowed:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "Anda hanya dapat memberi akses ke perusahaan yang Anda kelola.",
-            )
     user = serialize(await db.users.find_one({"id": user_id}, NO_ID))
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pengguna tidak ditemukan.")
@@ -296,7 +353,10 @@ async def grant_company_access(
 @router.get("/roles")
 async def list_roles(ctx: AuthContext = Depends(require_permission("role", "view"))):
     db = get_db()
-    roles = serialize_list(await db.roles.find({}, NO_ID).sort("sort_order", 1).to_list(200))
+    roles = [
+        r for r in serialize_list(await db.roles.find({}, NO_ID).sort("sort_order", 1).to_list(500))
+        if _role_visible(ctx, r)
+    ]
     perms = await db.role_permissions.find({}, NO_ID).to_list(20000)
     by_role: Dict[str, List[str]] = {}
     for p in perms:
@@ -304,6 +364,8 @@ async def list_roles(ctx: AuthContext = Depends(require_permission("role", "view
     for r in roles:
         r["permission_keys"] = sorted(by_role.get(r["key"], []))
         r["permission_count"] = len(r["permission_keys"])
+        r["is_global"] = r.get("company_id") is None
+        r["editable"] = ctx.is_platform_admin or not r["is_global"]
         r["user_count"] = await db.user_company_roles.count_documents(
             {"role_key": r["key"], "company_id": ctx.company_id, "status": "active"}
         )
@@ -327,7 +389,8 @@ async def create_role(payload: RoleCreate, ctx: AuthContext = Depends(require_pe
     last = await db.roles.find({}, NO_ID).sort("sort_order", -1).limit(1).to_list(1)
     doc = {
         "id": new_id(),
-        "company_id": None,
+        # Platform Admin membuat peran global; Tenant Admin membuat peran khusus tenant-nya.
+        "company_id": None if ctx.is_platform_admin else ctx.company_id,
         "key": payload.key,
         "name": payload.name,
         "description": payload.description,
@@ -349,8 +412,7 @@ async def update_role(
 ):
     db = get_db()
     before = serialize(await db.roles.find_one({"key": role_key}, NO_ID))
-    if not before:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Peran tidak ditemukan.")
+    _guard_role_change(ctx, before)
     patch = payload.model_dump(exclude_none=True)
     if not patch:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
@@ -369,12 +431,18 @@ async def update_role_permissions(
 ):
     db = get_db()
     role = serialize(await db.roles.find_one({"key": role_key}, NO_ID))
-    if not role:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Peran tidak ditemukan.")
+    _guard_role_change(ctx, role)
     if role_key == "super_admin" and not ctx.is_super_admin:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Hak akses Super Admin hanya dapat diubah oleh Super Admin."
         )
+    if not ctx.is_platform_admin:
+        forbidden = [k for k in payload.permission_keys if k == WILDCARD or k in PLATFORM_ONLY_PERMISSIONS]
+        if forbidden:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"Hak akses berikut khusus Platform Admin: {', '.join(forbidden)}.",
+            )
     valid = {p["key"] for p in await db.permissions.find({}, NO_ID).to_list(5000)}
     valid.add("*:*")
     invalid = [k for k in payload.permission_keys if k not in valid]
@@ -418,8 +486,7 @@ async def update_role_permissions(
 async def delete_role(role_key: str, ctx: AuthContext = Depends(require_permission("role", "delete"))):
     db = get_db()
     role = serialize(await db.roles.find_one({"key": role_key}, NO_ID))
-    if not role:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Peran tidak ditemukan.")
+    _guard_role_change(ctx, role)
     if role.get("is_system"):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
