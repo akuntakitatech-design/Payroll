@@ -663,6 +663,15 @@ Status legend: DONE / PASS / IN PROGRESS / PARTIAL / TODO / BLOCKED / DEFERRED. 
 - Environment event: container recycle → MariaDB FATAL at autostart → started via supervisor (no datadir re-init) + one backend recovery restart (ENVIRONMENT, not 01G).
 - Restart sanity: backend restarted once → healthy, staging, AUTO_SEED=false, m0008 SKIP, 0 table deltas, portal smoke PASS (verify/session/logout, PostHog absent), smoke fixture cleaned → 0 deltas.
 - Report: `/app/UPGRADE_01G_PUBLIC_EMPLOYEE_FORM_PROGRESS.md` section F. Production Changed: NO. No push/PR/merge/deploy.
+### 15.4c — PR #14 (01F + 01G) (STATUS: OPEN, ready for review — NOT merged, NOT deployed)
+- https://github.com/akuntakitatech-design/Payroll/pull/14 · branch `feature/upgrade-01f-01g-completeness-public-form` → `main` (base `af266c9`, after PR #13). 3 commits (01F, 01G, docs plan), 39 files +6040/−15, GitHub mergeable = clean.
+- Built from origin/main in a separate worktree (the local branch history was not rewritten). Excluded: `.env.example`, `backend/.env.example`, `.gitignore`, `UPGRADE_01A` (production IP), `memory/`, `test_reports/`. Product code is identical to the tested code.
+- Token used only for push + PR creation (not stored in git config; temp files deleted). The user must revoke it. Production Changed: NO.
+### 15.4d — ENHANCEMENT 01G: Flexible Employee Form Builder (STATUS: AUDIT DONE · schema proposal — STOP for review, NO migration/code yet)
+- Audit: 01F completeness_rules + scopes reusable as the source of truth for core field levels (REQUIRED/RECOMMENDED/OFF; 11 scope types incl. project/department/job_grade/position/status). There is no custom-field infrastructure (no JSON column on employees).
+- Proposal m0009 (additive): employee_form_sections, employee_form_fields (CORE config + CUSTOM definitions), employee_form_field_scopes, employee_custom_field_values; employee_submission_files.field_key; proposed.custom + meta.form_version.
+- Open decisions: custom field levels Option 1 (form-only, no 01F change — recommended) vs Option 2 (CUSTOM.* in 01F); permission employee_form:configure vs reuse; @dnd-kit; git (stacked PR on PR #14); custom file fields = pending attachment.
+- Document: `/app/UPGRADE_01G_FORM_BUILDER_AUDIT.md`. Production Changed: NO.
 ### 15.5 — 01H HR Verification (inbox/compare/approve/reject/apply-to-master) (STATUS: TODO / NOT STARTED) — not part of 01G.
 
 
