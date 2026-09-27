@@ -30,7 +30,8 @@ Publik - sesi (sama untuk kedua jalur):
   DELETE /api/public/employee-form/attachments/{id}; GET .../attachments/{id}/file
   POST /api/public/employee-form/logout
 
-Approval / apply ke Profile 360 / penggantian dokumen / recalculate kelengkapan = scope 01H.
+Approval / apply ke Profile 360 / promosi dokumen / recalculate kelengkapan = Upgrade 01H
+(routers/employee_update_verification.py). 01H: REVISION_REQUESTED = pengajuan yang sama dapat diedit & dikirim ulang.
 """
 import hashlib
 import json
@@ -150,7 +151,8 @@ def _submission_out(sub: Optional[Dict[str, Any]], files: int = 0) -> Optional[D
             "attachments": files, "source": sub.get("source")}
 
 
-_SUB_LABELS = {P.DRAFT: "Draft (belum dikirim)", P.PENDING: "Menunggu verifikasi HR"}
+_SUB_LABELS = {P.DRAFT: "Draft (belum dikirim)", P.PENDING: "Menunggu verifikasi HR",
+               P.REVISION: "Perlu perbaikan (diminta HR)", P.APPROVED: "Disetujui HR", P.REJECTED: "Ditolak HR"}
 
 
 # =================================================================== HR
@@ -655,7 +657,7 @@ async def _form_layout(sess: PublicSession):
     if defs:
         for r in await sess.tdb.employee_custom_field_values.find(
                 {"company_id": sess.company_id, "employee_id": sess.employee_id, "status": {"$ne": "deleted"}}, NO_ID).to_list(500):
-            official[r["field_key"]] = _json(r.get("value"))
+            official[r["field_key"]] = r.get("value")  # 01H: kolom JSON sudah didekode layer DB (nilai string polos tetap utuh)
     return cfg, layout, defs, official
 
 
@@ -695,6 +697,21 @@ async def get_form(sess: PublicSession = Depends(get_public_session)):
                       "allowed_extensions": _allowed_ext(None), "max_size_mb": P.PUBLIC_MAX_MB,
                       "has_existing": bool(emp.get("photo_path"))})
     draft = None
+    revision, last_decision = None, None
+    if sub and sub.get("status") == P.REVISION:  # Upgrade 01H: HR meminta perbaikan -> form dapat diedit lagi
+        hist = _json(sub.get("review_history")) or []
+        last = hist[-1] if hist else {}
+        revision = {"note": sub.get("review_note"), "items": last.get("items") or [],
+                    "requested_at": _serialize_dt(sub.get("reviewed_at")), "round": int(sub.get("revision_count") or 0)}
+    if not sub:  # Upgrade 01H: keputusan final terakhir (tanpa nilai data)
+        rows = await tdb.employee_update_submissions.find(
+            {"company_id": cid, "employee_id": sess.employee_id, "status": {"$in": list(P.FINAL_SUBMISSION_STATUSES)}},
+            {"_id": 0, "status": 1, "review_note": 1, "reviewed_at": 1}).sort("reviewed_at", -1).limit(1).to_list(1)
+        if rows:
+            r = rows[0]
+            last_decision = {"status": r.get("status"), "status_label": _SUB_LABELS.get(r.get("status")),
+                             "reason": r.get("review_note") if r.get("status") == P.REJECTED else None,
+                             "decided_at": _serialize_dt(r.get("reviewed_at"))}
     if sub:
         files = await tdb.employee_submission_files.find(
             {"company_id": cid, "submission_id": sub["id"], "status": "active"}, NO_ID).sort("uploaded_at", 1).to_list(50)
@@ -728,7 +745,7 @@ async def get_form(sess: PublicSession = Depends(get_public_session)):
     return {"mode": "READ_ONLY" if read_only else "EDIT", "message": P.MSG_SUBMITTED if read_only else None,
             "sections": [{"key": k, "label": v} for k, v in P.SECTIONS], "view_only": view_only, "fields": fields,
             "family": family, "documents": documents, "options": OPTIONS, "completeness": completeness,
-            "layout": layout, "custom_fields": custom_fields,
+            "layout": layout, "custom_fields": custom_fields, "revision": revision, "last_decision": last_decision,
             "draft": draft, "session": {"expires_at": _serialize_dt(sess.link.get("session_expires_at")),
                                         "idle_timeout_minutes": int(P.SESSION_IDLE.total_seconds() // 60)}}
 
@@ -917,7 +934,7 @@ async def save_draft(body: DraftIn, sess: PublicSession = Depends(get_public_ses
             raise HTTPException(status.HTTP_409_CONFLICT, "Draft telah diperbarui dari tab/perangkat lain. Muat ulang formulir.")
         version = int(sub.get("version") or 1) + 1
         res = await sess.tdb.employee_update_submissions.update_one(
-            {"id": sub["id"], "status": P.DRAFT, "version": sub.get("version")},
+            {"id": sub["id"], "status": {"$in": list(P.EDITABLE_SUBMISSION_STATUSES)}, "version": sub.get("version")},
             {"$set": {"proposed": proposed, "version": version, "draft_saved_at": now(), "updated_at": now(),
                       "link_id": sess.link["id"]}})
         if not res.matched_count:
@@ -983,13 +1000,15 @@ async def submit(body: SubmitIn, sess: PublicSession = Depends(get_public_sessio
     ts = now()
     audit = build_audit_entry(sess.actor, "public_form.submitted", RESOURCE, sub["id"], emp.get("employee_number"), None,
                               {"changed_fields": changed, "family_ops": len(proposed["family"]), "attachments": files,
-                               "identity_change": identity, "status": P.PENDING}, module=MODULE, company_id=cid)
+                               "identity_change": identity, "status": P.PENDING,
+                               "resubmission": sub.get("status") == P.REVISION}, module=MODULE, company_id=cid)
     async with transaction() as tx:
         cur = await tx.select_one_for_update("employee_update_submissions", {"id": sub["id"], "company_id": cid})
-        if not cur or cur.get("status") != P.DRAFT or cur.get("version") != body.version:
+        if not cur or cur.get("status") not in P.EDITABLE_SUBMISSION_STATUSES or cur.get("version") != body.version:
             raise HTTPException(status.HTTP_409_CONFLICT, "Draft telah berubah atau sudah dikirim. Muat ulang formulir.")
         await tx.update("employee_update_submissions", {"id": sub["id"], "company_id": cid}, {
-            "status": P.PENDING, "proposed": proposed, "baseline": {"fields": baseline_fields, "family": baseline_family, "custom": baseline_custom},
+            "status": P.PENDING, "proposed": proposed, "baseline": {"fields": baseline_fields, "family": baseline_family, "custom": baseline_custom,
+                                                          "photo_version": emp.get("photo_version")},  # 01H: deteksi konflik foto
             "changed_fields": changed, "identity_change": identity, "submitted_at": ts, "submit_ip": sess.ip,
             "completeness_before": {"score_pct": snap.get("score_pct"), "status": snap.get("completeness_status"),
                                     "missing_codes": _json(snap.get("missing_codes")) or []},

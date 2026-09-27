@@ -18,7 +18,7 @@ Batasan tambahan (untuk fase upgrade saat ini):
 - Tenant **`ZT01B170909`**: **jangan disentuh** (catat sebagai existing test tenant di luar scope 01E-B).
 
 ### Update fokus (fase saat ini) — 2026-09-27
-**Enhancement 01G — Flexible Employee Form Builder: LOCKED ✅** (see §15.4e). 01F LOCKED ✅ · 01G LOCKED ✅ · 01H NOT STARTED. Branch `feature/upgrade-01g-form-builder`. Production Changed: NO.
+**Enhancement 01G — Flexible Employee Form Builder: LOCKED ✅** (see §15.4e). 01F LOCKED ✅ · 01G LOCKED ✅ · 01H PARTIAL (see §16.4). Branch `feature/upgrade-01g-form-builder`. Production Changed: NO.
 
 (Historical focus, older phases:)
 1) **01C Employee Profile 360** — **COMPLETED & LOCKED**.
@@ -706,7 +706,7 @@ Locked decisions: core level = 01F (OFF = Tidak Dinilai, not Optional); 01F REQU
 - Next: STOP for review. Do not start 01H. No push/PR/merge/deploy.
 - 15.4e.5 PR hygiene: local commit cleaned (`.gitignore` + test reports removed; sensitive scan 0) → pushed (force-with-lease back to clean `70634e7` after a platform auto-commit) → **PR #16 open** (1 commit, 22 files; not merged). PR #15 closed as superseded (not merged).
 
-## Phase 16 — Upgrade 01H: HR Verification (STATUS: **STEP 1 AUDIT DONE — STOP for user review; NO code/migration yet**)
+## Phase 16 — Upgrade 01H: HR Verification (STATUS: **PARTIAL — implementation DONE + targeted checks PASS (66/66, frontend build); E2E/regression/cleanup/PR NOT STARTED**)
 Report: `/app/UPGRADE_01H_HR_VERIFICATION_AUDIT.md` (read-only code audit + 1 read-only staging count query; agent-inspected, no functional tests yet).
 Local branch: `feature/upgrade-01h-hr-verification` (from local HEAD with platform auto-commit `9b54a61`; must be cleaned before any 01H PR). Local 01G ref reset to `70634e7` (= remote PR #16). Nothing pushed.
 ### 16.1 Audit findings (summary)
@@ -721,14 +721,36 @@ Local branch: `feature/upgrade-01h-hr-verification` (from local HEAD with platfo
 - `no_npwp` → info only (touches payroll `employee_salaries.has_npwp`) → DEFER.
 - Schema: m0010, additive NULL columns on `employee_update_submissions` (reviewed_by/_name/_at, review_note, revision_count, review_history, apply_result, completeness_after) + `employee_submission_files` (document_id, review_status_at); new permission `employee_form:verify` (hr_admin, hr_manager; tenant_admin/company_owner implicit).
 - API `/api/employees/update-verifications` (summary, list, detail, file, approve, reject, request-revision); UI Kepegawaian → Verifikasi Pembaruan Data.
-### 16.3 Implementation steps (NOT STARTED — only after user approval)
+### 16.3 Implementation steps
 1 m0010 + specs → 2 core/hr_verification.py (diff/conflict/apply) → 3 HR router → 6 backend tests → 4 public revision banner/last decision → 5 monitoring counts → 7 UI → 8 public UI banner → 9 testing agent → 10 docs.
-- Next: STOP for review. No coding, no push, no PR, no merge, no deploy. Production Changed: NO.
+- Superseded note: implementation was later approved by the user (see 16.4).
+
+### 16.4 Step 2 — Implementation + targeted verification (STATUS: **PARTIAL** — implementation DONE, targeted checks PASS; E2E/regression/cleanup/PR NOT STARTED) — 2026-09-27
+| Item | Status | Evidence (agent-tested, NOT user-confirmed) |
+|---|---|---|
+| Branch/base | DONE | `feature/upgrade-01h-hr-verification` rebased on `origin/main` `7c0460a` (PR #16); 0 behind main. Local only — remote branch NOT rewritten, nothing pushed. |
+| Local MariaDB (dev only, `hris_dev` @127.0.0.1) | DONE | Supervisor `payroll-dev-mariadb` was FATAL (binary not found at pod start); binary present again → `supervisorctl restart` → RUNNING. Existing data intact (76 tables, ledger m0003–m0010; m0001/m0002 do not use the ledger). No reinit/reset/reseed. AUTO_SEED=false, ENABLE_SCHEDULER=false, R2 not configured. Production MariaDB/R2 NOT touched. |
+| Backend `/api/health` | PASS | `{"status":"healthy","database":"mariadb:connected","read_only":false}` (storage: R2 not configured — expected for dev). |
+| m0010_hr_verification | DONE | Additive/idempotent; apply OK, rerun SKIP; grants `employee_form:verify` (tenant_admin, hr_admin, hr_manager). |
+| Backend scope | DONE | RBAC `verify`; `core/hr_verification.py` (diff, conflict detection/resolution, transactional apply incl. family, custom official values/files, document/photo promotion via `storage.copy_object`, completeness refresh, audit); router `/api/employees/update-verifications` (summary, list, detail, file, approve, reject, request-revision) registered before `/api/employees/{employee_id}`, no duplicate routes; public form revision flow (REVISION_REQUESTED editable, resubmit, last decision, `photo_version` baseline); Form Builder monitoring counts (revision/approved/rejected). |
+| Minimal 01G touch | NOTE | Public form prefill of custom official values now uses the DB-decoded value directly (previous `_json()` re-decode turned plain strings into `None`). Only affects values written by 01H. |
+| Frontend scope | DONE | Pages `EmployeeUpdateVerificationPage` / `EmployeeUpdateVerificationDetailPage`, `ChangeCompareTable`, routes `/employees/update-verifications[/:id]`, sidebar item (employee_form:verify), public revision/last-decision banner. |
+| `tests/test_hr_verification_01h.py` | PASS | **66/66 PASS** (in-process ASGI + local MariaDB; R2 stubbed in-memory because dev R2 is not available). |
+| Frontend compile/build | PASS | esbuild bundle OK; webpack "Compiled successfully"; smoke render of list page OK. |
+| Local checkpoint commit | DONE (local only) | 1 commit on the 01H branch in `/app/.repo_work/Payroll`; no push/PR. |
+
+Remaining gaps before E2E / regression / cleanup / PR:
+- Browser E2E (testing agent) of list/detail/approve/reject/revision + public revision banner: NOT STARTED.
+- Broad regression: NOT STARTED. Known env issues from an earlier attempt: `aiosqlite` missing (tenant isolation test); `test_development_core.py` expects a clean DB but `hris_dev` now holds T01H test data → needs a fresh dev DB, not a code fix.
+- Real R2 copy path (`copy_object`) not exercised against a real dev bucket (no dev R2).
+- Remote branch history must be handled (force-with-lease after rebase) when the user approves a push; PR body/docs report not written.
+- Final cleanup (test data, artifacts) NOT STARTED.
+- Production Changed: NO.
 
 
 
 ## 3) Next Actions (immediate)
-**Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 open) · 01H STEP 1 AUDIT DONE — STOP for review (no code) · Production Changed: NO.**
+**Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 merged) · 01H PARTIAL — implementation + targeted verification PASS, local checkpoint commit, STOP before E2E/cleanup/PR (see §16.4) · Production Changed: NO.**
 
 Status 01E (history): **01E-A DONE (checkpoint)** + **01E-B IN PROGRESS**.
 

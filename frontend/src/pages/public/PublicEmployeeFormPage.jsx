@@ -23,6 +23,35 @@ const digits = (v) => String(v || "").replace(/\D/g, "");
 const mask = (v) => (v.length <= 4 ? "*".repeat(v.length) : "*".repeat(v.length - 4) + v.slice(-4));
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" }); } catch { return iso; } };
 
+/* Upgrade 01H: HR meminta perbaikan (pengajuan yang sama dapat diedit) / keputusan terakhir HR. */
+const DecisionBanner = ({ form, compact = false }) => {
+  if (form?.revision) {
+    return (
+      <Alert className="border-amber-300 bg-amber-50" data-testid="public-revision-banner">
+        <AlertDescription className="space-y-1 text-amber-900">
+          <p className="font-semibold">Perlu perbaikan dari HR</p>
+          <p className="whitespace-pre-line break-words" data-testid="public-revision-note">{form.revision.note}</p>
+          {!compact && <p className="text-sm">Perbaiki data yang diminta, lalu kirim kembali. Data Anda sebelumnya tetap tersimpan.</p>}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  const d = form?.last_decision;
+  if (!d || compact) return null;
+  const ok = d.status === "APPROVED";
+  return (
+    <Alert className={ok ? "border-emerald-300 bg-emerald-50" : "border-rose-300 bg-rose-50"} data-testid="public-last-decision">
+      <AlertDescription className={ok ? "text-emerald-900" : "text-rose-900"}>
+        <p className="font-semibold" data-testid="public-last-decision-status">
+          {ok ? "Pengajuan terakhir Anda telah disetujui HR" : "Pengajuan terakhir Anda ditolak HR"}{d.decided_at ? ` (${fmtDate(d.decided_at)})` : ""}.
+        </p>
+        {!ok && d.reason && <p className="mt-1 whitespace-pre-line break-words" data-testid="public-last-decision-reason">Alasan: {d.reason}</p>}
+        <p className="mt-1 text-sm">{ok ? "Data resmi Anda sudah diperbarui. Anda dapat mengajukan pembaruan baru bila diperlukan." : "Anda dapat mengajukan pembaruan data baru."}</p>
+      </AlertDescription>
+    </Alert>
+  );
+};
+
 export default function PublicEmployeeFormPage() {
   const { companyCode } = useParams();
   const scope = String(companyCode || "").trim().toUpperCase();
@@ -301,6 +330,7 @@ export default function PublicEmployeeFormPage() {
             </dl>
             {form.draft && <p className="mt-4 rounded-xl border border-primary/30 bg-[hsl(var(--accent-mint,168_55%_92%))] p-3 text-sm" data-testid="public-welcome-draft">Anda memiliki draft yang tersimpan{savedAt ? ` (${savedAt})` : ""}. Isian Anda akan dilanjutkan.</p>}
           </section>
+          <DecisionBanner form={form} />
           <CompletenessCard completeness={form.completeness} />
           <div className="flex flex-col gap-3 sm:flex-row">
             <Button className="h-12 flex-1 text-base" onClick={() => { setPhase("form"); goStep(0); }} data-testid="public-start-button">{form.draft ? "Lanjutkan Mengisi" : "Mulai Periksa Data"}<ArrowRight className="ml-2 h-5 w-5" /></Button>
@@ -312,6 +342,7 @@ export default function PublicEmployeeFormPage() {
         <div className="space-y-5" data-testid="public-form">
           <div className="flex items-center justify-between gap-2"><SaveStatus state={saveState} at={savedAt} /><Button variant="ghost" size="sm" className="h-10" onClick={logout} data-testid="public-form-logout"><LogOut className="mr-1 h-4 w-4" />Keluar</Button></div>
           <StepProgress index={step} total={steps.length} label={steps[step]?.label} />
+          <DecisionBanner form={form} compact />
           {notice && <Alert data-testid="public-form-notice"><AlertDescription className="flex flex-wrap items-center gap-2">{notice}<Button size="sm" variant="outline" onClick={() => { setNotice(null); loadForm(sess, "form"); }} data-testid="public-reload-button">Muat ulang</Button></AlertDescription></Alert>}
           {steps[step]?.kind === "fields" && (
             <section className="space-y-5 rounded-2xl border bg-background p-4 sm:p-6" data-testid={`public-section-${steps[step].key}`}>

@@ -31,7 +31,12 @@ IP_MAX_FAILS, IP_WINDOW, IP_LOCK = 20, timedelta(minutes=15), timedelta(minutes=
 
 ACTIVE, EXPIRED, REVOKED, SUBMITTED = "ACTIVE", "EXPIRED", "REVOKED", "SUBMITTED"
 DRAFT, PENDING = "DRAFT", "PENDING_HR_VERIFICATION"
-OPEN_SUBMISSION_STATUSES = (DRAFT, PENDING)
+# Upgrade 01H - keputusan HR. REVISION_REQUESTED = tetap terbuka (baris sama, dapat diedit karyawan);
+# APPROVED / REJECTED = final (open_slot dilepas -> karyawan dapat membuat pengajuan baru).
+REVISION, APPROVED, REJECTED = "REVISION_REQUESTED", "APPROVED", "REJECTED"
+OPEN_SUBMISSION_STATUSES = (DRAFT, PENDING, REVISION)
+EDITABLE_SUBMISSION_STATUSES = (DRAFT, REVISION)
+FINAL_SUBMISSION_STATUSES = (APPROVED, REJECTED)
 SOURCE = "PUBLIC_EMPLOYEE_FORM"
 MODE_IDENTITY = "IDENTITY_3F"   # jalur OPSIONAL/EXCEPTION: undangan (link unik) dari HR + verifikasi 3 faktor
 MODE_PORTAL = "PORTAL_3F"       # jalur UTAMA: portal publik per tenant (kode perusahaan) + verifikasi 3 faktor
