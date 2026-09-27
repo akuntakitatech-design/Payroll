@@ -108,6 +108,9 @@ export default function EmployeeUpdateVerificationDetailPage() {
   if (!d) return (<><PageHeader title="Verifikasi Pembaruan Data" /><PageBody><div className="space-y-3" data-testid="uv-detail-loading"><Skeleton className="h-24 w-full" /><Skeleton className="h-64 w-full" /></div></PageBody></>);
 
   const identityPending = (d.identity_fields || []).length > 0;
+  // tampilkan label field (mis. "Nama lengkap (sesuai KTP)"), bukan kunci teknis (full_name)
+  const fieldLabels = Object.fromEntries(d.sections.flatMap((s) => s.items).filter((it) => it.field).map((it) => [it.field, it.label]));
+  const identityLabels = (d.identity_fields || []).map((f) => fieldLabels[f] || f).join(", ");
   const needText = dialog === "reject" || dialog === "revision";
   const textOk = !needText || text.trim().length >= 5;
   const canApprove = d.can_decide && unresolved.length === 0;
@@ -208,7 +211,7 @@ export default function EmployeeUpdateVerificationDetailPage() {
             {dialog === "approve" && identityPending && (
               <label className="flex items-start gap-2 rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">
                 <Checkbox checked={confirmId} onCheckedChange={(v) => setConfirmId(!!v)} data-testid="uv-confirm-identity" />
-                <span>Saya sudah memeriksa perubahan data identitas ({d.identity_fields.join(", ")}) terhadap dokumen resmi.</span>
+                <span>Saya sudah memeriksa perubahan data identitas ({identityLabels}) terhadap dokumen resmi.</span>
               </label>
             )}
             <div className="space-y-1.5">

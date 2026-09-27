@@ -184,7 +184,7 @@ async def _detail(ctx: AuthContext, sub: Dict[str, Any]) -> Dict[str, Any]:
     cid, tdb = ctx.company_id, ctx.tdb
     data = await HV.load_context(tdb, cid, sub)
     enums, labels = HV._enums_and_labels()
-    ev = HV.evaluate(sub, data, enums)
+    ev = HV.decided_view(HV.evaluate(sub, data, enums), sub, data["files"])
     full = can_view_sensitive(ctx)
     emp = data["emp"]
     proj = (await _active_projects(tdb, cid, [sub["employee_id"]])).get(sub["employee_id"]) or emp.get("project_id")

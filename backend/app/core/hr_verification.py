@@ -35,8 +35,10 @@ RESOURCE = "employee_public_form"
 OK, ALREADY_APPLIED, CONFLICT, SKIPPED, INFO = "OK", "ALREADY_APPLIED", "CONFLICT", "SKIPPED", "INFO"
 USE_PROPOSED, KEEP_CURRENT = "use_proposed", "keep_current"
 BOTH = [USE_PROPOSED, KEEP_CURRENT]
+APPLIED, KEPT, NOT_APPLIED = "APPLIED", "KEPT", "NOT_APPLIED"  # status tampilan untuk pengajuan yang sudah diputuskan
 STATE_LABELS = {OK: "Akan diterapkan", ALREADY_APPLIED: "Sudah sama dengan data resmi", CONFLICT: "Konflik",
-                SKIPPED: "Tidak akan diterapkan", INFO: "Informasi"}
+                SKIPPED: "Tidak akan diterapkan", INFO: "Informasi",
+                APPLIED: "Diterapkan", KEPT: "Data saat ini dipertahankan", NOT_APPLIED: "Tidak diterapkan"}
 STATUS_LABELS = {P.DRAFT: "Draft", P.PENDING: "Menunggu Verifikasi", P.REVISION: "Perlu Perbaikan",
                  P.APPROVED: "Disetujui", P.REJECTED: "Ditolak"}
 REVIEW_STATUSES = (P.PENDING, P.REVISION, P.APPROVED, P.REJECTED)
@@ -294,6 +296,43 @@ def evaluate(sub: Dict[str, Any], data: Dict[str, Any], enums: Optional[Dict[str
                       "note": "Tidak diterapkan otomatis - sesuaikan status NPWP di Struktur Gaji bila perlu."})
     conflicts = [i["key"] for i in items if i["state"] == CONFLICT]
     return {"items": items, "conflicts": conflicts, "notes": proposed.get("notes"), "no_npwp": bool(proposed.get("no_npwp"))}
+
+
+def decided_view(ev: Dict[str, Any], sub: Dict[str, Any], files: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Tampilan pengajuan yang sudah DISETUJUI/DITOLAK: status item diambil dari hasil keputusan (apply_result &
+    status lampiran), BUKAN dari diff terhadap data resmi terkini (yang sudah berubah karena keputusan itu sendiri)."""
+    status = sub.get("status")
+    if status not in (P.APPROVED, P.REJECTED):
+        return ev
+    res = jl(sub.get("apply_result")) or {}
+    applied = res.get("applied") or {}
+    skipped = {s.get("key"): s for s in (res.get("skipped") or []) if isinstance(s, dict)}
+    fstatus = {f["id"]: f.get("status") for f in files}
+    out = []
+    for it in ev["items"]:
+        it = dict(it, options=[])
+        if it["state"] == INFO:
+            out.append(it)
+            continue
+        if status == P.REJECTED:
+            st = NOT_APPLIED
+        elif it["key"] in skipped:
+            st = KEPT if skipped[it["key"]].get("resolution") == KEEP_CURRENT else NOT_APPLIED
+        elif it["kind"] == "field":
+            st = APPLIED if it["field"] in (applied.get("fields") or []) else NOT_APPLIED
+        elif it["kind"] in ("custom", "custom_file"):
+            st = APPLIED if it["field"] in (applied.get("custom") or []) else NOT_APPLIED
+        elif it["kind"] == "photo":
+            st = APPLIED if applied.get("photo") else NOT_APPLIED
+        elif it["kind"] == "document":
+            st = APPLIED if fstatus.get(it.get("file_id")) == FILE_PROMOTED else NOT_APPLIED
+        else:  # keluarga: diterapkan kecuali tercatat dilewati
+            st = NOT_APPLIED if it["state"] == SKIPPED else APPLIED
+        it["state"] = st
+        it["note"] = ("Dokumen baru ditambahkan sebagai dokumen resmi; dokumen lama tidak dihapus."
+                      if st == APPLIED and it["kind"] == "document" else None)
+        out.append(it)
+    return dict(ev, items=out, conflicts=[])
 
 
 def change_summary(sub: Dict[str, Any], files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, int]:

@@ -251,6 +251,11 @@ async def t_approve_full(env):
     check("audit tanpa nilai sensitif mentah", "9876543210" not in str(audits) and "3201999988887777" not in str(audits))
     r = await env.c.post(f"{base(sub['id'])}/approve", headers=env.hr, json={"version": s2["version"]})
     check("approve ulang pada APPROVED -> 409", r.status_code == 409)
+    dd = (await env.c.get(base(sub["id"]), headers=env.hr)).json()
+    st = {i["key"]: i["state"] for s in dd["sections"] for i in s["items"]}
+    check("detail APPROVED: status dari hasil keputusan (foto bukan konflik, tanpa 'Akan diterapkan')",
+          not dd["has_conflict"] and st.get("photo") == "APPLIED" and st.get("field:phone") == "APPLIED"
+          and "OK" not in st.values() and "CONFLICT" not in st.values(), str(st))
     tl = await env.c.get(f"/api/employees/{emp['id']}/timeline", headers=env.hr)
     check("perubahan muncul di timeline Profile 360", tl.status_code == 200 and any(
         i.get("action") == "update" for i in tl.json()["items"]))
@@ -281,6 +286,9 @@ async def t_reject(env):
     files = await env.tdb.employee_submission_files.find({"company_id": env.cid, "submission_id": sub["id"]}, {"_id": 0}).to_list(10)
     s2 = await env.tdb.employee_update_submissions.find_one({"id": sub["id"]}, {"_id": 0})
     check("reject: file REJECTED + open_slot kosong", all(f["status"] == "REJECTED" for f in files) and s2.get("open_slot") is None)
+    dd = (await env.c.get(base(sub["id"]), headers=env.hr)).json()
+    check("detail REJECTED: semua item 'Tidak diterapkan'",
+          all(i["state"] == "NOT_APPLIED" for s in dd["sections"] for i in s["items"]) and not dd["has_conflict"], str(dd["sections"])[:200])
     f = (await env.c.get("/api/public/employee-form/form", headers=await portal_session(env, emp))).json()
     check("portal: keputusan ditolak + alasan tampil", (f.get("last_decision") or {}).get("reason") == "Dokumen buram" and f["mode"] == "EDIT")
     sub2, _ = await submit(env, emp, fields={"phone": "081333334444"})
@@ -332,6 +340,11 @@ async def t_conflict(env):
         check(f"[{mode}] resolusi utk item non-konflik -> 422", r.status_code == 422)
         r = await env.c.post(f"{base(sub['id'])}/approve", headers=env.hr,
                              json={"version": d["version"], "resolutions": {"field:phone": mode}})
+        dd = (await env.c.get(base(sub["id"]), headers=env.hr)).json()
+        st = {i["key"]: i["state"] for s in dd["sections"] for i in s["items"]}
+        check(f"[{mode}] detail sesudah keputusan: {'KEPT' if mode == 'keep_current' else 'APPLIED'} untuk konflik",
+              st.get("field:phone") == ("KEPT" if mode == "keep_current" else "APPLIED") and not dd["has_conflict"], str(st))
+
         e2 = await env.tdb.employees.find_one({"company_id": env.cid, "id": emp["id"]}, {"_id": 0})
         exp = "081377778888" if mode == "keep_current" else "081355556666"
         check(f"[{mode}] hasil resolusi diterapkan", r.status_code == 200 and e2["phone"] == exp and e2["address"] == "Jl. Konflik", r.text[:200])

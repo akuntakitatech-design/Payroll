@@ -15,6 +15,10 @@ export const STATE_STYLE = {
   ALREADY_APPLIED: { cls: "border-slate-200 bg-slate-50 text-slate-700", icon: CheckCircle2 },
   SKIPPED: { cls: "border-slate-200 bg-slate-100 text-slate-600", icon: MinusCircle },
   INFO: { cls: "border-sky-200 bg-sky-50 text-sky-800", icon: Info },
+  // pengajuan yang sudah diputuskan
+  APPLIED: { cls: "border-emerald-200 bg-emerald-50 text-emerald-800", icon: CheckCircle2 },
+  KEPT: { cls: "border-slate-200 bg-slate-50 text-slate-700", icon: MinusCircle },
+  NOT_APPLIED: { cls: "border-slate-200 bg-slate-100 text-slate-600", icon: MinusCircle },
 };
 
 export const StateBadge = ({ state, label, testid }) => {
