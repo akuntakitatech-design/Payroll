@@ -87,6 +87,9 @@ GLOBAL_COLLECTIONS = [
     # Tenant Foundation Final - pengaturan global platform (branding KelolaKita).
     # Key/value JSON; bukan data tenant sehingga tidak memakai company_id.
     "platform_settings",
+    # Upgrade 01G - counter percobaan gagal formulir publik per IP (kunci = hash, bukan IP mentah).
+    # Bukan data tenant; dipakai lintas tenant sebelum tenant diketahui (token belum valid).
+    "public_rate_limits",
 ]
 
 TENANT_COLLECTIONS = [
@@ -169,6 +172,11 @@ TENANT_COLLECTIONS = [
     "completeness_rules",
     "completeness_rule_scopes",
     "employee_completeness",
+    # Upgrade 01G - Public Employee Form: link undangan (+ sesi publik terbatas), draft/submission
+    # perubahan data (menunggu verifikasi HR 01H), dan lampiran submission (private, belum dokumen resmi).
+    "employee_public_links",
+    "employee_update_submissions",
+    "employee_submission_files",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
@@ -444,6 +452,30 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "effective_from": "s32", "effective_to": "s32", "notes": "t",
     },
     # Upgrade 01F - snapshot. completeness_status: LENGKAP | BELUM_LENGKAP | EXCLUDED
+    # Upgrade 01G - hanya HASH token yang disimpan (token mentah tidak pernah disimpan/di-log).
+    # Sesi publik (setelah verifikasi identitas) melekat pada link: satu sesi aktif per link.
+    "employee_public_links": {
+        "employee_id": "fk", "token_hash": "s64", "token_hint": "s32", "verification_mode": "s32",
+        "expires_at": "dt", "failed_attempts": "i", "total_failed_attempts": "i", "locked_until": "dt",
+        "last_failed_at": "dt", "last_opened_at": "dt", "verified_at": "dt", "submitted_at": "dt",
+        "revoked_at": "dt", "revoked_by": "fk", "revoke_reason": "s512", "submission_id": "fk",
+        "session_hash": "s64", "session_expires_at": "dt", "session_verified_at": "dt", "session_last_seen_at": "dt",
+    },
+    # status: DRAFT -> PENDING_HR_VERIFICATION (01G). `open_slot` = employee_id selama submission
+    # masih terbuka (unik per tenant) -> maksimal 1 draft/pending per karyawan.
+    "employee_update_submissions": {
+        "employee_id": "fk", "link_id": "fk", "source": "s32", "open_slot": "s64", "proposed": "j",
+        "baseline": "j", "changed_fields": "j", "identity_change": "b", "version": "i",
+        "draft_saved_at": "dt", "submitted_at": "dt", "submit_ip": "s64", "completeness_before": "j",
+    },
+    "employee_submission_files": {
+        "submission_id": "fk", "employee_id": "fk", "document_type_id": "fk", "document_type_code": "s64",
+        "purpose": "s32", "file_name": "s", "file_extension": "s32", "mime_type": "s64", "file_size": "bi",
+        "sha256": "s64", "storage_path": "s512", "uploaded_at": "dt",
+    },
+    "public_rate_limits": {
+        "key_hash": "s64", "scope": "s32", "fail_count": "i", "window_start": "dt", "locked_until": "dt",
+    },
     "employee_completeness": {
         "employee_id": "fk", "score_pct": "f", "completeness_status": "s32", "required_total": "i",
         "required_fulfilled": "i", "recommended_total": "i", "recommended_fulfilled": "i",
@@ -707,6 +739,20 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     ],
     "completeness_rules": [("ux_completeness_rule_code", ["company_id", "requirement_code"], True)],
     "completeness_rule_scopes": [("ix_completeness_scope_code", ["company_id", "requirement_code"], False)],
+    "employee_public_links": [
+        ("ux_public_link_token", ["token_hash"], True),
+        ("ux_public_link_session", ["session_hash"], True),
+        ("ix_public_link_employee", ["company_id", "employee_id", "status"], False),
+    ],
+    "employee_update_submissions": [
+        ("ux_submission_open_slot", ["company_id", "open_slot"], True),
+        ("ix_submission_employee", ["company_id", "employee_id", "created_at"], False),
+        ("ix_submission_status", ["company_id", "status", "submitted_at"], False),
+    ],
+    "employee_submission_files": [
+        ("ix_submission_file", ["company_id", "submission_id", "status"], False),
+    ],
+    "public_rate_limits": [("ux_public_rate_key", ["key_hash"], True)],
     "employee_completeness": [
         ("ux_employee_completeness_emp", ["company_id", "employee_id"], True),
         ("ix_employee_completeness_score", ["company_id", "completeness_status", "score_pct"], False),
