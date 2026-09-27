@@ -16,6 +16,7 @@ from app.routers import (
     auth,
     branding,
     public_employee_form,
+    employee_form_builder,
     certifications,
     companies,
     completeness,
@@ -115,6 +116,7 @@ api.include_router(branding.public_router)
 # Upgrade 01G-A - Public Employee Form (HR: link undangan; publik: verifikasi, sesi terbatas, draft, submit)
 api.include_router(public_employee_form.hr_router)
 api.include_router(public_employee_form.public_router)
+api.include_router(employee_form_builder.router)  # Enhancement 01G Form Builder
 api.include_router(master.router)
 api.include_router(users.router)
 api.include_router(approvals.router)

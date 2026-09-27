@@ -177,6 +177,12 @@ TENANT_COLLECTIONS = [
     "employee_public_links",
     "employee_update_submissions",
     "employee_submission_files",
+    # Enhancement 01G - Form Builder: konfigurasi section/field per tenant (core field = katalog whitelist
+    # 01G; custom field = definisi `cf_*`), scope tampil per field, dan nilai custom resmi (ditulis 01H).
+    "employee_form_sections",
+    "employee_form_fields",
+    "employee_form_field_scopes",
+    "employee_custom_field_values",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
@@ -472,6 +478,26 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "submission_id": "fk", "employee_id": "fk", "document_type_id": "fk", "document_type_code": "s64",
         "purpose": "s32", "file_name": "s", "file_extension": "s32", "mime_type": "s64", "file_size": "bi",
         "sha256": "s64", "storage_path": "s512", "uploaded_at": "dt",
+        "field_key": "s64",  # Enhancement 01G Form Builder: lampiran untuk custom field tipe file
+    },
+    # Enhancement 01G - Form Builder (m0009). section_key sistem: personal/family/bank_tax/bpjs/documents;
+    # custom: cs_*. status: active | inactive (tidak ada hard delete).
+    "employee_form_sections": {
+        "section_key": "s64", "label": "s", "description": "t", "sort_order": "i", "is_system": "b",
+    },
+    # source: CORE (key whitelist 01G; hanya tampil/label/urutan/section) | CUSTOM (cf_*).
+    # Level core TIDAK disimpan di sini (sumber = 01F). form_level hanya untuk CUSTOM: REQUIRED|RECOMMENDED|OPTIONAL.
+    "employee_form_fields": {
+        "field_key": "s64", "source": "s32", "section_key": "s64", "sort_order": "i", "visible": "b",
+        "label_override": "s", "help_text": "t", "placeholder": "s", "field_type": "s32", "options": "j",
+        "validation": "j", "form_level": "s32", "data_version": "i",
+    },
+    "employee_form_field_scopes": {
+        "field_key": "s64", "scope_type": "s32", "scope_id": "s64", "scope_label": "s", "mode": "s32",
+    },
+    # Nilai custom RESMI per karyawan (tanpa kolom baru di employees). Hanya ditulis oleh approval 01H.
+    "employee_custom_field_values": {
+        "employee_id": "fk", "field_key": "s64", "value": "j", "value_text": "s512", "source_submission_id": "fk",
     },
     "public_rate_limits": {
         "key_hash": "s64", "scope": "s32", "fail_count": "i", "window_start": "dt", "locked_until": "dt",
@@ -753,6 +779,10 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("ix_submission_file", ["company_id", "submission_id", "status"], False),
     ],
     "public_rate_limits": [("ux_public_rate_key", ["key_hash"], True)],
+    "employee_form_sections": [("ux_form_section_key", ["company_id", "section_key"], True)],
+    "employee_form_fields": [("ux_form_field_key", ["company_id", "field_key"], True)],
+    "employee_form_field_scopes": [("ix_form_field_scope", ["company_id", "field_key"], False)],
+    "employee_custom_field_values": [("ux_custom_value_emp_key", ["company_id", "employee_id", "field_key"], True)],
     "employee_completeness": [
         ("ux_employee_completeness_emp", ["company_id", "employee_id"], True),
         ("ix_employee_completeness_score", ["company_id", "completeness_status", "score_pct"], False),

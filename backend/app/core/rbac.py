@@ -61,6 +61,8 @@ RESOURCES: Dict[str, tuple] = {
     "employee_status": ("Status Karyawan", "employee_core", ["manage", "change"]),
     # Upgrade 01F - Master Kelengkapan Data (melihat kelengkapan cukup employee:view)
     "employee_completeness": ("Master Kelengkapan Data", "employee_core", ["configure"]),
+    # Enhancement 01G - Form Builder (Pengaturan Form Pembaruan Data). Melihat form aktif/monitoring = employee:view
+    "employee_form": ("Form Pembaruan Data", "employee_core", ["configure"]),
     "certification": ("Sertifikasi Karyawan", "employee_core", ["view", "create", "edit", "delete", "export"]),
     "recruitment": ("Rekrutmen", "recruitment", ["view", "create", "edit", "delete", "approve", "export"]),
     "contract": ("Kontrak Kerja", "employee_core", ["view", "create", "edit", "delete", "approve"]),
@@ -162,11 +164,13 @@ def default_role_permissions() -> Dict[str, List[str]]:
         + ["employee:import"]
         # Upgrade 01F - Master Kelengkapan Data
         + ["employee_completeness:configure"]
+        # Enhancement 01G - Form Builder
+        + ["employee_form:configure"]
     )
     # hr_manager mewarisi hr_admin; hak Status Karyawan 01B dan impor massal 01E hanya untuk
     # Tenant Admin / Company Owner / HR Admin (keputusan user) -> dikeluarkan.
     _hr_manager_excluded = {"employee_status:manage", "employee_status:change", "employee:import",
-                            "employee_completeness:configure"}
+                            "employee_completeness:configure", "employee_form:configure"}
 
     hr_manager = [k for k in hr_admin if k not in _hr_manager_excluded] + [
         "approval_workflow:create", "approval_workflow:edit", "approval_workflow:delete",

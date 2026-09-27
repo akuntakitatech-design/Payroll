@@ -17,8 +17,10 @@ Batasan tambahan (untuk fase upgrade saat ini):
 - Semua test fixture upgrade 01E **harus prefix `ZT01E`**.
 - Tenant **`ZT01B170909`**: **jangan disentuh** (catat sebagai existing test tenant di luar scope 01E-B).
 
-### Update fokus (fase saat ini)
-Fokus aktif saat ini:
+### Update fokus (fase saat ini) — 2026-09-27
+**Enhancement 01G — Flexible Employee Form Builder: LOCKED ✅** (see §15.4e). 01F LOCKED ✅ · 01G LOCKED ✅ · 01H NOT STARTED. Branch `feature/upgrade-01g-form-builder`. Production Changed: NO.
+
+(Historical focus, older phases:)
 1) **01C Employee Profile 360** — **COMPLETED & LOCKED**.
 2) **01D Current Assignment / Penempatan Karyawan** — **COMPLETED** (agent-tested) — sebelumnya STOP menunggu review.
 3) **01E Employee Migration (Excel Import)**:
@@ -663,6 +665,45 @@ Status legend: DONE / PASS / IN PROGRESS / PARTIAL / TODO / BLOCKED / DEFERRED. 
 - Environment event: container recycle → MariaDB FATAL at autostart → started via supervisor (no datadir re-init) + one backend recovery restart (ENVIRONMENT, not 01G).
 - Restart sanity: backend restarted once → healthy, staging, AUTO_SEED=false, m0008 SKIP, 0 table deltas, portal smoke PASS (verify/session/logout, PostHog absent), smoke fixture cleaned → 0 deltas.
 - Report: `/app/UPGRADE_01G_PUBLIC_EMPLOYEE_FORM_PROGRESS.md` section F. Production Changed: NO. No push/PR/merge/deploy.
+### 15.4c — PR #14 (01F + 01G) (STATUS: OPEN, ready for review — NOT merged, NOT deployed)
+- https://github.com/akuntakitatech-design/Payroll/pull/14 · branch `feature/upgrade-01f-01g-completeness-public-form` → `main` (base `af266c9`, after PR #13). 3 commits (01F, 01G, docs plan), 39 files +6040/−15, GitHub mergeable = clean.
+- Built from origin/main in a separate worktree (the local branch history was not rewritten). Excluded: `.env.example`, `backend/.env.example`, `.gitignore`, `UPGRADE_01A` (production IP), `memory/`, `test_reports/`. Product code is identical to the tested code.
+- Token used only for push + PR creation (not stored in git config; temp files deleted). The user must revoke it. Production Changed: NO.
+### 15.4d — ENHANCEMENT 01G: Flexible Employee Form Builder (STATUS: AUDIT DONE · schema proposal — STOP for review, NO migration/code yet)
+- Audit: 01F completeness_rules + scopes reusable as the source of truth for core field levels (REQUIRED/RECOMMENDED/OFF; 11 scope types incl. project/department/job_grade/position/status). There is no custom-field infrastructure (no JSON column on employees).
+- Proposal m0009 (additive): employee_form_sections, employee_form_fields (CORE config + CUSTOM definitions), employee_form_field_scopes, employee_custom_field_values; employee_submission_files.field_key; proposed.custom + meta.form_version.
+- Open decisions: custom field levels Option 1 (form-only, no 01F change — recommended) vs Option 2 (CUSTOM.* in 01F); permission employee_form:configure vs reuse; @dnd-kit; git (stacked PR on PR #14); custom file fields = pending attachment.
+- Document: `/app/UPGRADE_01G_FORM_BUILDER_AUDIT.md`. Production Changed: NO.
+- PR #14 was MERGED into main (`bb73dbe`). This audit doc + plan note were submitted as **PR #15** (docs only, branch `docs/01g-form-builder-audit`, open, mergeable clean): https://github.com/akuntakitatech-design/Payroll/pull/15
+### 15.4e — ENHANCEMENT 01G: Flexible Employee Form Builder — IMPLEMENTATION (STATUS: **LOCKED ✅** — per the user's FINAL CLOSING instruction)
+Module status: 01F — Data Completeness: **LOCKED ✅** · 01G — Public Employee Form: **LOCKED ✅** · Enhancement 01G — Flexible Employee Form Builder: **LOCKED ✅** · 01H — HR Verification: **NOT STARTED**.
+Branch `feature/upgrade-01g-form-builder` (from main `bb73dbe`; PR #15 not reused). Local commits `c083e42` + `a8a6e9c` (platform auto-commit; NOT pushed). No push/PR/merge/deploy. Production Changed: NO.
+Locked decisions: core level = 01F (OFF = Tidak Dinilai, not Optional); 01F REQUIRED > builder hidden (backend); custom REQUIRED/RECOMMENDED/OPTIONAL outside the 01F score; `employee_form:configure`; prefix `cf_`/`cs_`; no hard delete (inactive); custom files = pending until 01H; no columns on `employees`.
+| Item | Status |
+|---|---|
+| Audit/design · architecture decisions | DONE |
+| Migration m0009 | DONE — PASS (ledger 1×, rerun SKIP, clean-DB PASS, no schema drift; warning Note 1050 informational) |
+| Backend Form Builder (reserved denylist, DB-side monitoring, hidden-core rule) | DONE — PASS (suite 88/88) |
+| Dynamic public form | DONE — PASS (backend + browser) |
+| Backoffice page + menu Data Karyawan → Form Pembaruan Data | DONE — PASS |
+| Share Link / QR / PNG download | DONE — PASS (QR decoded = public URL only) |
+| Monitoring (DB-side + UI + filters) | DONE — PASS |
+| Custom fields · scope · confirmations · forced badge · preview mobile/desktop · drag & drop (field+section, mouse+keyboard) | DONE — PASS |
+| **Custom Field E2E** | **PASS ✅** (browser 24/24, fixture ZT01G-E2E-085945) |
+| RBAC employee_form:configure · tenant isolation | PASS |
+| Responsive 360/390/430/768/1366 (public + backoffice) | PASS |
+| Regression: 01F 79/79 + isolation 4/4 · 01G 77/77 · security 35/35 · portal 59/59 · analytics 9/9 · tenant pytest · expired browser | PASS (01F concurrency not rerun: 01F engine diff = 0 lines) |
+| Compile + `yarn build` | PASS |
+| **Regression & Restart Verification** | **PASS** (restart delta NONE, m0009 SKIP) |
+| Drag & Drop E2E (targeted, iteration_15 + agent verification) | PASS |
+| Scoped ZT cleanup | APPLIED · PASS — 40 employees + 96 cf_zt + 9 cs_zt + 18 scopes + dependents + 22 storage objects; integrity 17/17; G5 OUT OF SCOPE / PROTECTED (unchanged); counter NEP 83 unchanged; 10 old orphans untouched |
+| LOCK | **YES — LOCKED ✅** |
+- 15.4e.1 Code review + m0009 investigation: DONE → `/app/UPGRADE_01G_FORM_BUILDER_CODE_REVIEW.md`.
+- 15.4e.2 Blockers (reserved key/label, DB-side monitoring, hidden-core rule, backoffice reachable, UX): DONE — PASS.
+- 15.4e.3 Final verification (E2E, responsive, regression, restart, cleanup dry-run): DONE — details `/app/UPGRADE_01G_FORM_BUILDER_PROGRESS.md` §D–§H.
+- Environment event: container reset → MariaDB binary missing → reinstalled per `/app/ops/README.md` (datadir not re-initialized).
+- 15.4e.4 FINAL CLOSING: targeted DnD PASS → cleanup apply → integrity 17/17 → post-cleanup smoke PASS → **LOCKED ✅** (details `/app/UPGRADE_01G_FORM_BUILDER_PROGRESS.md` §L). Known non-blockers: core REQUIRED server-side at submit = existing 01G behavior; G5 cleanup deferred (cross-module/01F); 10 old storage orphans not owned by the FB. Hygiene: `a8a6e9c` holds an unredacted iteration_14.json (synthetic, local, not pushed; working copy redacted).
+- Next: STOP for review. Do not start 01H. No push/PR/merge/deploy.
 ### 15.5 — 01H HR Verification (inbox/compare/approve/reject/apply-to-master) (STATUS: TODO / NOT STARTED) — not part of 01G.
 
 

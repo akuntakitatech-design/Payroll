@@ -47,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..core import completeness as engine
 from ..core import completeness_mapping as M
+from ..core import form_builder as FB
 from ..core import public_form as P
 from ..core.audit import build_audit_entry, log_action
 from ..core.branding_assets import is_tenant_logo_path
@@ -611,7 +612,8 @@ def _mask_proposed(proposed: Dict[str, Any]) -> Dict[str, Any]:
         if data.get("nik"):
             data["nik"] = mask_value(data["nik"])
         family.append({**op, "data": data or None})
-    return {"fields": fields, "family": family, "notes": proposed.get("notes"), "no_npwp": bool(proposed.get("no_npwp"))}
+    return {"fields": fields, "family": family, "notes": proposed.get("notes"), "no_npwp": bool(proposed.get("no_npwp")),
+            "custom": proposed.get("custom") or {}}
 
 
 async def _doc_types(sess: PublicSession) -> List[Dict[str, Any]]:
@@ -633,9 +635,28 @@ def _max_mb(doc_type: Optional[Dict[str, Any]]) -> float:
 
 
 def _file_out(f: Dict[str, Any]) -> Dict[str, Any]:
-    return {"id": f["id"], "document_type_code": f.get("document_type_code"), "purpose": f.get("purpose"),
+    return {"id": f["id"], "document_type_code": f.get("document_type_code"), "purpose": f.get("purpose"), "field_key": f.get("field_key"),
             "file_name": f.get("file_name"), "file_size": f.get("file_size"), "mime_type": f.get("mime_type"),
             "uploaded_at": _serialize_dt(f.get("uploaded_at"))}
+
+
+async def _form_layout(sess: PublicSession):
+    """-> (config, layout, visible custom definitions, official custom values). 01F snapshot is only READ here."""
+    cfg = await FB.load_config(sess.company_id)
+    snap = await sess.tdb.employee_completeness.find_one({"company_id": sess.company_id, "employee_id": sess.employee_id}, NO_ID) or {}
+    items = _json(snap.get("items")) or []
+    if items:
+        levels, forced, forced_sec = FB.levels_from_snapshot(items)
+    else:  # no 01F snapshot yet -> conservative: rule-REQUIRED core fields stay visible
+        levels, forced, forced_sec = FB.levels_without_snapshot(await engine.load_rules(sess.company_id))
+    layout = FB.resolve_layout(cfg, levels, forced, forced_sec, sess.employee, await FB.scope_context(sess.company_id, sess.employee))
+    defs = FB.visible_custom(layout, cfg)
+    official = {}
+    if defs:
+        for r in await sess.tdb.employee_custom_field_values.find(
+                {"company_id": sess.company_id, "employee_id": sess.employee_id, "status": {"$ne": "deleted"}}, NO_ID).to_list(500):
+            official[r["field_key"]] = _json(r.get("value"))
+    return cfg, layout, defs, official
 
 
 @public_router.get("/form")
@@ -679,6 +700,23 @@ async def get_form(sess: PublicSession = Depends(get_public_session)):
             {"company_id": cid, "submission_id": sub["id"], "status": "active"}, NO_ID).sort("uploaded_at", 1).to_list(50)
         draft = {**_submission_out(sub, len(files)), "version": sub.get("version"),
                  "proposed": _mask_proposed(_json(sub.get("proposed")) or {}), "files": [_file_out(f) for f in files]}
+    # Enhancement 01G Form Builder: layout dinamis (section/urutan/label/visibility/scope/custom) per karyawan.
+    completeness = await _completeness(sess)
+    cfg, layout, custom_defs, official = await _form_layout(sess)
+    shown = {i["key"]: i for st in layout["steps"] for i in st["fields"]}
+    # Final rule (01G-FB): a core field hidden by the builder and NOT forced by 01F REQUIRED is not sent at all
+    # (no editable field, no prefill). Forced REQUIRED fields are always part of the layout.
+    fields = [f for f in fields if f["key"] in shown]
+    if draft and isinstance(draft.get("proposed"), dict):
+        draft["proposed"]["fields"] = {k: v for k, v in (draft["proposed"].get("fields") or {}).items() if k in shown}
+    for item in fields:
+        lay = shown.get(item["key"])
+        if lay:
+            item["label"], item["help_text"], item["placeholder"] = lay["label"], lay.get("help_text"), lay.get("placeholder")
+    custom_fields = [{"key": k, "label": d["label"], "type": d["type"], "help_text": d.get("help_text"),
+                      "placeholder": d.get("placeholder"), "level": d["form_level"], "level_label": FB.LEVEL_LABELS[d["form_level"]],
+                      "options": [o for o in d["options"] if o.get("active", True)], "validation": d["validation"],
+                      "value": official.get(k)} for k, d in custom_defs.items()]
     view_only = {
         "company_name": sess.company.get("name"), "employee_number": emp.get("employee_number"),
         "position": await _label(tdb, "positions", cid, emp.get("position_id")) or emp.get("job_title"),
@@ -689,7 +727,8 @@ async def get_form(sess: PublicSession = Depends(get_public_session)):
     }
     return {"mode": "READ_ONLY" if read_only else "EDIT", "message": P.MSG_SUBMITTED if read_only else None,
             "sections": [{"key": k, "label": v} for k, v in P.SECTIONS], "view_only": view_only, "fields": fields,
-            "family": family, "documents": documents, "options": OPTIONS, "completeness": await _completeness(sess),
+            "family": family, "documents": documents, "options": OPTIONS, "completeness": completeness,
+            "layout": layout, "custom_fields": custom_fields,
             "draft": draft, "session": {"expires_at": _serialize_dt(sess.link.get("session_expires_at")),
                                         "idle_timeout_minutes": int(P.SESSION_IDLE.total_seconds() // 60)}}
 
@@ -710,6 +749,7 @@ class DraftIn(BaseModel):
     family: List[FamilyOp] = Field(default_factory=list)
     notes: Optional[str] = Field(None, max_length=2000)
     no_npwp: Optional[bool] = None
+    custom: Dict[str, Any] = Field(default_factory=dict)  # Enhancement 01G Form Builder (cf_* only)
 
 
 class SubmitIn(BaseModel):
@@ -721,13 +761,20 @@ def _reject(detail: str, errors: Optional[Dict[str, str]] = None, **extra) -> JS
     return JSONResponse(status_code=422, content={"detail": detail, "errors": errors or {}, **extra})
 
 
-def _clean_draft(body: DraftIn, emp: Dict[str, Any], family_ids: set):
-    """-> (proposed, errors, rejected_fields). Kosong = tidak ada perubahan (tidak menghapus master)."""
-    rejected = sorted(k for k in body.fields if k not in P.EDITABLE_FIELDS)
+def _clean_draft(body: DraftIn, emp: Dict[str, Any], family_ids: set, custom_defs: Optional[Dict[str, Any]] = None,
+                 official: Optional[Dict[str, Any]] = None, allowed_core: Optional[set] = None):
+    """-> (proposed, errors, rejected_fields). Kosong = tidak ada perubahan (tidak menghapus master).
+    Custom answers: only ACTIVE + VISIBLE `cf_*` definitions for this employee; never merged into core/master fields.
+    `allowed_core` (Form Builder): core fields in the employee's final layout; a hidden, non-REQUIRED core field is rejected."""
+    custom_defs, official = custom_defs or {}, official or {}
+    rejected = sorted(k for k in body.fields if k not in P.EDITABLE_FIELDS or (allowed_core is not None and k not in allowed_core))
+    if body.no_npwp and allowed_core is not None and "npwp" not in allowed_core:
+        rejected.append("no_npwp")
+    rejected += sorted(k for k in body.custom if k not in custom_defs or custom_defs[k].get("type") == "file")
     errors: Dict[str, str] = {}
     fields: Dict[str, Any] = {}
     for key, raw in body.fields.items():
-        if key not in P.EDITABLE_FIELDS:
+        if key in rejected:
             continue
         if raw is not None and not isinstance(raw, (str, int, float)):
             errors[key] = "Format nilai tidak valid."
@@ -777,8 +824,19 @@ def _clean_draft(body: DraftIn, emp: Dict[str, Any], family_ids: set):
             continue
         clean = {k: v for k, v in fam.model_dump().items() if v not in (None, "")}
         family.append({"op": op.op, "ref": op.ref if op.op == "update" else None, "data": clean})
+    custom: Dict[str, Any] = {}
+    for key, raw in body.custom.items():
+        if key in rejected:
+            continue
+        val, msg = FB.validate_custom(custom_defs[key], raw)
+        if msg:
+            errors[key] = msg
+            continue
+        if val is None or val == official.get(key):
+            continue
+        custom[key] = val
     proposed = {"fields": fields, "family": family, "notes": (body.notes or "").strip() or None,
-                "no_npwp": bool(body.no_npwp)}
+                "no_npwp": bool(body.no_npwp), "custom": custom}
     return proposed, errors, rejected
 
 
@@ -789,7 +847,7 @@ async def _family_ids(sess: PublicSession) -> set:
 
 
 def _changed_names(proposed: Dict[str, Any]) -> List[str]:
-    names = sorted((proposed.get("fields") or {}).keys())
+    names = sorted((proposed.get("fields") or {}).keys()) + sorted((proposed.get("custom") or {}).keys())
     if proposed.get("family"):
         names.append("family")
     if proposed.get("no_npwp"):
@@ -840,7 +898,10 @@ async def save_draft(body: DraftIn, sess: PublicSession = Depends(get_public_ses
     _ensure_editable(sess, sub)
     if sub:
         _restore_masked(body, _json(sub.get("proposed")) or {})
-    proposed, errors, rejected = _clean_draft(body, sess.employee, await _family_ids(sess))
+    cfg, layout, custom_defs, official = await _form_layout(sess)
+    proposed, errors, rejected = _clean_draft(body, sess.employee, await _family_ids(sess), custom_defs, official,
+                                              FB.shown_core(layout))
+    proposed["meta"] = {"form_version": cfg["version"]}
     if rejected:
         return _reject("Field berikut tidak dapat diubah melalui formulir ini: " + ", ".join(rejected) + ".",
                        rejected_fields=rejected)
@@ -879,19 +940,38 @@ async def submit(body: SubmitIn, sess: PublicSession = Depends(get_public_sessio
     if body.version != sub.get("version"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Draft telah diperbarui dari tab/perangkat lain. Muat ulang formulir.")
     stored = _json(sub.get("proposed")) or {}
+    cfg, layout, custom_defs, official = await _form_layout(sess)
+    allowed_core = FB.shown_core(layout)
+    # answers for fields that HR has since deactivated/hidden (custom, or core not REQUIRED by 01F) are dropped (never applied)
+    stored_custom = {k: v for k, v in (stored.get("custom") or {}).items() if k in custom_defs and custom_defs[k].get("type") != "file"}
+    stored_fields = {k: v for k, v in (stored.get("fields") or {}).items() if k in allowed_core}
     try:
-        again = DraftIn(fields=stored.get("fields") or {}, family=stored.get("family") or [],
-                        notes=stored.get("notes"), no_npwp=stored.get("no_npwp"))
+        again = DraftIn(fields=stored_fields, family=stored.get("family") or [],
+                        notes=stored.get("notes"), no_npwp=bool(stored.get("no_npwp")) and "npwp" in allowed_core, custom=stored_custom)
     except ValidationError:
         return _reject("Draft tidak valid. Simpan ulang draft Anda.")
     family_ids = await _family_ids(sess)
-    proposed, errors, rejected = _clean_draft(again, emp, family_ids)
+    proposed, errors, rejected = _clean_draft(again, emp, family_ids, custom_defs, official, allowed_core)
     if errors or rejected:
         return _reject("Periksa kembali isian yang ditandai sebelum mengirim.", errors)
-    files = await tdb.employee_submission_files.count_documents({"company_id": cid, "submission_id": sub["id"], "status": "active"})
-    if not proposed["fields"] and not proposed["family"] and not proposed["no_npwp"] and not files:
+    active_files = await tdb.employee_submission_files.find(
+        {"company_id": cid, "submission_id": sub["id"], "status": "active"}, {"field_key": 1}).to_list(100)
+    files = len(active_files)
+    file_keys = {f.get("field_key") for f in active_files if f.get("field_key")}
+    missing = {}
+    for k, d in custom_defs.items():
+        if d["form_level"] != "REQUIRED":
+            continue
+        ok = (k in file_keys) if d["type"] == "file" else (proposed["custom"].get(k) is not None or official.get(k) not in (None, "", []))
+        if not ok:
+            missing[k] = "Wajib diisi."
+    if missing:
+        return _reject("Masih ada pertanyaan wajib yang belum diisi.", missing)
+    proposed["meta"] = {"form_version": cfg["version"]}
+    if not proposed["fields"] and not proposed["family"] and not proposed["no_npwp"] and not proposed["custom"] and not files:
         return _reject("Belum ada perubahan data atau dokumen yang diajukan.")
     baseline_fields = {k: emp.get(k) for k in proposed["fields"]}
+    baseline_custom = {k: official.get(k) for k in proposed["custom"]}
     refs = [op["ref"] for op in proposed["family"] if op.get("ref")]
     baseline_family = {}
     if refs:
@@ -909,7 +989,7 @@ async def submit(body: SubmitIn, sess: PublicSession = Depends(get_public_sessio
         if not cur or cur.get("status") != P.DRAFT or cur.get("version") != body.version:
             raise HTTPException(status.HTTP_409_CONFLICT, "Draft telah berubah atau sudah dikirim. Muat ulang formulir.")
         await tx.update("employee_update_submissions", {"id": sub["id"], "company_id": cid}, {
-            "status": P.PENDING, "proposed": proposed, "baseline": {"fields": baseline_fields, "family": baseline_family},
+            "status": P.PENDING, "proposed": proposed, "baseline": {"fields": baseline_fields, "family": baseline_family, "custom": baseline_custom},
             "changed_fields": changed, "identity_change": identity, "submitted_at": ts, "submit_ip": sess.ip,
             "completeness_before": {"score_pct": snap.get("score_pct"), "status": snap.get("completeness_status"),
                                     "missing_codes": _json(snap.get("missing_codes")) or []},
@@ -939,14 +1019,23 @@ def _safe_name(name: str, ext: str) -> str:
 
 
 @public_router.post("/attachments", status_code=201)
-async def upload_attachment(file: UploadFile = File(...), document_type_code: str = Form(..., max_length=64),
+async def upload_attachment(file: UploadFile = File(...), document_type_code: str = Form("", max_length=64),
+                            field_key: Optional[str] = Form(None, max_length=64),
                             sess: PublicSession = Depends(get_public_session)):
     tdb, cid = sess.tdb, sess.company_id
     sub = await _open_submission(tdb, cid, sess.employee_id)
     _ensure_editable(sess, sub)
     code = document_type_code.strip().upper()
-    doc_type = None
-    if code == P.PHOTO_CODE:
+    doc_type, custom_def = None, None
+    if field_key:  # Enhancement 01G: custom field tipe file -> lampiran PENDING (bukan dokumen resmi)
+        _c, _l, custom_defs, _o = await _form_layout(sess)
+        custom_def = custom_defs.get(field_key)
+        if not custom_def or custom_def.get("type") != "file":
+            return _reject("Pertanyaan tidak dikenal.", {"field_key": "Pertanyaan tidak dikenal."})
+        code, purpose = field_key, "CUSTOM_FIELD"
+    elif not code:
+        return _reject("Jenis dokumen tidak dikenal.", {"document_type_code": "Jenis dokumen tidak dikenal."})
+    elif code == P.PHOTO_CODE:
         purpose = "PHOTO"
     else:
         purpose = "DOCUMENT"
@@ -954,19 +1043,23 @@ async def upload_attachment(file: UploadFile = File(...), document_type_code: st
         if not doc_type:
             return _reject("Jenis dokumen tidak dikenal.", {"document_type_code": "Jenis dokumen tidak dikenal."})
     allowed = _allowed_ext(doc_type)
+    max_mb = _max_mb(doc_type)
+    if custom_def:
+        allowed = sorted(set(custom_def["validation"].get("allowed_ext") or P.PUBLIC_EXTENSIONS) & P.PUBLIC_EXTENSIONS)
+        max_mb = min(float(custom_def["validation"].get("max_mb") or P.PUBLIC_MAX_MB), P.PUBLIC_MAX_MB)
     ext = os.path.splitext(file.filename or "")[1].lstrip(".").lower()
     if ext not in allowed:
         return _reject(f"Jenis berkas tidak diizinkan. Gunakan: {', '.join(allowed)}.", {"file": "Jenis berkas tidak diizinkan."})
-    max_bytes = int(_max_mb(doc_type) * 1024 * 1024)
+    max_bytes = int(max_mb * 1024 * 1024)
     data = await file.read(max_bytes + 1)
     if not data:
         return _reject("Berkas kosong.", {"file": "Berkas kosong."})
     if len(data) > max_bytes:
-        return _reject(f"Ukuran berkas melebihi batas {_max_mb(doc_type):g} MB.", {"file": "Ukuran berkas terlalu besar."})
+        return _reject(f"Ukuran berkas melebihi batas {max_mb:g} MB.", {"file": "Ukuran berkas terlalu besar."})
     if not _MAGIC[ext](data):
         return _reject("Isi berkas tidak sesuai dengan jenis berkasnya.", {"file": "Isi berkas tidak sesuai."})
     if not sub:
-        sub = await _new_draft(sess, {"fields": {}, "family": [], "notes": None, "no_npwp": False})
+        sub = await _new_draft(sess, {"fields": {}, "family": [], "notes": None, "no_npwp": False, "custom": {}})
     base = {"company_id": cid, "submission_id": sub["id"], "status": "active"}
     if await tdb.employee_submission_files.count_documents(base) >= P.MAX_FILES_PER_SUBMISSION:
         return _reject(f"Maksimal {P.MAX_FILES_PER_SUBMISSION} berkas per pengajuan.")
@@ -982,6 +1075,7 @@ async def upload_attachment(file: UploadFile = File(...), document_type_code: st
            "document_type_id": doc_type["id"] if doc_type else None, "document_type_code": code, "purpose": purpose,
            "file_name": _safe_name(file.filename, ext), "file_extension": ext, "mime_type": _MIME[ext], "file_size": len(data),
            "sha256": hashlib.sha256(data).hexdigest(), "storage_path": path, "uploaded_at": now(),
+           "field_key": field_key if custom_def else None,
            "created_at": now(), "updated_at": now()}
     await tdb.employee_submission_files.insert_one(dict(row))
     await tdb.employee_update_submissions.update_one({"id": sub["id"]}, {"$set": {"draft_saved_at": now(), "updated_at": now()}})

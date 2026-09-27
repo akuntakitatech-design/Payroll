@@ -10,7 +10,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { publicFormApi, sessionStore, enforcePublicAnalyticsOff } from "@/lib/publicFormApi";
-import { CompletenessCard, FieldInput, PublicShell, REQ_FIELDS, SaveStatus, SECTION_TITLES, StatusScreen, StepProgress, STEPS, stepOf } from "@/components/public-form/PublicFormParts";
+import { CompletenessCard, FieldInput, PublicShell, REQ_FIELDS, SaveStatus, StatusScreen, StepProgress, STEPS } from "@/components/public-form/PublicFormParts";
+import { CustomFieldInput, customFilled } from "@/components/public-form/CustomFieldInput";
 import { FamilySection } from "@/components/public-form/FamilySection";
 import { DocumentsSection } from "@/components/public-form/DocumentsSection";
 import { ReviewSection } from "@/components/public-form/ReviewSection";
@@ -43,6 +44,7 @@ export default function PublicEmployeeFormPage() {
   const [savedAt, setSavedAt] = useState(null);
   const [busy, setBusy] = useState(false);
   const [agree, setAgree] = useState(false);
+  const [cvals, setCvals] = useState({});
   const dirty = useRef(false);
   const saving = useRef(null);
   const topRef = useRef(null);
@@ -57,6 +59,9 @@ export default function PublicEmployeeFormPage() {
       if (fd.sensitive) { if (dv && typeof dv === "object" && dv.masked) dm[fd.key] = dv.masked; }
       else v[fd.key] = dv !== undefined && dv !== null ? String(dv) : fd.value !== null && fd.value !== undefined ? String(fd.value) : "";
     });
+    const cv = {};
+    (f.custom_fields || []).forEach((cf) => { const dv = d.custom?.[cf.key]; cv[cf.key] = dv !== undefined && dv !== null ? dv : cf.value ?? (cf.type === "checkbox" && cf.options?.length ? [] : ""); });
+    setCvals(cv);
     setForm(f); setValues(v); setSens({}); setDraftMasked(dm); setOps(d.family || []); setNoNpwp(!!d.no_npwp);
     setFiles(f.draft?.files || []); setVersion(f.draft?.version ?? null); setErrors({}); dirty.current = false;
     setSaveState(f.draft ? "saved" : null); setSavedAt(f.draft?.draft_saved_at ? fmtDate(f.draft.draft_saved_at) : null);
@@ -92,6 +97,18 @@ export default function PublicEmployeeFormPage() {
 
   // ------------------------------------------------------------------ payload & simpan draft
   const fieldsBy = useMemo(() => Object.fromEntries((form?.fields || []).map((f) => [f.key, f])), [form]);
+  const customBy = useMemo(() => Object.fromEntries((form?.custom_fields || []).map((f) => [f.key, f])), [form]);
+  // Enhancement 01G Form Builder: langkah dinamis dari layout server (section/urutan/label/visibility/scope) + Review
+  const steps = useMemo(() => {
+    if (form?.layout?.steps) return [...form.layout.steps, { key: "review", label: "Review", kind: "review", fields: [] }];
+    return STEPS.map((s) => ({ key: s.key, label: s.label, kind: s.key === "review" ? "review" : s.sections ? "fields" : s.key,
+      fields: (form?.fields || []).filter((f) => (s.sections || []).includes(f.section)).map((f) => ({ key: f.key, source: "CORE" })) }));
+  }, [form]);
+  const fieldStep = useMemo(() => {
+    const m = {};
+    steps.forEach((s) => { s.fields.forEach((f) => { m[f.key] = s.key; }); if (s.kind === "family" || s.kind === "documents") m[`__${s.kind}`] = s.key; });
+    return m;
+  }, [steps]);
   const buildPayload = useCallback(() => {
     const out = {};
     (form?.fields || []).forEach((fd) => {
@@ -103,23 +120,30 @@ export default function PublicEmployeeFormPage() {
         if (nv && nv !== String(fd.value ?? "")) out[fd.key] = nv;
       }
     });
-    return { version, fields: out, family: ops, no_npwp: noNpwp };
-  }, [form, sens, draftMasked, values, ops, noNpwp, version]);
+    const custom = {};
+    Object.values(customBy).forEach((cf) => {
+      if (cf.type === "file") return;
+      const v = cvals[cf.key];
+      const empty = v === undefined || v === null || v === "" || v === false || (Array.isArray(v) && !v.length);
+      if (!empty && JSON.stringify(v) !== JSON.stringify(cf.value ?? null)) custom[cf.key] = typeof v === "string" ? v.trim() : v;
+    });
+    return { version, fields: out, family: ops, no_npwp: noNpwp, custom };
+  }, [form, sens, draftMasked, values, ops, noNpwp, version, customBy, cvals]);
 
   const focusError = useCallback((errs) => {
     const first = Object.keys(errs)[0];
     if (!first) return;
-    const sec = first.startsWith("family") ? "family" : stepOf(fieldsBy[first]?.section);
-    const idx = STEPS.findIndex((s) => s.key === sec);
+    const sec = first.startsWith("family") ? fieldStep.__family : fieldStep[first];
+    const idx = steps.findIndex((s) => s.key === sec);
     if (idx >= 0) setStep(idx);
     setTimeout(() => document.getElementById(`pef-${first}`)?.focus(), 150);
-  }, [fieldsBy]);
+  }, [fieldStep, steps]);
 
   const save = useCallback(async ({ silent = false } = {}) => {
     if (!sess) return false;
     if (saving.current) await saving.current.catch(() => {});
     const payload = buildPayload();
-    if (payload.version === null && !Object.keys(payload.fields).length && !payload.family.length && !payload.no_npwp) { dirty.current = false; return true; }
+    if (payload.version === null && !Object.keys(payload.fields).length && !payload.family.length && !payload.no_npwp && !Object.keys(payload.custom).length) { dirty.current = false; return true; }
     setSaveState("saving");
     const run = publicFormApi.saveDraft(sess, payload);
     saving.current = run;
@@ -157,25 +181,27 @@ export default function PublicEmployeeFormPage() {
     setSaveState("dirty");
     const t = setTimeout(() => { if (dirty.current) save({ silent: true }); }, 3000);
     return () => clearTimeout(t);
-  }, [values, sens, ops, noNpwp, phase, save]);
+  }, [values, sens, ops, noNpwp, cvals, phase, save]);
 
   const change = (k, v) => { dirty.current = true; if (fieldsBy[k]?.sensitive) setSens((s) => ({ ...s, [k]: v })); else setValues((s) => ({ ...s, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); };
   const changeOps = (next) => { dirty.current = true; setOps(next); };
+  const changeCustom = (k, v) => { dirty.current = true; setCvals((s) => ({ ...s, [k]: v })); setErrors((e) => ({ ...e, [k]: undefined })); };
 
   const refreshDraftMeta = async () => {
     const f = await publicFormApi.form(sess);
     setFiles(f.draft?.files || []); setVersion(f.draft?.version ?? null);
   };
-  const upload = async (code, file, replaceIds = []) => {
+  const upload = async (code, file, replaceIds = [], fieldKey = null) => {
     try {
       if (dirty.current) await save({ silent: true });
-      await publicFormApi.upload(sess, file, code);
+      await publicFormApi.upload(sess, file, code, fieldKey);
       // "Ganti": berkas pending lama untuk jenis yang sama dihapus SETELAH berkas baru berhasil diunggah
       for (const id of replaceIds) { await publicFormApi.removeFile(sess, id).catch(() => {}); }
       await refreshDraftMeta();
       toast.success(replaceIds.length ? "Berkas diganti di draft." : "Berkas terunggah ke draft.");
-    } catch (e) { if (e.status === 401) expire(); throw e; }
+    } catch (e) { if (e.status === 401) expire(); else if (fieldKey) toast.error(e.detail); throw e; }
   };
+  const uploadCustom = (key, file) => upload(null, file, [], key);
   const removeFile = async (id) => {
     try { await publicFormApi.removeFile(sess, id); await refreshDraftMeta(); } catch (e) { if (e.status === 401) expire(); else toast.error(e.detail); }
   };
@@ -195,26 +221,34 @@ export default function PublicEmployeeFormPage() {
       return fs.every((k) => provided(k) || (it.status === "MISSING" && fieldsBy[k]?.has_value));
     };
     const state = {}, badge = {}, docNeed = {};
-    STEPS.forEach((s) => { state[s.key] = { ok: true, required: [], recommended: [], changes: 0 }; });
+    steps.forEach((s) => { state[s.key] = { ok: true, required: [], recommended: [], changes: 0 }; });
+    const stepFor = (it) => (it.section === "family" ? fieldStep.__family : it.section === "documents" ? fieldStep.__documents
+      : (REQ_FIELDS[it.code] || []).map((k) => fieldStep[k]).find(Boolean));
     (form?.completeness?.missing || []).forEach((it) => {
       if (addressed(it)) return;
-      const st = state[stepOf(it.section)];
+      const st = state[stepFor(it)];
       if (!st) return;
       if (it.level === "REQUIRED") { st.ok = false; st.required.push(it.label); } else st.recommended.push(it.label);
       (REQ_FIELDS[it.code] || []).forEach((k) => { badge[k] = it.level; });
       docNeed[it.code] = it.level;
     });
-    Object.keys(payload.fields).forEach((k) => { const s = stepOf(fieldsBy[k]?.section); if (state[s]) state[s].changes += 1; });
-    state.family.changes = ops.length; state.documents.changes = files.length;
-    if (noNpwp) state.bank_tax.changes += 1;
-    const firstGap = STEPS.findIndex((s) => state[s.key] && !state[s.key].ok);
-    const total = Object.keys(payload.fields).length + ops.length + files.length + (noNpwp ? 1 : 0);
+    Object.values(customBy).forEach((cf) => {
+      const st = state[fieldStep[cf.key]];
+      if (!st || cf.level === "OPTIONAL" || customFilled(cf, cvals[cf.key], files)) return;
+      if (cf.level === "REQUIRED") { st.ok = false; st.required.push(cf.label); } else st.recommended.push(cf.label);
+    });
+    [...Object.keys(payload.fields), ...Object.keys(payload.custom)].forEach((k) => { const s = fieldStep[k]; if (state[s]) state[s].changes += 1; });
+    files.forEach((f) => { const s = f.field_key ? fieldStep[f.field_key] : fieldStep.__documents; if (state[s]) state[s].changes += 1; });
+    if (fieldStep.__family && state[fieldStep.__family]) state[fieldStep.__family].changes = ops.length;
+    if (noNpwp && state[fieldStep.npwp]) state[fieldStep.npwp].changes += 1;
+    const firstGap = steps.findIndex((s) => state[s.key] && !state[s.key].ok);
+    const total = Object.keys(payload.fields).length + Object.keys(payload.custom).length + ops.length + files.length + (noNpwp ? 1 : 0);
     return { state, badge, docNeed, firstGap, total };
-  }, [buildPayload, files, ops, noNpwp, form, fieldsBy]);
+  }, [buildPayload, files, ops, noNpwp, form, fieldsBy, customBy, cvals, steps, fieldStep]);
 
   // ------------------------------------------------------------------ navigasi & kirim
   const goStep = (i) => { setStep(i); setTimeout(() => window.scrollTo({ top: 0, behavior: "auto" }), 0); };
-  const next = async () => { setBusy(true); const ok = dirty.current ? await save() : true; setBusy(false); if (ok) goStep(Math.min(step + 1, STEPS.length - 1)); };
+  const next = async () => { setBusy(true); const ok = dirty.current ? await save() : true; setBusy(false); if (ok) goStep(Math.min(step + 1, steps.length - 1)); };
   const back = () => { if (dirty.current) save({ silent: true }); goStep(Math.max(step - 1, 0)); };
 
   const submit = async () => {
@@ -277,37 +311,49 @@ export default function PublicEmployeeFormPage() {
       {phase === "form" && form && (
         <div className="space-y-5" data-testid="public-form">
           <div className="flex items-center justify-between gap-2"><SaveStatus state={saveState} at={savedAt} /><Button variant="ghost" size="sm" className="h-10" onClick={logout} data-testid="public-form-logout"><LogOut className="mr-1 h-4 w-4" />Keluar</Button></div>
-          <StepProgress index={step} total={STEPS.length} label={STEPS[step].label} />
+          <StepProgress index={step} total={steps.length} label={steps[step]?.label} />
           {notice && <Alert data-testid="public-form-notice"><AlertDescription className="flex flex-wrap items-center gap-2">{notice}<Button size="sm" variant="outline" onClick={() => { setNotice(null); loadForm(sess, "form"); }} data-testid="public-reload-button">Muat ulang</Button></AlertDescription></Alert>}
-          {(STEPS[step].sections || []).map((secKey) => (
-            <section key={secKey} className="space-y-5 rounded-2xl border bg-background p-4 sm:p-6" data-testid={`public-section-${secKey}`}>
-              {STEPS[step].sections.length > 1 && <h3 className="text-base font-semibold" data-testid={`public-section-title-${secKey}`}>{SECTION_TITLES[secKey] || secKey}</h3>}
-              {form.fields.filter((f) => f.section === secKey).map((f) => (
-                <FieldInput key={f.key} field={f} value={f.sensitive ? sens[f.key] : values[f.key]} onChange={change} error={errors[f.key]}
-                  badge={analysis.badge[f.key]} draftMasked={f.sensitive ? draftMasked[f.key] : null} options={f.options ? form.options[f.options] : null} disabled={busy} />
-              ))}
-              {secKey === "bank_tax" && (
-                <label className="flex min-h-12 items-center gap-3 rounded-lg border p-3"><Checkbox checked={noNpwp} onCheckedChange={(v) => { dirty.current = true; setNoNpwp(!!v); }} data-testid="public-no-npwp" /><span className="text-sm">Saya tidak memiliki NPWP</span></label>
-              )}
+          {steps[step]?.kind === "fields" && (
+            <section className="space-y-5 rounded-2xl border bg-background p-4 sm:p-6" data-testid={`public-section-${steps[step].key}`}>
+              {steps[step].description && <p className="text-sm text-muted-foreground">{steps[step].description}</p>}
+              {steps[step].fields.map((it) => {
+                if (it.source === "CUSTOM") {
+                  const cf = customBy[it.key];
+                  return cf ? <CustomFieldInput key={it.key} field={cf} value={cvals[it.key]} onChange={changeCustom} error={errors[it.key]} disabled={busy}
+                    files={files} onUpload={uploadCustom} onRemove={removeFile} /> : null;
+                }
+                const f = fieldsBy[it.key];
+                if (!f) return null;
+                return (
+                  <React.Fragment key={f.key}>
+                    <FieldInput field={f} value={f.sensitive ? sens[f.key] : values[f.key]} onChange={change} error={errors[f.key]}
+                      badge={analysis.badge[f.key]} draftMasked={f.sensitive ? draftMasked[f.key] : null} options={f.options ? form.options[f.options] : null} disabled={busy} />
+                    {f.help_text && <p className="-mt-3 text-xs text-muted-foreground" data-testid={`public-field-help-${f.key}`}>{f.help_text}</p>}
+                    {f.key === "npwp" && (
+                      <label className="flex min-h-12 items-center gap-3 rounded-lg border p-3"><Checkbox checked={noNpwp} onCheckedChange={(v) => { dirty.current = true; setNoNpwp(!!v); }} data-testid="public-no-npwp" /><span className="text-sm">Saya tidak memiliki NPWP</span></label>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </section>
-          ))}
-          {STEPS[step].key === "family" && <FamilySection family={form.family} ops={ops} setOps={changeOps} options={form.options} disabled={busy} errors={errors} />}
-          {STEPS[step].key === "documents" && <DocumentsSection documents={form.documents} files={files} onUpload={upload} onRemove={removeFile} disabled={busy} missingCodes={analysis.docNeed} />}
-          {STEPS[step].key === "review" && (<>
+          )}
+          {steps[step]?.kind === "family" && <FamilySection family={form.family} ops={ops} setOps={changeOps} options={form.options} disabled={busy} errors={errors} />}
+          {steps[step]?.kind === "documents" && <DocumentsSection documents={form.documents} files={files.filter((f) => !f.field_key)} onUpload={upload} onRemove={removeFile} disabled={busy} missingCodes={analysis.docNeed} />}
+          {steps[step]?.kind === "review" && (<>
             <CompletenessCard completeness={form.completeness} compact />
-            <ReviewSection sectionState={analysis.state} changedCount={analysis.total} onGo={goStep} agree={agree} setAgree={setAgree} disabled={busy} />
+            <ReviewSection steps={steps} sectionState={analysis.state} changedCount={analysis.total} onGo={goStep} agree={agree} setAgree={setAgree} disabled={busy} />
             {analysis.firstGap >= 0 && <Alert className="border-amber-300 bg-amber-50" data-testid="public-review-blocked"><AlertDescription className="text-amber-900">Masih ada data <b>wajib</b> yang belum dilengkapi. <button type="button" className="font-semibold underline" onClick={() => goStep(analysis.firstGap)} data-testid="public-review-goto-gap">Lengkapi sekarang</button></AlertDescription></Alert>}
           </>)}
           <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
             <div className="flex gap-2">
               {step > 0 && <Button variant="outline" className="h-12 px-4" onClick={back} disabled={busy} aria-label="Kembali" data-testid="public-back-button"><ArrowLeft className="h-5 w-5" /><span className="ml-1 hidden sm:inline">Kembali</span></Button>}
-              {STEPS[step].key !== "review" ? (
+              {steps[step]?.kind !== "review" ? (
                 <Button className="h-12 flex-1 text-base" onClick={next} disabled={busy} data-testid="public-next-button">{busy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}Simpan &amp; Lanjutkan</Button>
               ) : (
                 <Button className="h-12 flex-1 text-base" onClick={submit} disabled={busy || !agree || analysis.firstGap >= 0 || analysis.total === 0} data-testid="public-submit-button">{busy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Send className="mr-2 h-5 w-5" />}Kirim Data ke HR</Button>
               )}
             </div>
-            {STEPS[step].key === "review" && analysis.total === 0 && <p className="mt-2 text-xs text-muted-foreground" data-testid="public-submit-empty">Belum ada perubahan data atau dokumen yang diajukan.</p>}
+            {steps[step]?.kind === "review" && analysis.total === 0 && <p className="mt-2 text-xs text-muted-foreground" data-testid="public-submit-empty">Belum ada perubahan data atau dokumen yang diajukan.</p>}
           </div>
         </div>
       )}
