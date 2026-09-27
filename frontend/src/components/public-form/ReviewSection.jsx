@@ -1,13 +1,12 @@
 import React from "react";
 import { AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { STEPS } from "@/components/public-form/PublicFormParts";
 
 /** Ringkasan per bagian. REQUIRED yang belum dilengkapi memblokir kirim; RECOMMENDED tidak. */
-export const ReviewSection = ({ sectionState, changedCount, onGo, agree, setAgree, disabled }) => (
+export const ReviewSection = ({ steps, sectionState, changedCount, onGo, agree, setAgree, disabled }) => (
   <div className="space-y-4" data-testid="public-review-section">
     <ul className="divide-y rounded-xl border bg-background">
-      {STEPS.filter((s) => s.key !== "review").map((s, i) => {
+      {steps.filter((s) => s.key !== "review").map((s, i) => {
         const st = sectionState[s.key] || { ok: true, required: [], recommended: [], changes: 0 };
         return (
           <li key={s.key}>

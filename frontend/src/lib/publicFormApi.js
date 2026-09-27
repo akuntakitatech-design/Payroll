@@ -75,10 +75,10 @@ export const publicFormApi = {
   form: (s) => request("GET", "/form", { token: s }),
   saveDraft: (s, payload) => request("PUT", "/draft", { token: s, json: payload }),
   submit: (s, version) => request("POST", "/submit", { token: s, json: { version } }),
-  upload: (s, file, code) => {
+  upload: (s, file, code, fieldKey) => {
     const fd = new FormData();
     fd.append("file", file);
-    fd.append("document_type_code", code);
+    if (fieldKey) fd.append("field_key", fieldKey); else fd.append("document_type_code", code);
     return request("POST", "/attachments", { token: s, form: fd });
   },
   removeFile: (s, id) => request("DELETE", `/attachments/${encodeURIComponent(id)}`, { token: s }),
