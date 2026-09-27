@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.db import NO_ID, ReturnDocument, now, serialize
 from ..core.deps import AuthContext
@@ -404,6 +405,7 @@ async def convert_candidate(candidate_id: str, payload: CandidateConvertInput, c
 
     fresh = await _get_candidate(ctx, candidate_id)
     enriched = (await _enrich(ctx.company_id, [serialize(fresh)]))[0]
+    await completeness.safe_refresh(ctx.company_id, [employee["id"]], "recruitment", ctx.user_id)  # Upgrade 01F
     return {
         "message": f"{candidate.get('full_name')} berhasil menjadi karyawan dengan nomor {employee.get('employee_number')}.",
         "candidate": enriched,

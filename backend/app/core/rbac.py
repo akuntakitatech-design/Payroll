@@ -8,7 +8,8 @@ by the seeder.
 """
 from typing import Dict, List
 
-ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "view_own", "manage", "change", "import"]
+ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "view_own", "manage", "change", "import",
+           "configure"]
 
 ACTION_LABELS = {
     "view": "Lihat",
@@ -24,6 +25,8 @@ ACTION_LABELS = {
     "change": "Ubah Status",
     # Upgrade 01E - impor/migrasi massal Excel (hak khusus, tidak otomatis dari create/edit)
     "import": "Impor Massal",
+    # Upgrade 01F - kelola Master Kelengkapan Data
+    "configure": "Kelola Konfigurasi",
 }
 
 # resource_key -> (label_id, module_key, [allowed actions])
@@ -56,6 +59,8 @@ RESOURCES: Dict[str, tuple] = {
     # Upgrade 01B: manage = kelola Master Status Karyawan; change = Ubah Status karyawan.
     # Lihat status & riwayat mengikuti employee:view.
     "employee_status": ("Status Karyawan", "employee_core", ["manage", "change"]),
+    # Upgrade 01F - Master Kelengkapan Data (melihat kelengkapan cukup employee:view)
+    "employee_completeness": ("Master Kelengkapan Data", "employee_core", ["configure"]),
     "certification": ("Sertifikasi Karyawan", "employee_core", ["view", "create", "edit", "delete", "export"]),
     "recruitment": ("Rekrutmen", "recruitment", ["view", "create", "edit", "delete", "approve", "export"]),
     "contract": ("Kontrak Kerja", "employee_core", ["view", "create", "edit", "delete", "approve"]),
@@ -155,10 +160,13 @@ def default_role_permissions() -> Dict[str, List[str]]:
         + ["employee_status:manage", "employee_status:change"]
         # Upgrade 01E - impor massal karyawan
         + ["employee:import"]
+        # Upgrade 01F - Master Kelengkapan Data
+        + ["employee_completeness:configure"]
     )
     # hr_manager mewarisi hr_admin; hak Status Karyawan 01B dan impor massal 01E hanya untuk
     # Tenant Admin / Company Owner / HR Admin (keputusan user) -> dikeluarkan.
-    _hr_manager_excluded = {"employee_status:manage", "employee_status:change", "employee:import"}
+    _hr_manager_excluded = {"employee_status:manage", "employee_status:change", "employee:import",
+                            "employee_completeness:configure"}
 
     hr_manager = [k for k in hr_admin if k not in _hr_manager_excluded] + [
         "approval_workflow:create", "approval_workflow:edit", "approval_workflow:delete",

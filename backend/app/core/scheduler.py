@@ -254,6 +254,20 @@ def start_scheduler() -> Optional[AsyncIOScheduler]:
             coalesce=True,
             max_instances=1,
         )
+        # Upgrade 01F - evaluasi ulang kelengkapan data harian (masa berlaku dokumen/kontrak/sertifikasi).
+        # Memakai scheduler existing (tidak membuat scheduler baru); job idempotent (snapshot di-upsert).
+        from .completeness import daily_reevaluation
+
+        scheduler.add_job(
+            daily_reevaluation,
+            CronTrigger(hour=1, minute=30, timezone=JAKARTA_TZ),
+            id="employee_completeness_daily",
+            name="Evaluasi ulang kelengkapan data karyawan (harian 01:30)",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+            max_instances=1,
+        )
         scheduler.start()
         _scheduler = scheduler
         logger.info("Penjadwal pengingat aktif (zona %s).", JAKARTA_TZ)

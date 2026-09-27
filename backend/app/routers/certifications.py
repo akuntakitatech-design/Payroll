@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.db import NO_ID, get_db
 from ..core.deps import AuthContext, require_permission
@@ -118,6 +119,7 @@ async def create_certification(
     repo = TenantRepository("employee_certifications", ctx.company_id)
     created = await repo.create(data, ctx.user_id)
     await log_action(ctx, "create", "certification", created["id"], created.get("name"), after=created)
+    await completeness.safe_refresh(ctx.company_id, [created.get("employee_id")], "certification", ctx.user_id)  # Upgrade 01F
     return created
 
 
@@ -155,6 +157,7 @@ async def update_certification(
         before=before,
         after=after,
     )
+    await completeness.safe_refresh(ctx.company_id, [after.get("employee_id")], "certification", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -181,6 +184,7 @@ async def change_status(
         before=before,
         after=after,
     )
+    await completeness.safe_refresh(ctx.company_id, [after.get("employee_id")], "certification", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -195,4 +199,5 @@ async def delete_certification(
     await log_action(
         ctx, "delete", "certification", certification_id, item.get("name"), before=before, after=after
     )
+    await completeness.safe_refresh(ctx.company_id, [item.get("employee_id")], "certification", ctx.user_id)  # Upgrade 01F
     return {"message": f"Sertifikasi '{item.get('name')}' berhasil dihapus."}

@@ -31,6 +31,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import ProfilePage from "@/pages/ProfilePage";
 import EmployeeImportPage from "@/pages/EmployeeImportPage";
 import EmployeeMigrationPage from "@/pages/EmployeeMigrationPage";
+import EmployeeCompletenessPage from "@/pages/EmployeeCompletenessPage";
 import PayrollRunsPage from "@/pages/PayrollRunsPage";
 import PayrollRunDetailPage from "@/pages/PayrollRunDetailPage";
 import PayrollComponentsPage from "@/pages/PayrollComponentsPage";
@@ -143,6 +144,7 @@ const AppRoutes = () => (
       <Route path="/employees" element={<EmployeesPage />} />
       <Route path="/employees/import" element={<EmployeeImportPage />} />
       <Route path="/employees/migration" element={<EmployeeMigrationPage />} />
+      <Route path="/employees/completeness" element={<EmployeeCompletenessPage />} />
       <Route path="/employees/:employeeId" element={<EmployeeDetailPage />} />
       <Route path="/payroll/runs" element={<PayrollRunsPage />} />
       <Route path="/payroll/runs/:runId" element={<PayrollRunDetailPage />} />

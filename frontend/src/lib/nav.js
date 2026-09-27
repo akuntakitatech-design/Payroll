@@ -1,4 +1,5 @@
 import {
+  ClipboardCheck,
   LayoutDashboard,
   Building2,
   Users,
@@ -99,6 +100,7 @@ export const NAV_GROUPS = [
     label: "Kepegawaian",
     items: [
       { key: "employees", label: "Data Karyawan", to: "/employees", icon: Users, resource: "employee", action: "view", module: "employee_core" },
+      { key: "employee-completeness", label: "Kelengkapan Data", to: "/employees/completeness", icon: ClipboardCheck, resource: "employee", action: "view", module: "employee_core" },
       { key: "reminders", label: "Kalender Masa Berlaku", to: "/reminders", icon: CalendarClock, resource: "document", action: "view" },
     ],
   },

@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.db import NO_ID, get_db, now, serialize, serialize_list
 from ..core.deps import AuthContext, require_permission
@@ -136,6 +137,7 @@ async def create_contract(
         f"{created.get('contract_number') or 'Kontrak'} - {employee.get('full_name')}",
         after=created,
     )
+    await completeness.safe_refresh(ctx.company_id, [created.get("employee_id")], "contract", ctx.user_id)  # Upgrade 01F
     return created
 
 
@@ -171,6 +173,7 @@ async def update_contract(
     await log_action(
         ctx, "update", "contract", contract_id, after.get("contract_number"), before=before, after=after
     )
+    await completeness.safe_refresh(ctx.company_id, [after.get("employee_id")], "contract", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -195,6 +198,7 @@ async def approve_contract(
     await log_action(
         ctx, "approve", "contract", contract_id, contract.get("contract_number"), before=before, after=after
     )
+    await completeness.safe_refresh(ctx.company_id, [after.get("employee_id")], "contract", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -221,6 +225,7 @@ async def change_status(
         before=before,
         after=after,
     )
+    await completeness.safe_refresh(ctx.company_id, [after.get("employee_id")], "contract", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -234,6 +239,7 @@ async def delete_contract(
     await log_action(
         ctx, "delete", "contract", contract_id, contract.get("contract_number"), before=before, after=after
     )
+    await completeness.safe_refresh(ctx.company_id, [contract.get("employee_id")], "contract", ctx.user_id)  # Upgrade 01F
     return {"message": "Kontrak kerja berhasil dihapus dari daftar aktif."}
 
 
@@ -415,6 +421,7 @@ async def renew_contract(
                      f"Kontrak {previous.get('contract_number') or '-'} diperpanjang",
                      before=before, after=after)
 
+    await completeness.safe_refresh(ctx.company_id, [previous.get("employee_id")], "contract", ctx.user_id)  # Upgrade 01F
     return {
         "contract": created,
         "previous_contract": after,

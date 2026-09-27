@@ -164,6 +164,11 @@ TENANT_COLLECTIONS = [
     # Tidak menyimpan file Excel mentah; nilai sensitif di hasil analisis selalu dimasking.
     "employee_import_batches",
     "employee_import_rows",
+    # Upgrade 01F - Kelengkapan Data: override rule per tenant, scope applicability, snapshot hasil.
+    # Snapshot hanya menyimpan kode/status/skor - TIDAK pernah nilai field (termasuk nilai sensitif).
+    "completeness_rules",
+    "completeness_rule_scopes",
+    "employee_completeness",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
@@ -428,6 +433,23 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "commit_status": "s32", "source_rows": "j", "changes": "j", "errors": "j", "warnings": "j",
         "change_signature": "s64", "commit_error": "t", "committed_at": "dt", "seq": "i",
     },
+    # Upgrade 01F - level: REQUIRED | RECOMMENDED | OFF (override default katalog completeness_mapping)
+    "completeness_rules": {
+        "requirement_code": "s64", "level": "s32", "notes": "t",
+    },
+    # Upgrade 01F - scope_type: company|branch|position|project|work_location|department|division|job_grade|
+    # employment_status|business_status_category ; mode: INCLUDE | EXCLUDE
+    "completeness_rule_scopes": {
+        "requirement_code": "s64", "scope_type": "s32", "scope_id": "s64", "scope_label": "s", "mode": "s32",
+        "effective_from": "s32", "effective_to": "s32", "notes": "t",
+    },
+    # Upgrade 01F - snapshot. completeness_status: LENGKAP | BELUM_LENGKAP | EXCLUDED
+    "employee_completeness": {
+        "employee_id": "fk", "score_pct": "f", "completeness_status": "s32", "required_total": "i",
+        "required_fulfilled": "i", "recommended_total": "i", "recommended_fulfilled": "i",
+        "missing_codes": "j", "recommended_missing_codes": "j", "items": "j", "catalog_version": "s32",
+        "rules_hash": "s64", "evaluated_at": "dt", "evaluated_trigger": "s64", "is_stale": "b", "stale_reason": "s",
+    },
     "candidate_status_history": {
         "candidate_id": "fk", "action": "s64", "from_status": "s64", "to_status": "s64",
         "notes": "t", "changed_by": "fk", "changed_by_name": "s", "changed_at": "dt",
@@ -682,6 +704,12 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "employee_import_rows": [
         ("ix_employee_import_row_batch", ["company_id", "batch_id", "seq"], False),
         ("ix_employee_import_row_class", ["company_id", "batch_id", "row_class"], False),
+    ],
+    "completeness_rules": [("ux_completeness_rule_code", ["company_id", "requirement_code"], True)],
+    "completeness_rule_scopes": [("ix_completeness_scope_code", ["company_id", "requirement_code"], False)],
+    "employee_completeness": [
+        ("ux_employee_completeness_emp", ["company_id", "employee_id"], True),
+        ("ix_employee_completeness_score", ["company_id", "completeness_status", "score_pct"], False),
     ],
     "candidate_status_history": [
         ("ix_candidate_history", ["company_id", "candidate_id", "changed_at"], False),
@@ -1743,6 +1771,11 @@ class _TxWriter:
         table = get_table(table_name)
         row = {k: v for k, v in _doc_to_row(table, values).items() if k in values}
         res = await self.conn.execute(sa.update(table).where(compile_filter(table, flt)).values(**row))
+        return res.rowcount or 0
+
+    async def delete(self, table_name: str, flt: Dict[str, Any]) -> int:
+        table = get_table(table_name)
+        res = await self.conn.execute(sa.delete(table).where(compile_filter(table, flt)))
         return res.rowcount or 0
 
 
