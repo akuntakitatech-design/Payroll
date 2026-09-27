@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -23,6 +23,7 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatCurrency, formatDate, formatFileSize } from "@/lib/format";
 import PageHeader, { PageBody } from "@/components/common/PageHeader";
+import { CompletenessCard } from "@/components/employees/CompletenessCard";
 import DataTable, { TableCard } from "@/components/common/DataTable";
 import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
@@ -98,8 +99,10 @@ const EmployeeDetailPage = () => {
   // Upgrade 01C - edit per bagian profil
   const [editSection, setEditSection] = useState(null);
   // tab aktif dikontrol agar tetap di tab yang sama setelah data dimuat ulang (mis. setelah aksi Penempatan)
-  const [tab, setTab] = useState("summary");
-  useEffect(() => setTab("summary"), [employeeId]);
+  // ?tab=<key> (mis. dari drawer Kelengkapan Data) membuka tab Profile 360 terkait
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get("tab") || "summary");
+  useEffect(() => setTab(searchParams.get("tab") || "summary"), [employeeId, searchParams]);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -688,7 +691,11 @@ const EmployeeDetailPage = () => {
           </div>
 
           <TabsContent value="summary" className="mt-4">
-            <SummaryTab employee={employee} documents={data.documents} contracts={data.contracts} />
+            <div className="space-y-4">
+              <CompletenessCard employeeId={employee.id} onOpenTab={setTab}
+                refreshKey={`${employee.updated_at}-${data.documents.length}-${data.contracts.length}-${data.certifications.length}`} />
+              <SummaryTab employee={employee} documents={data.documents} contracts={data.contracts} />
+            </div>
           </TabsContent>
           <TabsContent value="personal" className="mt-4">
             <PersonalTab employee={employee} catalog={catalog} onEdit={can("employee", "edit") ? () => setEditSection("personal") : undefined} />

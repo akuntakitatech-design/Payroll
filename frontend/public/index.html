@@ -11,7 +11,14 @@
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet" />
         <title>KelolaKita — HRIS &amp; Payroll</title>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
-        <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
+        <!-- 01G-B HARD RULE: SELURUH route publik (/public/* dan /isi-data*) TIDAK memuat & TIDAK meng-init
+             analytics/recording pihak ketiga (PostHog, emergent-main.js) sama sekali - bukan load lalu opt-out.
+             Keputusan diambil di sini, SEBELUM script analytics mana pun dieksekusi. -->
+        <script>window.__KK_PUBLIC_FORM__=/^\/(public|isi-data)(\/|$)/i.test(window.location.pathname);</script>
+        <!-- 01G-B defense-in-depth khusus /public/*: CSP membatasi script & koneksi hanya ke origin aplikasi/backend,
+             sehingga beacon/analytics pihak ketiga yang disisipkan di luar source aplikasi (mis. edge/CDN) juga diblokir browser. -->
+        <script>if(window.__KK_PUBLIC_FORM__){document.write('<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-inline\'; connect-src \'self\' %REACT_APP_BACKEND_URL%; img-src \'self\' data: blob: %REACT_APP_BACKEND_URL%; style-src \'self\' \'unsafe-inline\' https://fonts.googleapis.com; font-src \'self\' data: https://fonts.gstatic.com; frame-src \'none\'; object-src \'none\'; base-uri \'self\'; form-action \'self\'">');}</script>
+        <script>if(!window.__KK_PUBLIC_FORM__){document.write('<script src="https://assets.emergent.sh/scripts/emergent-main.js"><\/script>');}</script>
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>
@@ -27,6 +34,7 @@
       To create a production bundle, use `npm run build` or `yarn build`.
     -->
         <script>
+          if (!window.__KK_PUBLIC_FORM__) {
             !(function (t, e) {
                 var o, n, p, r;
                 e.__SV ||
@@ -96,6 +104,7 @@
                     capturePerformance: false,
                 },
             });
+          }
         </script>
     </body>
 </html>

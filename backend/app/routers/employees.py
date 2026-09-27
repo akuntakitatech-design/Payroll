@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from ..core import completeness  # Upgrade 01F
 from ..core.db import ASCENDING, ReturnDocument
 
 from ..core.audit import log_action
@@ -351,6 +352,7 @@ async def create_employee(
     await log_action(ctx, "create", "employee", created["id"], created.get("full_name"), after=created)
     # Upgrade 01D: karyawan baru dengan project -> assignment ACTIVE pertama
     await asg.create_initial_for_new_employee(ctx.company_id, created, "EMPLOYEE_CREATE", ctx.user_id, emp_status.today_local())
+    await completeness.safe_refresh(ctx.company_id, [created["id"]], "employee_create", ctx.user_id)  # Upgrade 01F
     return created
 
 
@@ -505,6 +507,7 @@ async def update_employee(
         notes=PROFILE_SECTIONS.get(section) if section else None,
     )
     after.pop("photo_path", None)  # Upgrade 01C: storage key tidak diekspos
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "employee_update", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -546,6 +549,7 @@ async def change_status(
     await log_action(
         ctx, action, "employee", employee_id, employee.get("full_name"), before=before, after=after
     )
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "employee_status", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -569,6 +573,7 @@ async def delete_employee(
     await log_action(
         ctx, "delete", "employee", employee_id, employee.get("full_name"), before=before, after=after
     )
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "employee_delete", ctx.user_id)  # Upgrade 01F
     return {"message": f"Karyawan '{employee.get('full_name')}' berhasil dihapus."}
 
 
@@ -773,6 +778,7 @@ async def import_commit(
         ctx, "create", "employee", None, f"Impor Excel {len(created)} karyawan",
         notes=f"{len(created)} berhasil, {len(failed)} gagal",
     )
+    await completeness.safe_refresh(ctx.company_id, [c.get("id") for c in created], "legacy_import", ctx.user_id)  # Upgrade 01F
     return {
         "created_count": len(created),
         "failed_count": len(failed),

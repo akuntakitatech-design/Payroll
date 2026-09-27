@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 
+from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.config import settings
 from ..core.db import NO_ID, get_db, new_id, serialize, serialize_list
@@ -182,6 +183,7 @@ async def upload_document(
     )
     created["document_type_name"] = doc_type.get("name")
     await log_action(ctx, "upload", "document", created["id"], created["name"], after=created)
+    await completeness.safe_refresh(ctx.company_id, [created.get("owner_id") if created.get("owner_type") == "employee" else None], "document", ctx.user_id)  # Upgrade 01F
     return created
 
 
@@ -306,6 +308,7 @@ async def update_document(
     await _assert_applicant_writable(ctx, existing.get("owner_type"), existing.get("owner_id"))
     before, after = await repo.update(document_id, data, ctx.user_id)
     await log_action(ctx, "update", "document", document_id, after.get("name"), before=before, after=after)
+    await completeness.safe_refresh(ctx.company_id, [after.get("owner_id") if after.get("owner_type") == "employee" else None], "document", ctx.user_id)  # Upgrade 01F
     return after
 
 
@@ -321,4 +324,5 @@ async def delete_document(
         document_id, {"is_deleted": True, "status": "archived"}, ctx.user_id
     )
     await log_action(ctx, "delete", "document", document_id, doc.get("name"), before=before, after=after)
+    await completeness.safe_refresh(ctx.company_id, [doc.get("owner_id") if doc.get("owner_type") == "employee" else None], "document", ctx.user_id)  # Upgrade 01F
     return {"message": f"Dokumen '{doc.get('name')}' berhasil dihapus dari daftar aktif."}

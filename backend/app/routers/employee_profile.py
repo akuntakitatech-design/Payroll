@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, Field, field_validator
 
+from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.branding_assets import read_image_upload
 from ..core.db import NO_ID, new_id
@@ -125,6 +126,7 @@ async def add_family(employee_id: str, payload: FamilyInput,
     created = await TenantRepository("employee_family_members", ctx.company_id).create(data, ctx.user_id)
     await log_action(ctx, "family_create", "employee", employee_id, emp.get("full_name"),
                      after=_family_out(created, True), notes="Data keluarga ditambah")
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "family", ctx.user_id)  # Upgrade 01F
     return _family_out(created, True)
 
 
@@ -144,6 +146,7 @@ async def update_family(employee_id: str, family_id: str, payload: FamilyInput,
         family_id, payload.model_dump(), ctx.user_id)
     await log_action(ctx, "family_update", "employee", employee_id, emp.get("full_name"),
                      before=_family_out(before, True), after=_family_out(after, True), notes="Data keluarga diubah")
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "family", ctx.user_id)  # Upgrade 01F
     return _family_out(after, True)
 
 
@@ -155,6 +158,7 @@ async def delete_family(employee_id: str, family_id: str,
     before = await TenantRepository("employee_family_members", ctx.company_id).hard_delete(family_id)
     await log_action(ctx, "family_delete", "employee", employee_id, emp.get("full_name"),
                      before=_family_out(before, True), notes="Data keluarga dihapus")
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "family", ctx.user_id)  # Upgrade 01F
     return {"message": "Data keluarga dihapus."}
 
 
@@ -195,6 +199,7 @@ async def upload_photo(employee_id: str, file: UploadFile = File(...),
     await log_action(ctx, "photo_replace" if old else "photo_upload", "employee", employee_id,
                      emp.get("full_name"), before={"photo": bool(old)},
                      after={"photo": True, "size": len(data), "content_type": mime}, notes="Foto profil diperbarui")
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "photo", ctx.user_id)  # Upgrade 01F
     return {"message": "Foto profil berhasil disimpan.",
             "photo_url": f"/api/employees/{employee_id}/photo?v={version}"}
 
@@ -211,6 +216,7 @@ async def delete_photo(employee_id: str, ctx: AuthContext = Depends(require_perm
         delete_object(old)
     await log_action(ctx, "photo_delete", "employee", employee_id, emp.get("full_name"),
                      before={"photo": True}, after={"photo": False}, notes="Foto profil dihapus")
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "photo", ctx.user_id)  # Upgrade 01F
     return {"message": "Foto profil dihapus."}
 
 

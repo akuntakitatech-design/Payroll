@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from ..core import completeness  # Upgrade 01F
 from ..core.audit import build_audit_entry, log_action
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list, transaction
 from ..core.deps import AuthContext, require_permission
@@ -359,6 +360,7 @@ async def change_employee_status(
         await tx.insert("audit_logs", audit)
 
     updated = await _get_employee(ctx, employee_id)
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "status_change", ctx.user_id)  # Upgrade 01F
     return {
         "message": f"Status {employee.get('full_name')} berhasil diubah menjadi {new_status.get('name')}.",
         "employee_id": employee_id,

@@ -15,8 +15,10 @@ from app.routers import (
     audit_logs,
     auth,
     branding,
+    public_employee_form,
     certifications,
     companies,
+    completeness,
     contracts,
     dashboard,
     documents,
@@ -110,6 +112,9 @@ api.include_router(companies.router)
 api.include_router(platform.router)
 api.include_router(branding.router)
 api.include_router(branding.public_router)
+# Upgrade 01G-A - Public Employee Form (HR: link undangan; publik: verifikasi, sesi terbatas, draft, submit)
+api.include_router(public_employee_form.hr_router)
+api.include_router(public_employee_form.public_router)
 api.include_router(master.router)
 api.include_router(users.router)
 api.include_router(approvals.router)
@@ -119,6 +124,7 @@ api.include_router(employee_status.router)  # Upgrade 01B
 api.include_router(employee_profile.router)  # Upgrade 01C
 api.include_router(employee_assignment.router)  # Upgrade 01D
 api.include_router(employee_import.router)  # Upgrade 01E
+api.include_router(completeness.router)  # Upgrade 01F
 api.include_router(contracts.router)
 api.include_router(certifications.router)
 api.include_router(reminders.router)

@@ -31,6 +31,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import ProfilePage from "@/pages/ProfilePage";
 import EmployeeImportPage from "@/pages/EmployeeImportPage";
 import EmployeeMigrationPage from "@/pages/EmployeeMigrationPage";
+import EmployeeCompletenessPage from "@/pages/EmployeeCompletenessPage";
 import PayrollRunsPage from "@/pages/PayrollRunsPage";
 import PayrollRunDetailPage from "@/pages/PayrollRunDetailPage";
 import PayrollComponentsPage from "@/pages/PayrollComponentsPage";
@@ -60,6 +61,8 @@ import OvertimePage from "@/pages/leave/OvertimePage";
 import LeaveBalancesPage from "@/pages/leave/LeaveBalancesPage";
 import LeaveOvertimeApprovalsPage from "@/pages/leave/LeaveOvertimeApprovalsPage";
 import NotFoundPage from "@/pages/NotFoundPage";
+import PublicEmployeeFormPage from "@/pages/public/PublicEmployeeFormPage";
+import { PublicUnavailable } from "@/components/public-form/PublicFormParts";
 import { Loader2, ShieldAlert } from "lucide-react";
 
 const FullPageLoader = () => (
@@ -143,6 +146,7 @@ const AppRoutes = () => (
       <Route path="/employees" element={<EmployeesPage />} />
       <Route path="/employees/import" element={<EmployeeImportPage />} />
       <Route path="/employees/migration" element={<EmployeeMigrationPage />} />
+      <Route path="/employees/completeness" element={<EmployeeCompletenessPage />} />
       <Route path="/employees/:employeeId" element={<EmployeeDetailPage />} />
       <Route path="/payroll/runs" element={<PayrollRunsPage />} />
       <Route path="/payroll/runs/:runId" element={<PayrollRunDetailPage />} />
@@ -184,15 +188,25 @@ const AppRoutes = () => (
   </Routes>
 );
 
+/** Aplikasi internal/backoffice (login HRIS) — struktur provider & ProtectedRoute tidak berubah. */
+const InternalApp = () => (
+  <BrandingProvider>
+    <AuthProvider>
+      <AppRoutes />
+      <Toaster />
+    </AuthProvider>
+  </BrandingProvider>
+);
+
 function App() {
   return (
     <BrowserRouter>
-      <BrandingProvider>
-        <AuthProvider>
-          <AppRoutes />
-          <Toaster />
-        </AuthProvider>
-      </BrandingProvider>
+      <Routes>
+        {/* 01G-B: Formulir Publik Karyawan — di LUAR AuthProvider/ProtectedRoute (tanpa login HRIS, tanpa analytics). */}
+        <Route path="/public/:companyCode/update-data" element={<PublicEmployeeFormPage />} />
+        <Route path="/public/*" element={<PublicUnavailable />} />
+        <Route path="/*" element={<InternalApp />} />
+      </Routes>
     </BrowserRouter>
   );
 }

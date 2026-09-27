@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.db import NO_ID, new_id, now, serialize, serialize_list
 from ..core.tenancy import get_tenant_db
@@ -388,6 +389,9 @@ async def upsert_salary(
 
     await log_action(ctx, "update" if before else "create", "payroll", employee_id,
                      f"Struktur gaji {emp.get('full_name')}", before=before, after=after)
+    # Upgrade 01F - hanya bila field sumber kelengkapan berubah (PTKP/NPWP/BPJS) atau data gaji baru dibuat
+    if completeness.salary_source_changed(before, after):
+        await completeness.safe_refresh(ctx.company_id, [employee_id], "salary", ctx.user_id)
     return after
 
 

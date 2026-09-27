@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
+from ..core import completeness  # Upgrade 01F
 from ..core import employee_import as engine
 from ..core.audit import log_action
 from ..core.db import NO_ID, new_id, now, serialize, serialize_list, audit_fields
@@ -230,5 +231,13 @@ async def commit_batch(batch_id: str, file: UploadFile = File(...), confirm_dupl
     await log_action(ctx, "import_commit", "employee", batch_id, batch.get("batch_number"),
                      after={"status": final_status, "committed": committed, "failed": failed, "skipped": skipped},
                      notes=f"Commit impor Excel {batch.get('batch_number')}: {committed} berhasil, {failed} gagal, {skipped} dilewati")
+    # Upgrade 01F - satu evaluasi kelengkapan bulk untuk karyawan yang ter-commit (bukan per baris)
+    try:
+        # hanya kolom employee_id (SELECT DISTINCT satu kolom), tanpa memuat source_rows/changes
+        done = await ctx.tdb[ROWS].distinct("employee_id", {"company_id": ctx.company_id, "batch_id": batch_id,
+                                                            "commit_status": "COMMITTED"})
+        await completeness.safe_refresh(ctx.company_id, done, "import_01e", ctx.user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Evaluasi kelengkapan pasca-impor dilewati: %s", type(exc).__name__)
     return {"batch": _public(await _batch(ctx, batch_id)),
             "summary": f"{committed} karyawan disimpan, {failed} gagal, {skipped} dilewati (UNCHANGED/CONFLICT/ERROR)."}

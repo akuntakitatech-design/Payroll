@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from ..core import completeness  # Upgrade 01F
 from ..core import assignment as asg
 from ..core.audit import build_audit_entry
 from ..core.db import NO_ID, now, serialize, serialize_list, transaction
@@ -163,6 +164,7 @@ async def assign(employee_id: str, payload: PlacementIn, ctx: AuthContext = Depe
     doc = asg.new_assignment_doc(ctx.company_id, employee_id, data, start, "MANUAL", payload.reason.strip(),
                                  payload.notes, ctx.user_id)
     await _write(ctx, emp, None, None, doc, "assignment_create", f"Penempatan ditetapkan (mulai {start}). Alasan: {payload.reason.strip()}")
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "assignment", ctx.user_id)  # Upgrade 01F
     return {"message": "Penempatan berhasil ditetapkan.", "assignment": serialize(doc)}
 
 
@@ -187,6 +189,7 @@ async def transfer(employee_id: str, payload: PlacementIn, ctx: AuthContext = De
     doc = asg.new_assignment_doc(ctx.company_id, employee_id, data, start, "TRANSFER", reason, payload.notes,
                                  ctx.user_id, previous_assignment_id=old["id"])
     await _write(ctx, emp, old, old_end, doc, "assignment_transfer", f"Pindah penempatan (efektif {start}). Alasan: {reason}")
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "assignment", ctx.user_id)  # Upgrade 01F
     return {"message": "Penempatan berhasil dipindahkan.", "assignment": serialize(doc)}
 
 
@@ -226,4 +229,5 @@ async def end(employee_id: str, payload: EndIn, ctx: AuthContext = Depends(requi
     msg = "Penempatan berhasil diakhiri."
     if status_error:
         msg += f" Status karyawan TIDAK diubah: {status_error} Silakan ulangi lewat 'Ubah Status'."
+    await completeness.safe_refresh(ctx.company_id, [employee_id], "assignment", ctx.user_id)  # Upgrade 01F
     return {"message": msg, "status_change": status_result, "status_change_error": status_error}
