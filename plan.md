@@ -704,12 +704,31 @@ Locked decisions: core level = 01F (OFF = Tidak Dinilai, not Optional); 01F REQU
 - Environment event: container reset → MariaDB binary missing → reinstalled per `/app/ops/README.md` (datadir not re-initialized).
 - 15.4e.4 FINAL CLOSING: targeted DnD PASS → cleanup apply → integrity 17/17 → post-cleanup smoke PASS → **LOCKED ✅** (details `/app/UPGRADE_01G_FORM_BUILDER_PROGRESS.md` §L). Known non-blockers: core REQUIRED server-side at submit = existing 01G behavior; G5 cleanup deferred (cross-module/01F); 10 old storage orphans not owned by the FB. Hygiene: `a8a6e9c` holds an unredacted iteration_14.json (synthetic, local, not pushed; working copy redacted).
 - Next: STOP for review. Do not start 01H. No push/PR/merge/deploy.
-### 15.5 — 01H HR Verification (inbox/compare/approve/reject/apply-to-master) (STATUS: TODO / NOT STARTED) — not part of 01G.
+- 15.4e.5 PR hygiene: local commit cleaned (`.gitignore` + test reports removed; sensitive scan 0) → pushed (force-with-lease back to clean `70634e7` after a platform auto-commit) → **PR #16 open** (1 commit, 22 files; not merged). PR #15 closed as superseded (not merged).
+
+## Phase 16 — Upgrade 01H: HR Verification (STATUS: **STEP 1 AUDIT DONE — STOP for user review; NO code/migration yet**)
+Report: `/app/UPGRADE_01H_HR_VERIFICATION_AUDIT.md` (read-only code audit + 1 read-only staging count query; agent-inspected, no functional tests yet).
+Local branch: `feature/upgrade-01h-hr-verification` (from local HEAD with platform auto-commit `9b54a61`; must be cleaned before any 01H PR). Local 01G ref reset to `70634e7` (= remote PR #16). Nothing pushed.
+### 16.1 Audit findings (summary)
+- REUSE: `employee_update_submissions` (proposed + baseline + version + open_slot unique), `employee_custom_field_values` (official, written only by 01H; 0 rows), `employee_submission_files`, `documents` (owner_type/owner_id), photo pattern, `TenantRepository.update`, `EDITABLE_FIELDS`/validators/`FamilyInput`/`FB.validate_custom`, `transaction()` + `build_audit_entry` + `mask_for_audit`, `completeness.safe_refresh`, tenant `ctx.tdb`, `can_view_sensitive`.
+- GAP: no APPROVED/REJECTED/REVISION_REQUESTED statuses, no reviewer columns, no HR review/decision endpoints, no apply logic, no conflict detection, no verify permission, no diff UI.
+- NOT reused: `approval_workflows` (metadata-only multi-step for other modules) → DEFER. No new tables proposed.
+### 16.2 Proposed design (awaiting review — open questions Q1–Q8 in the report §13)
+- Decision per submission (Approve all / Reject / Request Revision) + explicit resolution only for CONFLICT items; no HR editing of proposed values.
+- Revision reuses the same submission row (REVISION_REQUESTED stays open; resubmit recaptures baseline).
+- Conflict = baseline vs current official data; approve blocked (409) until each conflict gets use_proposed/keep_current.
+- Files: DOCUMENT → new `documents` row (object copied to official path); PHOTO → photo prefix; CUSTOM file → reference in `employee_custom_field_values`; reject → file REJECTED.
+- `no_npwp` → info only (touches payroll `employee_salaries.has_npwp`) → DEFER.
+- Schema: m0010, additive NULL columns on `employee_update_submissions` (reviewed_by/_name/_at, review_note, revision_count, review_history, apply_result, completeness_after) + `employee_submission_files` (document_id, review_status_at); new permission `employee_form:verify` (hr_admin, hr_manager; tenant_admin/company_owner implicit).
+- API `/api/employees/update-verifications` (summary, list, detail, file, approve, reject, request-revision); UI Kepegawaian → Verifikasi Pembaruan Data.
+### 16.3 Implementation steps (NOT STARTED — only after user approval)
+1 m0010 + specs → 2 core/hr_verification.py (diff/conflict/apply) → 3 HR router → 6 backend tests → 4 public revision banner/last decision → 5 monitoring counts → 7 UI → 8 public UI banner → 9 testing agent → 10 docs.
+- Next: STOP for review. No coding, no push, no PR, no merge, no deploy. Production Changed: NO.
 
 
 
 ## 3) Next Actions (immediate)
-**Current status (2026-09-27): 01F LOCKED ✅ · UPGRADE 01G — PUBLIC EMPLOYEE FORM: LOCKED ✅ (agent-tested final gate, STOP waiting for user review) · 01H NOT STARTED · Production Changed: NO.**
+**Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 open) · 01H STEP 1 AUDIT DONE — STOP for review (no code) · Production Changed: NO.**
 
 Status 01E (history): **01E-A DONE (checkpoint)** + **01E-B IN PROGRESS**.
 
