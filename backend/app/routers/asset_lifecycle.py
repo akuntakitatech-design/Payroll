@@ -309,17 +309,30 @@ async def _finish_detail(ctx, doc: Dict[str, Any], items: List[Dict[str, Any]]) 
     return out
 
 
-async def _write_items(tx, coll: str, parent_key: str, parent_id: str, cid: str, items, actor):
+async def _write_items(tx, coll: str, parent_key: str, parent_id: str, cid: str, items, actor) -> List[Dict[str, Any]]:
     await tx.delete(coll, {"company_id": cid, parent_key: parent_id})
+    rows = []
     for it in items:
-        await tx.insert(coll, {**_stamp(actor), "company_id": cid, parent_key: parent_id, **it})
+        row = {**_stamp(actor), "company_id": cid, parent_key: parent_id, **it}
+        await tx.insert(coll, dict(row))
+        rows.append(row)
+    return rows
+
+
+def _require_also(ctx: AuthContext, resource: str, action: str) -> None:
+    """Simpan & Publish = izin simpan (create/edit) DAN izin publish. Murni permission efektif, tanpa nama role."""
+    if not ctx.has_permission(resource, action):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Anda tidak memiliki hak akses untuk tindakan ini.")
 
 
 @router.get("/asset-handovers/options")
-async def handover_options(ctx: AuthContext = Depends(require_permission("asset_handover", "view"))):
+async def handover_options(include_employees: bool = True,
+                           ctx: AuthContext = Depends(require_permission("asset_handover", "view"))):
+    """`include_employees=false` (dipakai UI CP2.1): karyawan dicari lewat /asset-handovers/employee-search."""
     scope = await dscope.get_scope(ctx)
     db, cid = get_db(), ctx.company_id
-    emps = await db.employees.find(dscope.with_scope({"company_id": cid, "status": "active"}, scope), NO_ID).sort([("full_name", 1)]).to_list(2000)
+    emps = (await db.employees.find(dscope.with_scope({"company_id": cid, "status": "active"}, scope), NO_ID)
+            .sort([("full_name", 1)]).to_list(2000)) if include_employees else []
     assets = await db.assets.find(dscope.with_project_scope({"company_id": cid, "lifecycle_state": "READY", "status": "active"}, scope),
                                   NO_ID).sort([("asset_code_norm", 1)]).to_list(2000)
     pflt = {"company_id": cid, "status": "active"}
@@ -336,6 +349,61 @@ async def handover_options(ctx: AuthContext = Depends(require_permission("asset_
             "conditions": [{"id": c["id"], "name": c.get("name")} for c in conds],
             "restricted": not scope.is_all,
             "ga_pic_name": (await _user_names([ctx.user_id])).get(ctx.user_id)}
+
+
+# ------------------------------------------------------------------ Pencarian karyawan (server-side, CP2.1)
+EMP_SEARCH_MAX = 50
+
+
+async def _employee_search(ctx: AuthContext, q: Optional[str], page: int, limit: int, holders_only: bool) -> Dict[str, Any]:
+    """Cari karyawan aktif by nama / nomor karyawan di SQL, berhalaman (tanpa memuat seluruh karyawan ke browser).
+    Cakupan Data 01I diterapkan di SQL: user restricted hanya menemukan karyawan dalam project scope-nya.
+    `holders_only` = hanya karyawan yang memegang aset aktif (holding project juga dalam scope) untuk Pengembalian."""
+    cid = ctx.company_id
+    scope = await dscope.get_scope(ctx)
+    flt = dscope.with_scope({"company_id": cid, "status": "active"}, scope)
+    extra = []
+    term = (q or "").strip()
+    if term:
+        like = _like(term)
+        extra.append(lambda t, like=like: sa.or_(t.c.full_name.like(like), t.c.employee_number.like(like)))
+    if holders_only:
+        h = get_table("asset_holdings")
+        hsel = sa.select(h.c.employee_id).where(h.c.company_id == cid, h.c.holding_status == ACTIVE)
+        pclause = dscope.project_scope_clause(scope, h.c.project_id)
+        if pclause is not None:
+            hsel = hsel.where(pclause)
+        extra.append(lambda t, hsel=hsel: t.c.id.in_(hsel))
+    if extra:
+        prev = flt.get("$sql")
+        flt["$sql"] = ([*prev] if isinstance(prev, (list, tuple)) else ([prev] if prev else [])) + extra
+    db = get_db()
+    total = await db.employees.count_documents(flt)
+    rows = await db.employees.find(flt, NO_ID).sort([("full_name", 1), ("id", 1)]).skip((page - 1) * limit).limit(limit).to_list(limit)
+    ids = [r["id"] for r in rows]
+    proj_of: Dict[str, Optional[str]] = {}
+    if ids:
+        asg = await db.employee_assignments.find({"company_id": cid, "employee_id": {"$in": ids}, "assignment_status": "ACTIVE"},
+                                                 NO_ID).to_list(len(ids) * 3)
+        pnames = await _names(cid, "projects", [x.get("project_id") for x in asg])
+        for x in asg:
+            proj_of.setdefault(x["employee_id"], pnames.get(x.get("project_id")))
+    holding_counts: Dict[str, int] = {}
+    if holders_only and ids:
+        hs = await db.asset_holdings.find(dscope.with_project_scope({"company_id": cid, "holding_status": ACTIVE,
+                                                                     "employee_id": {"$in": ids}}, scope), NO_ID).to_list(5000)
+        for x in hs:
+            holding_counts[x["employee_id"]] = holding_counts.get(x["employee_id"], 0) + 1
+    items = [{"id": r["id"], "full_name": r.get("full_name"), "employee_number": r.get("employee_number"),
+              "project_name": proj_of.get(r["id"]), **({"active_holdings": holding_counts.get(r["id"], 0)} if holders_only else {})}
+             for r in rows]
+    return _page(total, page, limit, items)
+
+
+@router.get("/asset-handovers/employee-search")
+async def handover_employee_search(q: Optional[str] = None, page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=EMP_SEARCH_MAX),
+                                   ctx: AuthContext = Depends(require_permission("asset_handover", "view"))):
+    return await _employee_search(ctx, q, page, limit, holders_only=False)
 
 
 @router.get("/asset-handovers")
@@ -410,9 +478,82 @@ async def _cancel(ctx, coll: str, resource: str, record_id: str):
     return {"id": record_id, "doc_state": CANCELLED}
 
 
+HO_CONFLICT = "Konflik penyerahan bersamaan: aset sudah memiliki pemegang aktif atau sedang diproses. Publish dibatalkan seluruhnya."
+
+
+async def _handover_prepare(ctx: AuthContext, handover_date: str):
+    """Persiapan publish di luar transaksi: status IN_USE + baris counter BAST (tidak mengonsumsi nomor)."""
+    in_use = await svc.default_status_for(ctx.company_id, "IN_USE")
+    if not in_use:
+        raise _unprocessable("Status aset untuk kategori sistem IN_USE belum dikonfigurasi.")
+    prepared = await doc_sequence.prepare(ctx.company_id, SEQ["HANDOVER"], when=date.fromisoformat(handover_date), actor_id=ctx.user_id)
+    return in_use, prepared
+
+
+async def _handover_finalize(tx, ctx: AuthContext, scope, handover_id: str, emp: Dict[str, Any], items: List[Dict[str, Any]],
+                             in_use: Dict[str, Any], prepared: Dict[str, Any]) -> str:
+    """Satu-satunya logika publish penyerahan (dipakai Publish draft & Simpan & Publish), di DALAM transaksi pemanggil:
+    kunci + validasi ulang, nomor BAST, snapshot, holding, status aset, event. Gagal -> seluruh transaksi rollback."""
+    cid, actor = ctx.company_id, ctx.user_id
+    if not items:
+        raise _unprocessable("Draft penyerahan tidak memiliki item aset.")
+    cur = await tx.select_one_for_update("asset_handovers", {"company_id": cid, "id": handover_id})
+    if not cur or cur.get("doc_state") != DRAFT:
+        raise _conflict("Penyerahan ini sudah diterbitkan atau dibatalkan.")
+    e2 = await tx.select_one("employees", {"company_id": cid, "id": emp["id"]})
+    if not e2 or e2.get("status") != "active":
+        raise _unprocessable("Karyawan tidak lagi aktif.")
+    emp = e2   # snapshot memakai data karyawan terbaru saat terbit
+    assets: Dict[str, Dict[str, Any]] = {}
+    for it in sorted(items, key=lambda x: x["asset_id"]):   # urutan kunci stabil -> hindari deadlock
+        a = await tx.select_one_for_update("assets", {"company_id": cid, "id": it["asset_id"]})
+        if not a or a.get("status") == "deleted" or not scope.allows_project(a.get("project_id")):
+            raise _conflict("Salah satu aset tidak lagi tersedia dalam cakupan Anda. Publish dibatalkan seluruhnya.")
+        if a.get("lifecycle_state") != "READY":
+            raise _conflict(f"Aset {a.get('asset_code')} tidak lagi Siap Pakai (READY). Publish dibatalkan seluruhnya.")
+        if await tx.select_one("asset_holdings", {"company_id": cid, "active_lock": a["id"]}):
+            raise _conflict(f"Aset {a.get('asset_code')} masih memiliki pemegang aktif. Publish dibatalkan seluruhnya.")
+        assets[a["id"]] = a
+
+    async def _taken(candidate):
+        return bool(await tx.select_one("asset_basts", {"company_id": cid, "system_number": candidate}))
+    number = await doc_sequence.allocate_in_tx(tx, prepared, exists=_taken)
+    snap = await _snapshot_header(tx, ctx, "HANDOVER", cur, emp, number, cur["handover_date"], cur.get("project_id"),
+                                  cur.get("work_location_id"))
+    snap["items"] = await _snapshot_items(tx, cid, assets, items)
+    bast = {**_stamp(actor), "company_id": cid, "bast_type": "HANDOVER", "system_number": number,
+            "sequence_key": SEQ["HANDOVER"], "sequence_period": cur["handover_date"][:4], "source_type": "HANDOVER",
+            "source_id": handover_id, "employee_id": emp["id"], "project_id": cur.get("project_id"),
+            "bast_date": cur["handover_date"], "manual_number": cur.get("manual_number"),
+            "manual_number_norm": cur.get("manual_number_norm"), "doc_state": "ISSUED", "snapshot": snap,
+            "issued_at": now(), "issued_by": actor}
+    await tx.insert("asset_basts", dict(bast))
+    for it in items:
+        a = assets[it["asset_id"]]
+        holding = {**_stamp(actor), "company_id": cid, "asset_id": a["id"], "employee_id": emp["id"],
+                   "handover_id": handover_id, "handover_bast_id": bast["id"], "start_date": cur["handover_date"],
+                   "project_id": cur.get("project_id"), "work_location_id": cur.get("work_location_id"),
+                   "initial_condition_id": it.get("condition_id"), "accessories_out": it.get("accessories"),
+                   "holding_status": ACTIVE, "active_lock": a["id"]}
+        await tx.insert("asset_holdings", dict(holding))
+        await tx.update("assets", {"company_id": cid, "id": a["id"]},
+                        {"lifecycle_state": "IN_USE", "status_id": in_use["id"], "project_id": cur.get("project_id"),
+                         "work_location_id": cur.get("work_location_id"), "condition_id": it.get("condition_id"),
+                         "row_version": int(a.get("row_version") or 1) + 1, **_stamp(actor, False)})
+        await tx.insert("asset_events", _event(cid, a["id"], "HANDOVER", actor, from_state="READY", to_state="IN_USE",
+                                               project_id=cur.get("project_id"), work_location_id=cur.get("work_location_id"),
+                                               condition_id=it.get("condition_id"), status_id=in_use["id"],
+                                               employee_id=emp["id"], holding_id=holding["id"], bast_id=bast["id"],
+                                               changes={"bast_number": number}))
+    await tx.update("asset_handovers", {"company_id": cid, "id": handover_id},
+                    {"doc_state": PUBLISHED, "bast_id": bast["id"], "published_at": now(), "published_by": actor,
+                     **_stamp(actor, False)})
+    return number
+
+
 @router.post("/asset-handovers/{handover_id}/publish")
 async def publish_handover(handover_id: str, ctx: AuthContext = Depends(require_permission("asset_handover", "publish"))):
-    cid, actor = ctx.company_id, ctx.user_id
+    cid = ctx.company_id
     ho = await _visible(ctx, "asset_handovers", handover_id)
     if ho.get("doc_state") != DRAFT:
         raise _conflict("Penyerahan ini sudah diterbitkan atau dibatalkan.")
@@ -422,64 +563,59 @@ async def publish_handover(handover_id: str, ctx: AuthContext = Depends(require_
     items = await get_db().asset_handover_items.find({"company_id": cid, "handover_id": handover_id}, NO_ID).sort([("line_no", 1)]).to_list(500)
     if not items:
         raise _unprocessable("Draft penyerahan tidak memiliki item aset.")
-    in_use = await svc.default_status_for(cid, "IN_USE")
-    if not in_use:
-        raise _unprocessable("Status aset untuk kategori sistem IN_USE belum dikonfigurasi.")
-    prepared = await doc_sequence.prepare(cid, SEQ["HANDOVER"], when=date.fromisoformat(ho["handover_date"]), actor_id=actor)
-    async with _atomic("Konflik penyerahan bersamaan: aset sudah memiliki pemegang aktif atau sedang diproses. "
-                       "Publish dibatalkan seluruhnya.") as tx:
-        cur = await tx.select_one_for_update("asset_handovers", {"company_id": cid, "id": handover_id})
-        if not cur or cur.get("doc_state") != DRAFT:
-            raise _conflict("Penyerahan ini sudah diterbitkan atau dibatalkan.")
-        e2 = await tx.select_one("employees", {"company_id": cid, "id": emp["id"]})
-        if not e2 or e2.get("status") != "active":
-            raise _unprocessable("Karyawan tidak lagi aktif.")
-        emp = e2   # snapshot memakai data karyawan terbaru saat terbit
-        assets: Dict[str, Dict[str, Any]] = {}
-        for it in sorted(items, key=lambda x: x["asset_id"]):   # urutan kunci stabil -> hindari deadlock
-            a = await tx.select_one_for_update("assets", {"company_id": cid, "id": it["asset_id"]})
-            if not a or a.get("status") == "deleted" or not scope.allows_project(a.get("project_id")):
-                raise _conflict("Salah satu aset tidak lagi tersedia dalam cakupan Anda. Publish dibatalkan seluruhnya.")
-            if a.get("lifecycle_state") != "READY":
-                raise _conflict(f"Aset {a.get('asset_code')} tidak lagi Siap Pakai (READY). Publish dibatalkan seluruhnya.")
-            if await tx.select_one("asset_holdings", {"company_id": cid, "active_lock": a["id"]}):
-                raise _conflict(f"Aset {a.get('asset_code')} masih memiliki pemegang aktif. Publish dibatalkan seluruhnya.")
-            assets[a["id"]] = a
-
-        async def _taken(candidate):
-            return bool(await tx.select_one("asset_basts", {"company_id": cid, "system_number": candidate}))
-        number = await doc_sequence.allocate_in_tx(tx, prepared, exists=_taken)
-        snap = await _snapshot_header(tx, ctx, "HANDOVER", cur, emp, number, cur["handover_date"], cur.get("project_id"),
-                                      cur.get("work_location_id"))
-        snap["items"] = await _snapshot_items(tx, cid, assets, items)
-        bast = {**_stamp(actor), "company_id": cid, "bast_type": "HANDOVER", "system_number": number,
-                "sequence_key": SEQ["HANDOVER"], "sequence_period": cur["handover_date"][:4], "source_type": "HANDOVER",
-                "source_id": handover_id, "employee_id": emp["id"], "project_id": cur.get("project_id"),
-                "bast_date": cur["handover_date"], "manual_number": cur.get("manual_number"),
-                "manual_number_norm": cur.get("manual_number_norm"), "doc_state": "ISSUED", "snapshot": snap,
-                "issued_at": now(), "issued_by": actor}
-        await tx.insert("asset_basts", dict(bast))
-        for it in items:
-            a = assets[it["asset_id"]]
-            holding = {**_stamp(actor), "company_id": cid, "asset_id": a["id"], "employee_id": emp["id"],
-                       "handover_id": handover_id, "handover_bast_id": bast["id"], "start_date": cur["handover_date"],
-                       "project_id": cur.get("project_id"), "work_location_id": cur.get("work_location_id"),
-                       "initial_condition_id": it.get("condition_id"), "accessories_out": it.get("accessories"),
-                       "holding_status": ACTIVE, "active_lock": a["id"]}
-            await tx.insert("asset_holdings", dict(holding))
-            await tx.update("assets", {"company_id": cid, "id": a["id"]},
-                            {"lifecycle_state": "IN_USE", "status_id": in_use["id"], "project_id": cur.get("project_id"),
-                             "work_location_id": cur.get("work_location_id"), "condition_id": it.get("condition_id"),
-                             "row_version": int(a.get("row_version") or 1) + 1, **_stamp(actor, False)})
-            await tx.insert("asset_events", _event(cid, a["id"], "HANDOVER", actor, from_state="READY", to_state="IN_USE",
-                                                   project_id=cur.get("project_id"), work_location_id=cur.get("work_location_id"),
-                                                   condition_id=it.get("condition_id"), status_id=in_use["id"],
-                                                   employee_id=emp["id"], holding_id=holding["id"], bast_id=bast["id"],
-                                                   changes={"bast_number": number}))
-        await tx.update("asset_handovers", {"company_id": cid, "id": handover_id},
-                        {"doc_state": PUBLISHED, "bast_id": bast["id"], "published_at": now(), "published_by": actor,
-                         **_stamp(actor, False)})
+    in_use, prepared = await _handover_prepare(ctx, ho["handover_date"])
+    async with _atomic(HO_CONFLICT) as tx:
+        number = await _handover_finalize(tx, ctx, scope, handover_id, emp, items, in_use, prepared)
     await log_action(ctx, "publish", "asset_handover", handover_id, number, after={"items": len(items), "bast": number}, module="asset")
+    return await _handover_detail(ctx, await _visible(ctx, "asset_handovers", handover_id))
+
+
+@router.post("/asset-handovers/save-and-publish", status_code=201)
+async def save_and_publish_new_handover(payload: Dict[str, Any] = Body(...),
+                                        ctx: AuthContext = Depends(require_permission("asset_handover", "publish"))):
+    """Simpan & Publish dari form baru: buat draft + publish dalam SATU transaksi. Gagal -> tidak ada draft,
+    holding, perubahan status, maupun nomor BAST yang tersisa."""
+    _require_also(ctx, "asset_handover", "create")
+    data = await _validate_handover(ctx, payload)
+    items = data.pop("items")
+    scope = await dscope.get_scope(ctx)
+    emp = await _employee(ctx, scope, data["employee_id"])
+    in_use, prepared = await _handover_prepare(ctx, data["handover_date"])
+    doc = {**_stamp(ctx.user_id), "company_id": ctx.company_id, "doc_state": DRAFT, "ga_pic_user_id": ctx.user_id,
+           "row_version": 1, **data}
+    async with _atomic(HO_CONFLICT) as tx:
+        await tx.insert("asset_handovers", dict(doc))
+        rows = await _write_items(tx, "asset_handover_items", "handover_id", doc["id"], ctx.company_id, items, ctx.user_id)
+        number = await _handover_finalize(tx, ctx, scope, doc["id"], emp, rows, in_use, prepared)
+    await log_action(ctx, "create", "asset_handover", doc["id"], "Penyerahan (Simpan & Publish)", after={"items": len(rows)}, module="asset")
+    await log_action(ctx, "publish", "asset_handover", doc["id"], number, after={"items": len(rows), "bast": number}, module="asset")
+    return await _handover_detail(ctx, await _visible(ctx, "asset_handovers", doc["id"]))
+
+
+@router.post("/asset-handovers/{handover_id}/save-and-publish")
+async def save_and_publish_handover(handover_id: str, payload: Dict[str, Any] = Body(...),
+                                    ctx: AuthContext = Depends(require_permission("asset_handover", "publish"))):
+    """Simpan & Publish draft existing: update draft + publish dalam SATU transaksi. Gagal -> draft kembali ke versi
+    tersimpan sebelumnya (rollback)."""
+    _require_also(ctx, "asset_handover", "edit")
+    cur = await _visible(ctx, "asset_handovers", handover_id)
+    if cur.get("doc_state") != DRAFT:
+        raise _conflict("Penyerahan ini sudah diterbitkan atau dibatalkan.")
+    data = await _validate_handover(ctx, payload)
+    items = data.pop("items")
+    scope = await dscope.get_scope(ctx)
+    emp = await _employee(ctx, scope, data["employee_id"])
+    in_use, prepared = await _handover_prepare(ctx, data["handover_date"])
+    async with _atomic(HO_CONFLICT) as tx:
+        locked = await tx.select_one_for_update("asset_handovers", {"company_id": ctx.company_id, "id": handover_id})
+        if not locked or locked.get("doc_state") != DRAFT:
+            raise _conflict("Penyerahan ini sudah diterbitkan atau dibatalkan.")
+        await tx.update("asset_handovers", {"company_id": ctx.company_id, "id": handover_id},
+                        {**data, **_stamp(ctx.user_id, False), "row_version": int(locked.get("row_version") or 1) + 1})
+        rows = await _write_items(tx, "asset_handover_items", "handover_id", handover_id, ctx.company_id, items, ctx.user_id)
+        number = await _handover_finalize(tx, ctx, scope, handover_id, emp, rows, in_use, prepared)
+    await log_action(ctx, "update", "asset_handover", handover_id, "Draft penyerahan (Simpan & Publish)", after={"items": len(rows)}, module="asset")
+    await log_action(ctx, "publish", "asset_handover", handover_id, number, after={"items": len(rows), "bast": number}, module="asset")
     return await _handover_detail(ctx, await _visible(ctx, "asset_handovers", handover_id))
 
 
@@ -534,17 +670,26 @@ async def list_holdings(employee_id: Optional[str] = None, holding_status: str =
 
 
 @router.get("/asset-returns/options")
-async def return_options(ctx: AuthContext = Depends(require_permission("asset_return", "view"))):
+async def return_options(include_employees: bool = True,
+                         ctx: AuthContext = Depends(require_permission("asset_return", "view"))):
+    """`include_employees=false` (UI CP2.1): karyawan pemegang dicari lewat /asset-returns/employee-search."""
     scope = await dscope.get_scope(ctx)
     db, cid = get_db(), ctx.company_id
-    holders = await db.asset_holdings.find(dscope.with_scope(dscope.with_project_scope(
-        {"company_id": cid, "holding_status": ACTIVE}, scope), scope, "employee_id"), NO_ID).to_list(5000)
+    holders = (await db.asset_holdings.find(dscope.with_scope(dscope.with_project_scope(
+        {"company_id": cid, "holding_status": ACTIVE}, scope), scope, "employee_id"), NO_ID).to_list(5000)) if include_employees else []
     emps = await _names(cid, "employees", [h["employee_id"] for h in holders], None)
     conds = await db.asset_conditions.find({"company_id": cid, "status": "active"}, NO_ID).sort([("sort_order", 1)]).to_list(200)
     return {"employees": sorted([{"id": e["id"], "full_name": e.get("full_name"), "employee_number": e.get("employee_number")}
                                  for e in emps.values()], key=lambda x: x["full_name"] or ""),
             "conditions": [{"id": c["id"], "name": c.get("name")} for c in conds],
             "ga_pic_name": (await _user_names([ctx.user_id])).get(ctx.user_id)}
+
+
+@router.get("/asset-returns/employee-search")
+async def return_employee_search(q: Optional[str] = None, page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=EMP_SEARCH_MAX),
+                                 ctx: AuthContext = Depends(require_permission("asset_return", "view"))):
+    """Karyawan yang memegang aset aktif (untuk form Pengembalian), dicari di server + scope 01I."""
+    return await _employee_search(ctx, q, page, limit, holders_only=True)
 
 
 async def _validate_return(ctx: AuthContext, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -653,9 +798,80 @@ async def return_manual_number(return_id: str, payload: Dict[str, Any] = Body(..
     return await _edit_manual(ctx, "asset_returns", "asset_return", return_id, payload)
 
 
+RT_CONFLICT = "Konflik pengembalian bersamaan: aset sedang/sudah diproses transaksi lain. Publish dibatalkan seluruhnya."
+
+
+async def _return_prepare(ctx: AuthContext, return_date: str):
+    pending = await svc.default_status_for(ctx.company_id, "PENDING_INSPECTION")
+    if not pending:
+        raise _unprocessable("Status aset untuk kategori sistem PENDING_INSPECTION belum dikonfigurasi.")
+    prepared = await doc_sequence.prepare(ctx.company_id, SEQ["RETURN"], when=date.fromisoformat(return_date), actor_id=ctx.user_id)
+    return pending, prepared
+
+
+async def _return_finalize(tx, ctx: AuthContext, scope, return_id: str, emp: Dict[str, Any], items: List[Dict[str, Any]],
+                           pending: Dict[str, Any], prepared: Dict[str, Any]) -> str:
+    """Satu-satunya logika publish pengembalian (Publish draft & Simpan & Publish), di DALAM transaksi pemanggil:
+    hanya holding item yang dipilih ditutup (partial return), aset -> PENDING_INSPECTION, BAST-RTN terbit."""
+    cid, actor = ctx.company_id, ctx.user_id
+    if not items:
+        raise _unprocessable("Draft pengembalian tidak memiliki item aset.")
+    cur = await tx.select_one_for_update("asset_returns", {"company_id": cid, "id": return_id})
+    if not cur or cur.get("doc_state") != DRAFT:
+        raise _conflict("Pengembalian ini sudah diterbitkan atau dibatalkan.")
+    assets: Dict[str, Dict[str, Any]] = {}
+    holdings: Dict[str, Dict[str, Any]] = {}
+    for it in sorted(items, key=lambda x: x["asset_id"]):
+        a = await tx.select_one_for_update("assets", {"company_id": cid, "id": it["asset_id"]})
+        h = await tx.select_one_for_update("asset_holdings", {"company_id": cid, "id": it["holding_id"]})
+        if not a or not h or not scope.allows_project(h.get("project_id")):
+            raise _conflict("Salah satu aset tidak lagi tersedia dalam cakupan Anda. Publish dibatalkan seluruhnya.")
+        if (h.get("holding_status") != ACTIVE or h.get("employee_id") != emp["id"] or h.get("asset_id") != a["id"]
+                or h.get("active_lock") != a["id"] or a.get("lifecycle_state") != "IN_USE"):
+            raise _conflict(f"Aset {a.get('asset_code')} tidak lagi dipegang aktif oleh karyawan ini. Publish dibatalkan seluruhnya.")
+        assets[a["id"]], holdings[h["id"]] = a, h
+
+    async def _taken(candidate):
+        return bool(await tx.select_one("asset_basts", {"company_id": cid, "system_number": candidate}))
+    number = await doc_sequence.allocate_in_tx(tx, prepared, exists=_taken)
+    first_h = holdings[items[0]["holding_id"]]
+    snap = await _snapshot_header(tx, ctx, "RETURN", cur, emp, number, cur["return_date"], cur.get("project_id"),
+                                  first_h.get("work_location_id"))
+    snap["items"] = await _snapshot_items(tx, cid, assets, items)
+    bast = {**_stamp(actor), "company_id": cid, "bast_type": "RETURN", "system_number": number,
+            "sequence_key": SEQ["RETURN"], "sequence_period": cur["return_date"][:4], "source_type": "RETURN",
+            "source_id": return_id, "employee_id": emp["id"], "project_id": cur.get("project_id"),
+            "bast_date": cur["return_date"], "manual_number": cur.get("manual_number"),
+            "manual_number_norm": cur.get("manual_number_norm"), "doc_state": "ISSUED", "snapshot": snap,
+            "issued_at": now(), "issued_by": actor}
+    await tx.insert("asset_basts", dict(bast))
+    for it in items:
+        a, h = assets[it["asset_id"]], holdings[it["holding_id"]]
+        await tx.update("asset_holdings", {"company_id": cid, "id": h["id"]},
+                        {"holding_status": CLOSED, "end_date": cur["return_date"], "return_id": return_id,
+                         "return_bast_id": bast["id"], "return_condition_id": it.get("condition_id"),
+                         "accessories_in": it.get("accessories"), "active_lock": None, **_stamp(actor, False)})
+        await tx.update("assets", {"company_id": cid, "id": a["id"]},
+                        {"lifecycle_state": "PENDING_INSPECTION", "status_id": pending["id"],
+                         "condition_id": it.get("condition_id"), "row_version": int(a.get("row_version") or 1) + 1,
+                         **_stamp(actor, False)})
+        await tx.insert("asset_inspections", {**_stamp(actor), "company_id": cid, "return_id": return_id,
+                                              "return_item_id": it["id"], "asset_id": a["id"], "holding_id": h["id"],
+                                              "employee_id": emp["id"], "project_id": h.get("project_id"),
+                                              "inspection_state": "PENDING"})
+        await tx.insert("asset_events", _event(cid, a["id"], "RETURN", actor, from_state="IN_USE", to_state="PENDING_INSPECTION",
+                                               condition_id=it.get("condition_id"), status_id=pending["id"],
+                                               project_id=h.get("project_id"), employee_id=emp["id"],
+                                               holding_id=h["id"], bast_id=bast["id"], changes={"bast_number": number}))
+    await tx.update("asset_returns", {"company_id": cid, "id": return_id},
+                    {"doc_state": PUBLISHED, "bast_id": bast["id"], "published_at": now(), "published_by": actor,
+                     **_stamp(actor, False)})
+    return number
+
+
 @router.post("/asset-returns/{return_id}/publish")
 async def publish_return(return_id: str, ctx: AuthContext = Depends(require_permission("asset_return", "publish"))):
-    cid, actor = ctx.company_id, ctx.user_id
+    cid = ctx.company_id
     rt = await _visible(ctx, "asset_returns", return_id)
     if rt.get("doc_state") != DRAFT:
         raise _conflict("Pengembalian ini sudah diterbitkan atau dibatalkan.")
@@ -664,63 +880,57 @@ async def publish_return(return_id: str, ctx: AuthContext = Depends(require_perm
     items = await get_db().asset_return_items.find({"company_id": cid, "return_id": return_id}, NO_ID).sort([("line_no", 1)]).to_list(500)
     if not items:
         raise _unprocessable("Draft pengembalian tidak memiliki item aset.")
-    pending = await svc.default_status_for(cid, "PENDING_INSPECTION")
-    if not pending:
-        raise _unprocessable("Status aset untuk kategori sistem PENDING_INSPECTION belum dikonfigurasi.")
-    prepared = await doc_sequence.prepare(cid, SEQ["RETURN"], when=date.fromisoformat(rt["return_date"]), actor_id=actor)
-    async with _atomic("Konflik pengembalian bersamaan: aset sedang/sudah diproses transaksi lain. "
-                       "Publish dibatalkan seluruhnya.") as tx:
-        cur = await tx.select_one_for_update("asset_returns", {"company_id": cid, "id": return_id})
-        if not cur or cur.get("doc_state") != DRAFT:
-            raise _conflict("Pengembalian ini sudah diterbitkan atau dibatalkan.")
-        assets: Dict[str, Dict[str, Any]] = {}
-        holdings: Dict[str, Dict[str, Any]] = {}
-        for it in sorted(items, key=lambda x: x["asset_id"]):
-            a = await tx.select_one_for_update("assets", {"company_id": cid, "id": it["asset_id"]})
-            h = await tx.select_one_for_update("asset_holdings", {"company_id": cid, "id": it["holding_id"]})
-            if not a or not h or not scope.allows_project(h.get("project_id")):
-                raise _conflict("Salah satu aset tidak lagi tersedia dalam cakupan Anda. Publish dibatalkan seluruhnya.")
-            if (h.get("holding_status") != ACTIVE or h.get("employee_id") != emp["id"] or h.get("asset_id") != a["id"]
-                    or h.get("active_lock") != a["id"] or a.get("lifecycle_state") != "IN_USE"):
-                raise _conflict(f"Aset {a.get('asset_code')} tidak lagi dipegang aktif oleh karyawan ini. Publish dibatalkan seluruhnya.")
-            assets[a["id"]], holdings[h["id"]] = a, h
-
-        async def _taken(candidate):
-            return bool(await tx.select_one("asset_basts", {"company_id": cid, "system_number": candidate}))
-        number = await doc_sequence.allocate_in_tx(tx, prepared, exists=_taken)
-        first_h = holdings[items[0]["holding_id"]]
-        snap = await _snapshot_header(tx, ctx, "RETURN", cur, emp, number, cur["return_date"], cur.get("project_id"),
-                                      first_h.get("work_location_id"))
-        snap["items"] = await _snapshot_items(tx, cid, assets, items)
-        bast = {**_stamp(actor), "company_id": cid, "bast_type": "RETURN", "system_number": number,
-                "sequence_key": SEQ["RETURN"], "sequence_period": cur["return_date"][:4], "source_type": "RETURN",
-                "source_id": return_id, "employee_id": emp["id"], "project_id": cur.get("project_id"),
-                "bast_date": cur["return_date"], "manual_number": cur.get("manual_number"),
-                "manual_number_norm": cur.get("manual_number_norm"), "doc_state": "ISSUED", "snapshot": snap,
-                "issued_at": now(), "issued_by": actor}
-        await tx.insert("asset_basts", dict(bast))
-        for it in items:
-            a, h = assets[it["asset_id"]], holdings[it["holding_id"]]
-            await tx.update("asset_holdings", {"company_id": cid, "id": h["id"]},
-                            {"holding_status": CLOSED, "end_date": cur["return_date"], "return_id": return_id,
-                             "return_bast_id": bast["id"], "return_condition_id": it.get("condition_id"),
-                             "accessories_in": it.get("accessories"), "active_lock": None, **_stamp(actor, False)})
-            await tx.update("assets", {"company_id": cid, "id": a["id"]},
-                            {"lifecycle_state": "PENDING_INSPECTION", "status_id": pending["id"],
-                             "condition_id": it.get("condition_id"), "row_version": int(a.get("row_version") or 1) + 1,
-                             **_stamp(actor, False)})
-            await tx.insert("asset_inspections", {**_stamp(actor), "company_id": cid, "return_id": return_id,
-                                                  "return_item_id": it["id"], "asset_id": a["id"], "holding_id": h["id"],
-                                                  "employee_id": emp["id"], "project_id": h.get("project_id"),
-                                                  "inspection_state": "PENDING"})
-            await tx.insert("asset_events", _event(cid, a["id"], "RETURN", actor, from_state="IN_USE", to_state="PENDING_INSPECTION",
-                                                   condition_id=it.get("condition_id"), status_id=pending["id"],
-                                                   project_id=h.get("project_id"), employee_id=emp["id"],
-                                                   holding_id=h["id"], bast_id=bast["id"], changes={"bast_number": number}))
-        await tx.update("asset_returns", {"company_id": cid, "id": return_id},
-                        {"doc_state": PUBLISHED, "bast_id": bast["id"], "published_at": now(), "published_by": actor,
-                         **_stamp(actor, False)})
+    pending, prepared = await _return_prepare(ctx, rt["return_date"])
+    async with _atomic(RT_CONFLICT) as tx:
+        number = await _return_finalize(tx, ctx, scope, return_id, emp, items, pending, prepared)
     await log_action(ctx, "publish", "asset_return", return_id, number, after={"items": len(items), "bast": number}, module="asset")
+    return await _return_detail(ctx, await _visible(ctx, "asset_returns", return_id))
+
+
+@router.post("/asset-returns/save-and-publish", status_code=201)
+async def save_and_publish_new_return(payload: Dict[str, Any] = Body(...),
+                                      ctx: AuthContext = Depends(require_permission("asset_return", "publish"))):
+    """Simpan & Publish pengembalian baru dalam SATU transaksi (tanpa draft/holding/BAST parsial bila gagal)."""
+    _require_also(ctx, "asset_return", "create")
+    data = await _validate_return(ctx, payload)
+    items = data.pop("items")
+    scope = await dscope.get_scope(ctx)
+    emp = await _employee(ctx, scope, data["employee_id"])
+    pending, prepared = await _return_prepare(ctx, data["return_date"])
+    doc = {**_stamp(ctx.user_id), "company_id": ctx.company_id, "doc_state": DRAFT, "ga_pic_user_id": ctx.user_id,
+           "row_version": 1, **data}
+    async with _atomic(RT_CONFLICT) as tx:
+        await tx.insert("asset_returns", dict(doc))
+        rows = await _write_items(tx, "asset_return_items", "return_id", doc["id"], ctx.company_id, items, ctx.user_id)
+        number = await _return_finalize(tx, ctx, scope, doc["id"], emp, rows, pending, prepared)
+    await log_action(ctx, "create", "asset_return", doc["id"], "Pengembalian (Simpan & Publish)", after={"items": len(rows)}, module="asset")
+    await log_action(ctx, "publish", "asset_return", doc["id"], number, after={"items": len(rows), "bast": number}, module="asset")
+    return await _return_detail(ctx, await _visible(ctx, "asset_returns", doc["id"]))
+
+
+@router.post("/asset-returns/{return_id}/save-and-publish")
+async def save_and_publish_return(return_id: str, payload: Dict[str, Any] = Body(...),
+                                  ctx: AuthContext = Depends(require_permission("asset_return", "publish"))):
+    """Simpan & Publish draft pengembalian existing dalam SATU transaksi; gagal -> draft kembali ke versi tersimpan."""
+    _require_also(ctx, "asset_return", "edit")
+    cur = await _visible(ctx, "asset_returns", return_id)
+    if cur.get("doc_state") != DRAFT:
+        raise _conflict("Pengembalian ini sudah diterbitkan atau dibatalkan.")
+    data = await _validate_return(ctx, payload)
+    items = data.pop("items")
+    scope = await dscope.get_scope(ctx)
+    emp = await _employee(ctx, scope, data["employee_id"])
+    pending, prepared = await _return_prepare(ctx, data["return_date"])
+    async with _atomic(RT_CONFLICT) as tx:
+        locked = await tx.select_one_for_update("asset_returns", {"company_id": ctx.company_id, "id": return_id})
+        if not locked or locked.get("doc_state") != DRAFT:
+            raise _conflict("Pengembalian ini sudah diterbitkan atau dibatalkan.")
+        await tx.update("asset_returns", {"company_id": ctx.company_id, "id": return_id},
+                        {**data, **_stamp(ctx.user_id, False), "row_version": int(locked.get("row_version") or 1) + 1})
+        rows = await _write_items(tx, "asset_return_items", "return_id", return_id, ctx.company_id, items, ctx.user_id)
+        number = await _return_finalize(tx, ctx, scope, return_id, emp, rows, pending, prepared)
+    await log_action(ctx, "update", "asset_return", return_id, "Draft pengembalian (Simpan & Publish)", after={"items": len(rows)}, module="asset")
+    await log_action(ctx, "publish", "asset_return", return_id, number, after={"items": len(rows), "bast": number}, module="asset")
     return await _return_detail(ctx, await _visible(ctx, "asset_returns", return_id))
 
 

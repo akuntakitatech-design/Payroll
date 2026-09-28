@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { BAST_TYPE_LABEL, BastPdfActions, SnapshotView, StateBadge, employeeLabel } from "@/pages/asset/assetLifecycleShared";
+import { BAST_TYPE_LABEL, BastPdfActions, DetailButton, SnapshotView, StateBadge, employeeLabel } from "@/pages/asset/assetLifecycleShared";
 
 // Phase 2A CP2 - Dokumen BAST gabungan (Penyerahan + Pengembalian). Detail & PDF dibaca dari snapshot terbit.
 
@@ -71,7 +71,10 @@ const AssetBastPage = () => {
     { key: "item_count", header: "Aset", align: "right", render: (r) => <span className="tabular-nums">{r.item_count}</span> },
     { key: "doc_state", header: "Status", render: (r) => <StateBadge state={r.doc_state} /> },
     { key: "actions", header: "", align: "right", render: (r) => (
-      <RowActions testId={`bast-row-actions-${r.id}`} actions={[{ key: "view", label: "Lihat detail", icon: Eye, onSelect: () => openDetail(r), testId: `bast-view-${r.id}` }]} />
+      <div className="flex items-center justify-end gap-1">
+        <DetailButton onClick={() => openDetail(r)} testId={`bast-detail-button-${r.id}`} />
+        <RowActions testId={`bast-row-actions-${r.id}`} actions={[{ key: "view", label: "Lihat detail", icon: Eye, onSelect: () => openDetail(r), testId: `bast-view-${r.id}` }]} />
+      </div>
     ) },
   ];
 

@@ -22,11 +22,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  BastPdfActions, INSPECTION_RESULTS, InfoGrid, STATE_META, SnapshotView, StateBadge, employeeLabel, todayIso,
+  BastPdfActions, DetailButton, EmployeeSearchField, INSPECTION_RESULTS, InfoGrid, ItemField, STATE_META, SnapshotView, StateBadge,
+  bastIssuedMessage, employeeLabel, todayIso,
 } from "@/pages/asset/assetLifecycleShared";
 
 // Phase 2A CP2 - Pengembalian (DRAFT -> PUBLISHED, parsial; BAST Pengembalian terbit saat publish) dan
 // Pemeriksaan GA (PENDING_INSPECTION -> READY / MAINTENANCE / DAMAGED / LOST; LOST hanya bila dipilih eksplisit).
+// CP2.1: pemilik izin `asset_return:publish` dapat "Simpan & Publish" (atomik di backend); karyawan dicari server-side.
+const OPTS_PARAMS = { params: { include_employees: false } };
 
 const usePaged = (path, params) => {
   const [state, setState] = useState({ rows: [], total: 0, loading: true, error: "" });
@@ -89,10 +92,10 @@ const ReturnsTab = ({ perms, onPublished }) => {
 
   const openCreate = async () => {
     try {
-      const { data: o } = await api.get("/asset-returns/options");
+      const { data: o } = await api.get("/asset-returns/options", OPTS_PARAMS);
       setOpts(o);
       setHoldings([]);
-      setForm({ mode: "create", values: { employee_id: "", return_date: todayIso(), ga_pic_name: o.ga_pic_name || "", manual_number: "", notes: "", items: {} } });
+      setForm({ mode: "create", values: { employee_id: "", employee: null, return_date: todayIso(), ga_pic_name: o.ga_pic_name || "", manual_number: "", notes: "", items: {} } });
     } catch (e) {
       toast.error(errorMessage(e, "Pilihan pengembalian gagal dimuat."));
     }
@@ -100,13 +103,14 @@ const ReturnsTab = ({ perms, onPublished }) => {
 
   const openEdit = async (doc) => {
     try {
-      const [{ data: o }, { data: full }] = await Promise.all([api.get("/asset-returns/options"), api.get(`/asset-returns/${doc.id}`)]);
+      const [{ data: o }, { data: full }] = await Promise.all([api.get("/asset-returns/options", OPTS_PARAMS), api.get(`/asset-returns/${doc.id}`)]);
       setOpts(o);
       await loadHoldings(full.employee_id);
       const items = {};
       (full.items || []).forEach((i) => { items[i.holding_id] = { condition_id: i.condition_id || "", accessories: i.accessories || "", item_notes: i.item_notes || "" }; });
       setDetail(null);
-      setForm({ mode: "edit", id: full.id, values: { employee_id: full.employee_id, return_date: full.return_date, ga_pic_name: full.ga_pic_name || "",
+      setForm({ mode: "edit", id: full.id, values: { employee_id: full.employee_id,
+        employee: { id: full.employee_id, full_name: full.employee_name, employee_number: full.employee_number }, return_date: full.return_date, ga_pic_name: full.ga_pic_name || "",
         manual_number: full.manual_number || "", notes: full.notes || "", items } });
     } catch (e) {
       toast.error(errorMessage(e, "Draft pengembalian gagal dimuat."));
@@ -122,15 +126,43 @@ const ReturnsTab = ({ perms, onPublished }) => {
   });
   const setItem = (hid, k, v) => setForm((f) => ({ ...f, values: { ...f.values, items: { ...f.values.items, [hid]: { ...f.values.items[hid], [k]: v } } } }));
 
+  const validateForm = (v) => {
+    const ids = Object.keys(v.items);
+    if (!v.employee_id) { toast.error("Karyawan wajib dipilih."); return false; }
+    if (!ids.length) { toast.error("Pilih minimal satu aset yang dikembalikan."); return false; }
+    if (ids.some((id) => !v.items[id].condition_id)) { toast.error("Kondisi saat dikembalikan wajib diisi untuk setiap aset."); return false; }
+    return true;
+  };
+  const buildBody = (v) => ({ employee_id: v.employee_id, return_date: v.return_date, ga_pic_name: v.ga_pic_name || null, manual_number: v.manual_number || null,
+    notes: v.notes || null, items: Object.keys(v.items).map((id) => ({ holding_id: id, ...v.items[id] })) });
+
+  // Simpan & Publish: satu operasi atomik di backend. Gagal -> tidak ada perubahan tersimpan; input form dipertahankan.
+  const saveAndPublish = async () => {
+    setSaving(true);
+    try {
+      const body = buildBody(form.values);
+      const { data: d } = form.mode === "create"
+        ? await api.post("/asset-returns/save-and-publish", body)
+        : await api.post(`/asset-returns/${form.id}/save-and-publish`, body);
+      toast.success(`${bastIssuedMessage(d.bast_number)}. Aset menunggu pemeriksaan.`);
+      setConfirm(null);
+      setForm(null);
+      setDetail(d);
+      onPublished?.();
+      data.load();
+    } catch (e) {
+      setConfirm(null);
+      toast.error(errorMessage(e, "Simpan & Publish gagal. Tidak ada perubahan yang disimpan; periksa isian lalu coba lagi."), { duration: 9000 });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const save = async () => {
     const v = form.values;
-    const ids = Object.keys(v.items);
-    if (!v.employee_id) return toast.error("Karyawan wajib dipilih.");
-    if (!ids.length) return toast.error("Pilih minimal satu aset yang dikembalikan.");
-    if (ids.some((id) => !v.items[id].condition_id)) return toast.error("Kondisi saat dikembalikan wajib diisi untuk setiap aset.");
+    if (!validateForm(v)) return;
     setSaving(true);
-    const body = { employee_id: v.employee_id, return_date: v.return_date, ga_pic_name: v.ga_pic_name || null, manual_number: v.manual_number || null,
-      notes: v.notes || null, items: ids.map((id) => ({ holding_id: id, ...v.items[id] })) };
+    const body = buildBody(v);
     try {
       const { data: d } = form.mode === "create" ? await api.post("/asset-returns", body) : await api.put(`/asset-returns/${form.id}`, body);
       toast.success(form.mode === "create" ? "Draft pengembalian disimpan." : "Draft pengembalian diperbarui.");
@@ -155,11 +187,12 @@ const ReturnsTab = ({ perms, onPublished }) => {
 
   const runConfirm = async () => {
     const { type, doc } = confirm;
+    if (type === "save_publish") return saveAndPublish();
     setActing(true);
     try {
       if (type === "publish") {
         const { data: d } = await api.post(`/asset-returns/${doc.id}/publish`);
-        toast.success(`Pengembalian terbit. Nomor BAST ${d.bast_number}. Aset menunggu pemeriksaan.`);
+        toast.success(`${bastIssuedMessage(d.bast_number)}. Aset menunggu pemeriksaan.`);
         setDetail(d);
         onPublished?.();
       } else {
@@ -184,13 +217,18 @@ const ReturnsTab = ({ perms, onPublished }) => {
     { key: "project_name", header: "Project", hideOnMobile: true, render: (r) => r.project_name || "-" },
     { key: "doc_state", header: "Status", render: (r) => <StateBadge state={r.doc_state} testId={`return-state-${r.id}`} /> },
     { key: "actions", header: "", align: "right", render: (r) => (
-      <RowActions testId={`return-row-actions-${r.id}`} actions={[
-        { key: "view", label: "Lihat detail", icon: Eye, onSelect: () => openDetail(r), testId: `return-view-${r.id}` },
-        r.doc_state === "DRAFT" && perms.returnEdit && { key: "edit", label: "Ubah draft", icon: Pencil, onSelect: () => openEdit(r), testId: `return-edit-${r.id}` },
-      ]} />
+      <div className="flex items-center justify-end gap-1">
+        <DetailButton onClick={() => openDetail(r)} testId={`return-detail-button-${r.id}`} />
+        <RowActions testId={`return-row-actions-${r.id}`} actions={[
+          { key: "view", label: "Lihat detail", icon: Eye, onSelect: () => openDetail(r), testId: `return-view-${r.id}` },
+          r.doc_state === "DRAFT" && perms.returnEdit && { key: "edit", label: "Ubah draft", icon: Pencil, onSelect: () => openEdit(r), testId: `return-edit-${r.id}` },
+        ]} />
+      </div>
     ) },
   ];
   const v = form?.values;
+  // Simpan & Publish = izin simpan (create untuk form baru / edit untuk draft) + izin publish (permission efektif).
+  const canSavePublish = !!form && perms.returnPublish && (form.mode === "create" ? perms.returnCreate : perms.returnEdit);
   const selectedCount = v ? Object.keys(v.items).length : 0;
 
   return (
@@ -209,22 +247,22 @@ const ReturnsTab = ({ perms, onPublished }) => {
       <Paged data={data} columns={columns} testId="return-table" onRowClick={openDetail}
         emptyProps={{ icon: Undo2, testId: "return-list-empty", title: "Belum ada pengembalian", description: "Buat pengembalian saat karyawan menyerahkan kembali aset ke GA." }} />
 
-      <Dialog open={!!form} onOpenChange={(o) => !o && !saving && setForm(null)}>
+      <Dialog open={!!form} onOpenChange={(o) => !o && !saving && !confirm && setForm(null)}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl" data-testid="return-form-dialog">
           <DialogHeader>
-            <DialogTitle>{form?.mode === "edit" ? "Ubah Draft Pengembalian" : "Buat Draft Pengembalian"}</DialogTitle>
-            <DialogDescription>Pilih karyawan, lalu centang aset yang benar-benar dikembalikan. Satu pengembalian untuk aset dari project yang sama.</DialogDescription>
+            <DialogTitle>{form?.mode === "edit" ? "Ubah Draft Pengembalian" : "Buat Pengembalian"}</DialogTitle>
+            <DialogDescription>
+              Pilih karyawan, lalu centang aset yang benar-benar dikembalikan. Satu pengembalian untuk aset dari project yang sama.
+              {canSavePublish ? " Simpan & Publish langsung menerbitkan BAST Pengembalian." : ""}
+            </DialogDescription>
           </DialogHeader>
           {v && (
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>Karyawan <span className="text-danger">*</span></Label>
-                  <Select value={v.employee_id} disabled={form.mode === "edit"} onValueChange={(x) => { setForm((f) => ({ ...f, values: { ...f.values, employee_id: x, items: {} } })); loadHoldings(x); }}>
-                    <SelectTrigger data-testid="return-employee-select"><SelectValue placeholder="Pilih karyawan pemegang aset" /></SelectTrigger>
-                    <SelectContent>{(opts?.employees || []).map((e) => <SelectItem key={e.id} value={e.id}>{employeeLabel(e)}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
+                <EmployeeSearchField label="Karyawan pemegang aset" required endpoint="/asset-returns/employee-search" value={v.employee_id}
+                  selected={v.employee} disabled={form.mode === "edit"} testId="return-employee-select"
+                  hint="Hanya karyawan yang sedang memegang aset aktif."
+                  onSelect={(e) => { setForm((f) => ({ ...f, values: { ...f.values, employee_id: e.id, employee: e, items: {} } })); loadHoldings(e.id); }} />
                 <div className="space-y-1.5">
                   <Label htmlFor="rt-date">Tanggal pengembalian <span className="text-danger">*</span></Label>
                   <Input id="rt-date" type="date" value={v.return_date} onChange={(e) => setVal("return_date", e.target.value)} data-testid="return-date-input" />
@@ -264,15 +302,22 @@ const ReturnsTab = ({ perms, onPublished }) => {
                           <StateBadge state="IN_USE" />
                         </label>
                         {it && (
-                          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                            <Select value={it.condition_id} onValueChange={(x) => setItem(h.id, "condition_id", x)}>
-                              <SelectTrigger className="h-9" data-testid={`return-item-condition-${h.id}`}><SelectValue placeholder="Kondisi saat kembali *" /></SelectTrigger>
-                              <SelectContent>{(opts?.conditions || []).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                            </Select>
-                            <Input className="h-9" placeholder="Kelengkapan yang kembali" value={it.accessories} onChange={(e) => setItem(h.id, "accessories", e.target.value)}
-                              data-testid={`return-item-accessories-${h.id}`} />
-                            <Input className="h-9" placeholder="Catatan" value={it.item_notes} onChange={(e) => setItem(h.id, "item_notes", e.target.value)}
-                              data-testid={`return-item-notes-${h.id}`} />
+                          <div className="mt-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-3" data-testid={`return-item-fields-${h.id}`}>
+                            <p className="text-[12px] font-medium text-muted-foreground sm:col-span-3">Detail pengembalian {h.asset_code}</p>
+                            <ItemField label="Kondisi saat kembali" required>
+                              <Select value={it.condition_id} onValueChange={(x) => setItem(h.id, "condition_id", x)}>
+                                <SelectTrigger className="h-9" aria-label={`Kondisi ${h.asset_code}`} data-testid={`return-item-condition-${h.id}`}><SelectValue placeholder="Pilih kondisi" /></SelectTrigger>
+                                <SelectContent>{(opts?.conditions || []).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                              </Select>
+                            </ItemField>
+                            <ItemField label="Kelengkapan" htmlFor={`rt-acc-${h.id}`}>
+                              <Input id={`rt-acc-${h.id}`} className="h-9" placeholder="Mis. charger, tas" value={it.accessories} onChange={(e) => setItem(h.id, "accessories", e.target.value)}
+                                data-testid={`return-item-accessories-${h.id}`} />
+                            </ItemField>
+                            <ItemField label="Catatan" htmlFor={`rt-note-${h.id}`}>
+                              <Input id={`rt-note-${h.id}`} className="h-9" placeholder="Opsional" value={it.item_notes} onChange={(e) => setItem(h.id, "item_notes", e.target.value)}
+                                data-testid={`return-item-notes-${h.id}`} />
+                            </ItemField>
                           </div>
                         )}
                       </div>
@@ -284,7 +329,15 @@ const ReturnsTab = ({ perms, onPublished }) => {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setForm(null)} disabled={saving} data-testid="return-form-cancel-button">Batal</Button>
-            <Button onClick={save} disabled={saving} data-testid="return-form-save-button">{saving ? "Menyimpan…" : "Simpan Draft"}</Button>
+            <Button variant={canSavePublish ? "outline" : "default"} onClick={save} disabled={saving} data-testid="return-form-save-button">
+              {saving && !confirm ? "Menyimpan…" : "Simpan Draft"}
+            </Button>
+            {canSavePublish && (
+              <Button onClick={() => validateForm(v) && setConfirm({ type: "save_publish", doc: { items: Object.keys(v.items) } })} disabled={saving}
+                data-testid="return-form-save-publish-button">
+                <Send className="mr-2 h-4 w-4" /> Simpan &amp; Publish
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -333,12 +386,12 @@ const ReturnsTab = ({ perms, onPublished }) => {
           )}
         </SheetContent>
       </Sheet>
-      <ConfirmDialog open={!!confirm} onOpenChange={(o) => !o && !acting && setConfirm(null)} loading={acting} destructive={confirm?.type === "cancel"}
-        title={confirm?.type === "publish" ? "Publish pengembalian aset?" : "Batalkan draft pengembalian?"}
-        description={confirm?.type === "publish"
+      <ConfirmDialog open={!!confirm} onOpenChange={(o) => !o && !acting && !saving && setConfirm(null)} loading={acting || saving} destructive={confirm?.type === "cancel"}
+        title={confirm?.type === "cancel" ? "Batalkan draft pengembalian?" : confirm?.type === "save_publish" ? "Simpan & publish pengembalian aset?" : "Publish pengembalian aset?"}
+        description={confirm && confirm.type !== "cancel"
           ? `${confirm.doc.items?.length || 0} aset akan ditutup holding-nya, berstatus Menunggu Pemeriksaan, dan BAST Pengembalian terbit sekarang. Aset lain milik karyawan tetap Dipakai. Tindakan ini tidak dapat dibatalkan.`
           : "Draft akan ditandai dibatalkan."}
-        confirmLabel={confirm?.type === "publish" ? "Publish" : "Batalkan Draft"} onConfirm={runConfirm} />
+        confirmLabel={confirm?.type === "cancel" ? "Batalkan Draft" : confirm?.type === "save_publish" ? "Simpan & Publish" : "Publish"} onConfirm={runConfirm} />
     </div>
   );
 };
@@ -357,7 +410,7 @@ const InspectionTab = ({ state, perms, refreshKey }) => {
   const open = async (row) => {
     try {
       if (!conditions.length) {
-        const { data: o } = await api.get("/asset-returns/options");
+        const { data: o } = await api.get("/asset-returns/options", OPTS_PARAMS);
         setConditions(o.conditions || []);
       }
     } catch { /* pilihan kondisi opsional untuk tampilan */ }
@@ -408,6 +461,9 @@ const InspectionTab = ({ state, perms, refreshKey }) => {
       ? { key: "returned_condition_name", header: "Kondisi kembali", hideOnMobile: true, render: (r) => r.returned_condition_name || "-" }
       : { key: "completed_at", header: "Selesai", hideOnMobile: true, render: (r) => formatDateTime(r.completed_at) },
     { key: "state", header: pending ? "Status aset" : "Hasil akhir", render: (r) => <StateBadge state={pending ? r.lifecycle_state : r.result_state} testId={`inspection-state-${r.id}`} /> },
+    { key: "actions", header: "", align: "right", render: (r) => (
+      <DetailButton onClick={() => open(r)} label={pending ? "Periksa" : "Detail"} testId={`inspection-detail-button-${r.id}`} />
+    ) },
   ];
   const canSave = pending && (current?.inspected_by ? perms.inspEdit : perms.inspCreate);
 
