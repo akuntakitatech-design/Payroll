@@ -1,7 +1,12 @@
 """Upgrade 01I - Role & Data Scope: test backend terarah.
 
-CARA MENJALANKAN (hanya MariaDB development LOKAL `hris_dev`):
-    cd /app/backend && bash tests/dev_env_run.sh python3 tests/test_data_scope_01i.py
+CARA MENJALANKAN (hanya MariaDB development LOKAL `hris_dev`, berisi tenant development kode `DEV`):
+    cd backend
+    APP_ENV=development READ_ONLY=false ENABLE_SCHEDULER=false R2_ACCESS_KEY_ID= R2_SECRET_ACCESS_KEY= \
+    DATABASE_URL='mysql://<user>:<password>@127.0.0.1:3306/hris_dev' \
+    python3 tests/test_data_scope_01i.py            # atau: python3 -m pytest tests/test_data_scope_01i.py -q
+Variabel yang di-export di shell MENGALAHKAN nilai `backend/.env` (load_dotenv tidak menimpa variabel yang sudah ada),
+sehingga test dapat dijalankan walau `backend/.env` menunjuk database lain. Tanpa variabel di atas, guard menolak berjalan.
 
 KEAMANAN TEST
 - Guard: APP_ENV=development + host DB loopback + nama DB `hris_dev` + READ_ONLY=false + tanpa kredensial R2.
