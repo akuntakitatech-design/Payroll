@@ -1,17 +1,21 @@
 import React, { useEffect } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { PackageSearch, Settings2 } from "lucide-react";
+import { FileCheck2, HandCoins, PackageSearch, Settings2, Undo2 } from "lucide-react";
 
 import PageHeader from "@/components/common/PageHeader";
 import EmptyState from "@/components/common/EmptyState";
 import TimeTabs from "@/components/time/TimeTabs";
 import { useAuth } from "@/lib/auth";
 
-// Phase 2A CP1 - Manajemen Aset. Hanya Daftar Aset + Pengaturan (submenu CP2+ belum ditampilkan).
+// Phase 2A CP1 + CP2 - Manajemen Aset: Daftar Aset, Penyerahan, Pengembalian & Pemeriksaan, Dokumen BAST, Pengaturan.
 // Visibilitas: modul `asset` aktif + permission (tanpa cek nama role).
 export const assetTabs = (can) =>
   [
     can("asset", "view") && { to: "/modules/asset/assets", label: "Daftar Aset", icon: PackageSearch },
+    can("asset_handover", "view") && { to: "/modules/asset/handovers", label: "Penyerahan Aset", icon: HandCoins },
+    (can("asset_return", "view") || can("asset_inspection", "view")) &&
+      { to: "/modules/asset/returns", label: "Pengembalian & Pemeriksaan", icon: Undo2 },
+    can("asset_bast", "view") && { to: "/modules/asset/basts", label: "Dokumen BAST", icon: FileCheck2 },
     can("asset_master", "view") && { to: "/modules/asset/settings", label: "Pengaturan", icon: Settings2 },
   ].filter(Boolean);
 
@@ -52,7 +56,7 @@ const AssetModuleLayout = () => {
     <>
       <PageHeader
         title="Manajemen Aset"
-        subtitle="Master aset per unit fisik: kode, serial number, project, lokasi, kondisi, dan status."
+        subtitle="Aset per unit fisik beserta siklus penyerahan, pengembalian, pemeriksaan, dan dokumen BAST."
       />
       <TimeTabs items={tabs} testId="asset-module-tabs" />
       <Outlet />

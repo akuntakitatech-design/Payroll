@@ -61,6 +61,9 @@ import LeaveOvertimeModuleLayout from "@/pages/leave/LeaveOvertimeModuleLayout";
 import AssetModuleLayout from "@/pages/asset/AssetModuleLayout";
 import AssetListPage from "@/pages/asset/AssetListPage";
 import AssetSettingsPage from "@/pages/asset/AssetSettingsPage";
+import AssetHandoverPage from "@/pages/asset/AssetHandoverPage";
+import AssetReturnInspectionPage from "@/pages/asset/AssetReturnInspectionPage";
+import AssetBastPage from "@/pages/asset/AssetBastPage";
 import LeaveOvertimeOverviewPage from "@/pages/leave/LeaveOvertimeOverviewPage";
 import LeaveRequestsPage from "@/pages/leave/LeaveRequestsPage";
 import OvertimePage from "@/pages/leave/OvertimePage";
@@ -191,9 +194,12 @@ const AppRoutes = () => (
         <Route path="saldo" element={<LeaveBalancesPage />} />
         <Route path="persetujuan" element={<LeaveOvertimeApprovalsPage />} />
       </Route>
-      {/* Phase 2A CP1 - Manajemen Aset: hanya Daftar Aset + Pengaturan. /modules/asset -> halaman pertama yang diizinkan. */}
+      {/* Phase 2A CP1 + CP2 - Manajemen Aset: Daftar Aset, Penyerahan, Pengembalian & Pemeriksaan, Dokumen BAST, Pengaturan. */}
       <Route path="/modules/asset" element={<AssetModuleLayout />}>
         <Route path="assets" element={<AssetListPage />} />
+        <Route path="handovers" element={<AssetHandoverPage />} />
+        <Route path="returns" element={<AssetReturnInspectionPage />} />
+        <Route path="basts" element={<AssetBastPage />} />
         <Route path="settings" element={<AssetSettingsPage />} />
         <Route path="*" element={<Navigate to="/modules/asset" replace />} />
       </Route>
