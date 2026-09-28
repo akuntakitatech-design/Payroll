@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckCircle2, ClipboardCheck, Download, FileSpreadsheet, History, Loader2, Plus, RefreshCw, Search, Send, Upload, XCircle,
 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { api, errorMessage } from "@/lib/api";
@@ -9,6 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PageBody, SectionHeader } from "@/components/common/PageHeader";
+import { AssetDocumentsPanel } from "@/pages/asset/AssetDocumentsPanel";
 import DataTable, { Pagination, TableCard } from "@/components/common/DataTable";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import EmptyState from "@/components/common/EmptyState";
@@ -473,6 +475,18 @@ const OpeningSection = ({ can, reloadKey }) => {
   useEffect(() => { load(); }, [load, reloadKey]);   // reloadKey: impor saldo awal massal selesai -> daftar dimuat ulang
   useEffect(() => { api.get("/asset-openings/options").then((r) => setOptions(r.data)).catch(() => {}); }, []);
   const openDetail = async (r) => { try { setDetail((await api.get(`/asset-openings/${r.id}`)).data); } catch (e) { toast.error(errorMessage(e)); } };
+
+  // CP4: deep-link ?open=<id> (dari Profil Karyawan / Asset 360)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const id = searchParams.get("open");
+    if (!id) return;
+    openDetail({ id });
+    const p = new URLSearchParams(searchParams);
+    p.delete("open");
+    setSearchParams(p, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const publish = async () => {
     setBusy(true);
     try {
@@ -551,6 +565,9 @@ const OpeningSection = ({ can, reloadKey }) => {
                 {!detail.bast_snapshot && <InfoGrid testId="opening-detail-info" rows={[["Karyawan", employeeLabel({ full_name: detail.employee_name, employee_number: detail.employee_number })],
                   ["Tanggal Saldo Awal", formatDate(detail.opening_date)], ["Proyek", detail.project_name || "-"], ["Lokasi", detail.work_location_name || "-"],
                   ["PIC GA", detail.ga_pic_name || "-"], ["No. Referensi", detail.manual_number || "-"], ["Catatan", detail.notes || "-"]]} />}
+                <AssetDocumentsPanel sourceType="OPENING_EXISTING" sourceId={detail.id} docState={detail.doc_state}
+                  assets={(detail.items || []).map((i) => ({ asset_id: i.asset_id, asset_code: i.asset_code, asset_name: i.asset_name }))}
+                  testId="opening-doc-panel" />
                 {detail.bast_snapshot ? <SnapshotView snapshot={detail.bast_snapshot} testId="opening-snapshot" /> : (
                   <ul className="space-y-1 text-sm" data-testid="opening-detail-items">
                     {detail.items.map((i) => <li key={i.asset_id}>{i.asset_code} · {i.asset_name} · {i.condition_name || "-"}</li>)}
@@ -667,7 +684,7 @@ export default function AssetImportOpeningPage() {
   const { can } = useAuth();
   const canImport = can("asset_import", "view");
   const canOpening = can("asset_opening", "view");
-  const [tab, setTab] = useState(canImport ? "master" : "opening");
+  const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).get("tab") === "opening" || !canImport ? "opening" : "master"));
   const [historyKey, setHistoryKey] = useState(0);
   if (!canImport && !canOpening) {
     return <PageBody><EmptyState icon={XCircle} title="Tidak ada akses" description="Anda tidak memiliki izin Impor Aset maupun Saldo Awal." testId="imports-no-access" /></PageBody>;

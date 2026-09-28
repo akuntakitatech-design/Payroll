@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import settings
 from app.core.db import close_db, ensure_indexes, get_db, warm_pool
 from app.routers import (
+    asset_documents,
     asset_import,
     asset_lifecycle,
     asset_opening,
@@ -154,6 +155,7 @@ api.include_router(assets.router)  # Phase 2A CP1 - Manajemen Aset
 api.include_router(asset_lifecycle.router)  # Phase 2A CP2 - Penyerahan/Pengembalian/Pemeriksaan + BAST
 api.include_router(asset_opening.router)  # Phase 2A CP3 - Saldo Awal / Opening Existing Holding (BAST-EXS)
 api.include_router(asset_import.router)  # Phase 2A CP3 - Impor Master Aset & Impor Saldo Awal
+api.include_router(asset_documents.router)  # Phase 2A CP4 - Dokumen Transaksi Aset + Employee Asset 360
 
 app.include_router(api)
 

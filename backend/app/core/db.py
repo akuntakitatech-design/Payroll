@@ -209,6 +209,8 @@ TENANT_COLLECTIONS = [
     "asset_import_rows",
     "asset_openings",
     "asset_opening_items",
+    # Phase 2A CP4 (m0015) - lampiran dokumen transaksi aset (file fisik di object storage; metadata di sini).
+    "asset_documents",
     # Engine penomoran generik (CP1: ASSET_CODE; CP2: BAST_HANDOVER / BAST_RETURN).
     "document_sequence_configs",
     "document_sequence_counters",
@@ -574,6 +576,16 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
     },
     "asset_opening_items": {"opening_id": "fk", "asset_id": "fk", "line_no": "i", "condition_id": "fk",
                             "accessories": "t", "item_notes": "t"},
+    # Phase 2A CP4 (m0015) - dokumen transaksi aset (HANDOVER / RETURN / OPENING_EXISTING). Satu baris = satu file fisik
+    # (storage_path unik). Profil Karyawan membaca tabel ini (tanpa salinan). doc_status ACTIVE / SUPERSEDED / DELETED;
+    # signed_lock = source_id selama SIGNED_BAST ACTIVE -> maksimal satu BAST bertanda tangan aktif per transaksi.
+    "asset_documents": {
+        "source_type": "s32", "source_id": "fk", "bast_id": "fk", "employee_id": "fk", "asset_id": "fk",
+        "document_type": "s32", "document_date": "s32", "file_name": "s", "file_extension": "s32", "mime_type": "s64",
+        "file_size": "i", "file_hash": "s64", "storage_path": "s512", "notes": "t", "doc_status": "s32",
+        "version_no": "i", "replaces_id": "fk", "superseded_by": "fk", "superseded_at": "dt", "signed_lock": "s64",
+        "uploaded_by": "fk", "uploaded_at": "dt", "deleted_by": "fk", "deleted_at": "dt", "delete_reason": "t",
+    },
     "document_sequence_configs": {"sequence_key": "s64", "label": "s", "format": "s", "reset_policy": "s32", "is_system": "b"},
     "document_sequence_counters": {"sequence_key": "s64", "period_key": "s64", "next_value": "bi"},
     # Item terikat ke scope induk (scope_id) + company_id yang sama; ref_id = projects.id pada company tsb.
@@ -943,6 +955,12 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
                        ("ix_asset_op_manual", ["company_id", "manual_number_norm"], False)],
     "asset_opening_items": [("ux_asset_op_item", ["company_id", "opening_id", "asset_id"], True),
                             ("ix_asset_op_item_asset", ["company_id", "asset_id"], False)],
+    "asset_documents": [("ux_asset_doc_path", ["company_id", "storage_path"], True),
+                        ("ux_asset_doc_signed", ["company_id", "signed_lock"], True),
+                        ("ix_asset_doc_source", ["company_id", "source_type", "source_id", "doc_status"], False),
+                        ("ix_asset_doc_employee", ["company_id", "employee_id", "doc_status"], False),
+                        ("ix_asset_doc_asset", ["company_id", "asset_id"], False),
+                        ("ix_asset_doc_bast", ["company_id", "bast_id"], False)],
     "document_sequence_configs": [("ux_doc_seq_config", ["company_id", "sequence_key"], True)],
     "document_sequence_counters": [("ux_doc_seq_counter", ["company_id", "sequence_key", "period_key"], True)],
     "user_data_scope_items": [

@@ -93,6 +93,7 @@ RESOURCES: Dict[str, tuple] = {
     "asset_bast": ("Dokumen BAST Aset", "asset", ["view"]),
     # Phase 2A CP3 - Impor Master Aset (preview tidak menulis data bisnis; commit = proses impor) & Saldo Awal.
     "asset_import": ("Impor Aset", "asset", ["view", "create", "commit"]),
+    "asset_document": ("Dokumen Transaksi Aset", "asset", ["view", "create", "delete"]),
     "asset_opening": ("Saldo Awal Aset (Existing Holding)", "asset", ["view", "create", "edit", "publish"]),
 }
 
@@ -265,7 +266,10 @@ def default_role_permissions() -> Dict[str, List[str]]:
     asset_admin += (_crud(["asset_import"], ["view", "create", "commit"])
                     + _crud(["asset_opening"], ["view", "create", "edit", "publish"]))
     asset_staff += (_crud(["asset_import"], ["view", "create"]) + _crud(["asset_opening"], ["view", "create", "edit"]))
-    hr_admin = hr_admin + ["asset:view"]
+    # Phase 2A CP4 (preset): GA Admin semua; GA Staff unggah & lihat (tanpa hapus); HR Admin lihat (Profil Karyawan 360).
+    asset_admin += _crud(["asset_document"], ["view", "create", "delete"])
+    asset_staff += _crud(["asset_document"], ["view", "create"])
+    hr_admin = hr_admin + ["asset:view", "asset_document:view"]
     hr_manager = hr_manager + ["asset:view"]
     finance = finance + ["asset:view", "asset_value:view"]
 

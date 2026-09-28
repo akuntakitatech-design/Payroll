@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ClipboardCheck, Eye, Pencil, RefreshCw, Send, Undo2, XCircle } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PageBody, SectionHeader } from "@/components/common/PageHeader";
+import { AssetDocumentsPanel } from "@/pages/asset/AssetDocumentsPanel";
 import DataTable, { FilterBar, FilterSelect, Pagination, RowActions, TableCard } from "@/components/common/DataTable";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import EmptyState from "@/components/common/EmptyState";
@@ -185,6 +187,18 @@ const ReturnsTab = ({ perms, onPublished }) => {
     }
   };
 
+  // CP4: deep-link ?open=<id> (dari Profil Karyawan / Asset 360)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const id = searchParams.get("open");
+    if (!id) return;
+    openDetail({ id });
+    const p = new URLSearchParams(searchParams);
+    p.delete("open");
+    setSearchParams(p, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const runConfirm = async () => {
     const { type, doc } = confirm;
     if (type === "save_publish") return saveAndPublish();
@@ -350,6 +364,9 @@ const ReturnsTab = ({ perms, onPublished }) => {
                 <SheetTitle className="flex flex-wrap items-center gap-2">{detail.bast_number || "Draft Pengembalian"} <StateBadge state={detail.doc_state} testId="return-detail-state" /></SheetTitle>
                 <SheetDescription>{detail.doc_state === "DRAFT" ? "Tinjau draft sebelum dipublish." : "Dokumen terbit bersifat final (read-only). Hasil pemeriksaan tidak mengubah BAST ini."}</SheetDescription>
               </SheetHeader>
+              <AssetDocumentsPanel sourceType="RETURN" sourceId={detail.id} docState={detail.doc_state}
+                assets={(detail.items || []).map((i) => ({ asset_id: i.asset_id, asset_code: i.asset_code, asset_name: i.asset_name }))}
+                testId="return-doc-panel" />
               {detail.doc_state === "PUBLISHED" && detail.bast_snapshot ? (
                 <>
                   <BastPdfActions bastId={detail.bast_id} systemNumber={detail.bast_number} testIdPrefix="return-bast" />

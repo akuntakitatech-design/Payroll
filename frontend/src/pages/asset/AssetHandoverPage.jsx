@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ClipboardCheck, Eye, HandCoins, Pencil, RefreshCw, Send, XCircle } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { PageBody, SectionHeader } from "@/components/common/PageHeader";
+import { AssetDocumentsPanel } from "@/pages/asset/AssetDocumentsPanel";
 import DataTable, { FilterBar, FilterSelect, Pagination, RowActions, TableCard } from "@/components/common/DataTable";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import EmptyState from "@/components/common/EmptyState";
@@ -124,6 +126,18 @@ const AssetHandoverPage = () => {
       toast.error(errorMessage(e, "Detail penyerahan gagal dimuat."));
     }
   };
+
+  // CP4: deep-link ?open=<id> (dari Profil Karyawan / Asset 360)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const id = searchParams.get("open");
+    if (!id) return;
+    openDetail({ id });
+    const p = new URLSearchParams(searchParams);
+    p.delete("open");
+    setSearchParams(p, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const openCreate = async () => {
     const o = (await loadOptions()) || opts;
@@ -457,6 +471,9 @@ const AssetHandoverPage = () => {
               {detail.manual_number_warning && (
                 <Alert data-testid="handover-manual-warning"><AlertDescription>{detail.manual_number_warning}</AlertDescription></Alert>
               )}
+              <AssetDocumentsPanel sourceType="HANDOVER" sourceId={detail.id} docState={detail.doc_state}
+                assets={(detail.items || []).map((i) => ({ asset_id: i.asset_id, asset_code: i.asset_code, asset_name: i.asset_name }))}
+                testId="handover-doc-panel" />
               {detail.doc_state === "PUBLISHED" && detail.bast_snapshot ? (
                 <>
                   <BastPdfActions bastId={detail.bast_id} systemNumber={detail.bast_number} testIdPrefix="handover-bast" />

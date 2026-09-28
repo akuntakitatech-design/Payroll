@@ -919,6 +919,24 @@ Staging & production TIDAK disentuh. Tidak merge / tidak deploy. Semua hasil = a
   (upload banyak file pada Penyerahan/Pengembalian, tampil di Profil Karyawan, tambah setelah Published, tanpa duplikasi file,
   tidak mengubah snapshot BAST). Butuh migration baru + object storage → desain dilaporkan dulu.
 
+### 18.6 CP4 (gabungan CP3.1 + CP4) — Dokumen Transaksi Aset + Employee Asset 360 (PENDING USER UAT — **NOT LOCKED**)
+Branch `feature/hrga-phase2a-asset-documents-employee360` dari CP3 `66f3e5a` (history CP1→CP2→CP2.1→CP3 utuh; tanpa merge ke main).
+- Migration `m0015_asset_documents_employee360` (aditif; m0012/m0013/m0014 tidak diubah): tabel `asset_documents`
+  (metadata + object key; unik `ux_asset_doc_path`, `ux_asset_doc_signed` via `signed_lock`; index source/employee/asset/bast)
+  + permission `asset_document:{view,create,delete}` + preset (GA Admin semua; GA Staff view/create; HR Admin view).
+- Dokumen: sumber HANDOVER / RETURN / OPENING_EXISTING; jenis SIGNED_BAST, CONDITION_PHOTO, HANDOVER_REPORT,
+  DAMAGE_OR_LOSS_EVIDENCE, SUPPORTING_DOCUMENT, OTHER; PDF/JPG/JPEG/PNG (cek magic bytes), maks 10 MB/file,
+  maks 10 dokumen ACTIVE/transaksi (dikunci FOR UPDATE). File fisik sekali di R2 (`{R2_PREFIX}/companies/{cid}/asset-documents/`),
+  proxy download (tanpa expose key). Boleh setelah PUBLISHED; snapshot BAST tidak disentuh. SIGNED_BAST: 1 ACTIVE/transaksi,
+  Ganti Versi -> lama SUPERSEDED; tidak bisa dihapus. Dokumen lain: soft delete (DELETED) + audit. Tanpa hard delete.
+  Dev/test: penyimpanan lokal hanya bila R2 kosong DAN `ASSET_DOC_LOCAL_STORAGE_DIR` diisi (staging/prod selalu R2).
+- Employee Asset 360 (tab "Aset" di Profil Karyawan; tanpa tabel baru): Aset Saat Ini, Histori (Saldo Awal/Penyerahan/
+  Pengembalian/Pemeriksaan, kondisi sebelum→sesudah), Dokumen Aset (baris yang sama dengan panel transaksi); deep-link
+  `?open=` ke transaksi & BAST. 01I di SQL; tanpa asset_document:view -> dokumen disembunyikan.
+- Test hris_dev: CP4 **60/60** · CP3 84/84 · CP1 146/146 · CP2 145/145 · CP2.1 57/57 · 01I 176/176 · 01H 70/70.
+- Workflow HRGA mulai sekarang: Feature Branch → test hris_dev → rollout Live Preview → UAT user → revisi → final regression
+  → commit + push + PR → review → production rollout terpisah. Merge ke main BUKAN cara update Live Preview.
+
 ## Phase 17 — Upgrade 01I: Role & Data Scope (STATUS: **LOCKED ✅** — gap closing + targeted + staging m0011 + staging E2E + final regression DONE) — 2026-09-28
 
 ### 17.3 Gap closing + staging + final regression (2026-09-28) — 01I: LOCKED ✅

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Eye, FileText, RefreshCw } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { api, errorMessage } from "@/lib/api";
@@ -54,6 +55,18 @@ const AssetBastPage = () => {
       toast.error(errorMessage(e, "Detail BAST gagal dimuat."));
     }
   };
+
+  // CP4: deep-link ?open=<id> (dari Profil Karyawan / Asset 360)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const id = searchParams.get("open");
+    if (!id) return;
+    openDetail({ id });
+    const p = new URLSearchParams(searchParams);
+    p.delete("open");
+    setSearchParams(p, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const setFilter = (k) => (v) => {
     setFilters((f) => ({ ...f, [k]: v }));
