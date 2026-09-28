@@ -792,7 +792,7 @@ Fixtures (synthetic, via authorized admin/HR APIs; scripts in /root/t01h, not in
 
 
 
-## Phase 18 — Phase 2A: Manajemen Aset (STATUS: **CP0 DONE · CP1 DONE (PR #19 merged, staging rollout done) · CP2 merged + staging UAT PASS — NOT LOCKED · CP2.1 IMPLEMENTED / TESTED, PENDING REVIEW**) — 2026-09-28
+## Phase 18 — Phase 2A: Manajemen Aset (STATUS: **CP0 DONE · CP1 DONE (PR #19 merged) · CP2 COMPLETED / LOCKED ✅ (incl. CP2.1, PR #21 merged) · CP3 IMPLEMENTED / TESTED, PENDING REVIEW — NOT LOCKED**) — 2026-09-28
 Acuan wajib: `ASSET_BAST_FINAL_BLUEPRINT.md` (SHA256 `2d750349…8f67`). Canonical worktree `/app/.repo_work/Payroll`,
 branch `feature/hrga-phase2a-asset-management` (basis `c93012c` = origin/main saat branch dibuat). Belum commit/push/PR.
 Dev/test HANYA di `hris_dev` lokal via `backend/tests/dev_env_run.sh`. `/app/backend` & `/app/frontend` TIDAK dimirror.
@@ -875,6 +875,8 @@ Branch `feature/hrga-phase2a-asset-cp2-1-ux-permission` dari main `19f65dd`. Tan
 - Temuan di luar scope: di viewport 390px, topbar global (badge DEVELOPMENT + menu user) membuat halaman melebar (465px) —
   terjadi juga di halaman non-aset (mis. Slip Gaji); tab modul aset sendiri tidak overflow. Tidak diubah di CP2.1.
 
+- Update: CP2.1 commit `75085e5`, PR #21 merged ke main (`c9218d7`). User menyatakan **CP2 COMPLETED / LOCKED ✅**.
+
 ### 18.4 GLOBAL AUTHORIZATION STANDARD (berlaku untuk modul HRGA selanjutnya)
 1. Otorisasi berbasis **permission efektif**, BUKAN nama role. Kode tidak boleh bercabang pada `role_key`/nama role.
 2. Role hanyalah kumpulan permission; custom role dengan set izin yang sama harus berperilaku identik.
@@ -884,6 +886,38 @@ Branch `feature/hrga-phase2a-asset-cp2-1-ux-permission` dari main `19f65dd`. Tan
    UI hanya menyembunyikan tombol sebagai kenyamanan — penegakan tetap 403 di backend.
 5. Tidak menambah approval workflow kecuali diminta eksplisit. Retrofit modul HRGA lain TIDAK dilakukan sekarang
    (implementasi CP2.1 hanya pada Asset).
+
+### 18.5 CP3 — Impor Master Aset + Opening Existing Holding / Saldo Awal (IMPLEMENTED / TESTED, PENDING REVIEW — **CP3 NOT LOCKED**)
+Branch `feature/hrga-phase2a-asset-import-opening` dari main `c9218d7` (setelah CP2.1). Dev/test HANYA `hris_dev` lokal.
+Staging & production TIDAK disentuh. Tidak merge / tidak deploy. Semua hasil = agent-tested, belum dikonfirmasi user.
+- Migration baru `m0014_asset_import_opening` (aditif; m0012/m0013 TIDAK diubah): tabel `asset_import_batches`, `asset_import_rows`,
+  `asset_openings`, `asset_opening_items`; kolom `assets.legacy_code/legacy_code_norm/import_batch_id` + unique
+  `ux_asset_legacy_code (company_id, legacy_code_norm)`; `asset_holdings.opening_id` + index; 7 permission CP3 + preset role.
+  Applied di hris_dev; rerun = SKIP, tanpa duplikat.
+- Import Master Aset: Upload → Preview & Validasi (backend, batch, per baris VALID/WARNING/ERROR, filter Semua/Valid/Warning/Error)
+  → Konfirmasi → Selesai. Preview tidak menulis data bisnis; commit hanya bila 0 ERROR, divalidasi ulang, satu transaksi;
+  Asset Code selalu `AST-{SEQ:6}` (alokasi massal satu kunci counter); Kode Aset Lama terpisah; status IN_USE/PENDING_INSPECTION
+  ditolak; Excel hasil mapping Kode Lama → Asset Code. Performa 5.000 baris: preview ~1.6s, commit ~1.7s.
+- Opening Existing Holding (DRAFT → PUBLISHED, tanpa approval, bukan penyerahan palsu): manual (1 karyawan → banyak aset,
+  Kondisi/Kelengkapan/Catatan per aset, PIC GA, referensi manual) + bulk Excel (grouping per karyawan → 1 dokumen / 1 BAST-EXS,
+  ringkasan grouping di preview). `finalize_openings` = satu-satunya logika publish (publish draft, Simpan & Publish, bulk):
+  atomik, FOR UPDATE, reuse `asset_holdings`/`asset_basts`/`asset_events` (event OPENING_EXISTING), aset READY tanpa holding
+  aktif saja. `BAST-EXS/{YYYY}/{SEQ:6}` via doc_sequence (per company/tahun, concurrency-safe, immutable snapshot, PDF on-the-fly).
+  Setelah publish siklus CP2 (Pengembalian → Pemeriksaan) berlaku apa adanya. Batalkan Draft (asset_opening:edit).
+- Riwayat Import: batch, tanggal, user, file, Valid/Warning/Error/Berhasil, status, detail baris + grouping, download hasil.
+- Dokumen BAST: filter BAST Penyerahan / Pengembalian / Existing-Saldo Awal; detail + Lihat/Unduh PDF.
+- Otorisasi permission efektif (`asset_import:{view,create,commit}`, `asset_opening:{view,create,edit,publish}`), sesuai §18.4.
+  01I di SQL untuk semua lookup karyawan/proyek/aset; restricted hanya melihat batch miliknya; UUID lain → 404 generik.
+- Test (hris_dev): CP3 **84/84** · CP1 **146/146** (boundary test disesuaikan: impor/opening hanya di router CP3) · CP2 **145/145**
+  (orphan check mengenali BAST sumber opening) · CP2.1 **57/57** · 01I **176/176** · 01H **70/70**; residue 0 / orphan 0.
+  esbuild + `yarn build` PASS (1 warning pre-existing EmployeeMigrationPage) · ruff F/E9 file berubah: 0 temuan baru
+  (3 temuan baseline di db.py/server.py sudah ada di main) · `git diff --check` bersih.
+- UAT visual lokal (8002/3002, custom role drafter/finalizer): 31 screenshot desktop + mobile, console bersih; fixture UAT
+  dibersihkan (residue 0 / orphan 0; counter/config yang dibuat UAT dihapus; ledger migration utuh). Temuan global
+  pre-existing: overflow topbar 465px di viewport 390px (sama seperti CP2.1) — tidak diubah.
+- Requirement baru (DITUNDA, belum diimplementasikan — menunggu persetujuan desain user): Lampiran Dokumen Transaksi Aset
+  (upload banyak file pada Penyerahan/Pengembalian, tampil di Profil Karyawan, tambah setelah Published, tanpa duplikasi file,
+  tidak mengubah snapshot BAST). Butuh migration baru + object storage → desain dilaporkan dulu.
 
 ## Phase 17 — Upgrade 01I: Role & Data Scope (STATUS: **LOCKED ✅** — gap closing + targeted + staging m0011 + staging E2E + final regression DONE) — 2026-09-28
 
@@ -995,6 +1029,8 @@ Branch `feature/hrga-phase2a-asset-cp2-1-ux-permission` dari main `19f65dd`. Tan
 
 ## 3) Next Actions (immediate)
 **Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 merged) · 01H — HR Verification: LOCKED ✅ (see §16.7) — final local commit, push/PR pending user approval · 01I — Role & Data Scope: **LOCKED ✅** (01I 176/176, 01H 70/70, staging m0011 + E2E done; local clean commit on branch `feature/upgrade-01i-role-data-scope`, push/PR pending user approval; see §17.3) · Production Changed: NO.**
+
+**Update 2026-09-28 (CP3): CP2 COMPLETED / LOCKED ✅ · CP3 — Impor & Saldo Awal: IMPLEMENTED / TESTED, PENDING REVIEW — NOT LOCKED (see §18.5) · Staging Changed: NO · Production Changed: NO.**
 
 **Update 2026-09-28: Phase 2A — Manajemen Aset: CP0 DONE · CP1 DONE (PR #19 merged; see §18.1) · CP2 merged (PR #20) + staging UAT PASS — CP2: NOT LOCKED (see §18.2) · CP2.1 IMPLEMENTED / TESTED, PENDING REVIEW + STAGING UAT (see §18.3) · Global Authorization Standard (see §18.4) · Production Changed: NO.**
 

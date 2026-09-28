@@ -204,6 +204,11 @@ TENANT_COLLECTIONS = [
     "asset_return_items",
     "asset_inspections",
     "asset_basts",
+    # Phase 2A CP3 - Impor Master Aset + Saldo Awal (Opening Existing Holding) -> holding/BAST/event memakai tabel CP2.
+    "asset_import_batches",
+    "asset_import_rows",
+    "asset_openings",
+    "asset_opening_items",
     # Engine penomoran generik (CP1: ASSET_CODE; CP2: BAST_HANDOVER / BAST_RETURN).
     "document_sequence_configs",
     "document_sequence_counters",
@@ -502,6 +507,8 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "acquisition_date": "s32", "acquisition_year": "i", "acquisition_value": "dec",
         "project_id": "fk", "work_location_id": "fk", "condition_id": "fk", "status_id": "fk",
         "lifecycle_state": "s32", "notes": "t", "source": "s32", "row_version": "i",
+        # Phase 2A CP3 (m0014): Kode Aset Lama / Nomor Inventaris (terpisah dari asset_code sistem; unik bila diisi)
+        "legacy_code": "s64", "legacy_code_norm": "s64", "import_batch_id": "fk",
     },
     # Histori append-only (tidak ada endpoint ubah/hapus). CP1: CREATED / UPDATED / STATUS_CHANGE / RELOCATION.
     # Kolom terkait pemegang/BAST ditambahkan aditif pada CP berikutnya (m0013+).
@@ -527,6 +534,8 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "project_id": "fk", "work_location_id": "fk", "initial_condition_id": "fk", "accessories_out": "t",
         "holding_status": "s32", "end_date": "s32", "return_id": "fk", "return_bast_id": "fk",
         "return_condition_id": "fk", "accessories_in": "t", "active_lock": "s64",
+        # Phase 2A CP3 (m0014): holding dari Saldo Awal (handover_id NULL; handover_bast_id = BAST-EXS asal)
+        "opening_id": "fk",
     },
     "asset_returns": {
         "doc_state": "s32", "employee_id": "fk", "return_date": "s32", "project_id": "fk",
@@ -548,6 +557,23 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "manual_number": "s", "manual_number_norm": "s", "doc_state": "s32", "snapshot": "j",
         "issued_at": "dt", "issued_by": "fk",
     },
+    # Phase 2A CP3 (m0014) - batch impor (MASTER / OPENING). Baris preview disimpan untuk audit & commit tanpa upload ulang.
+    "asset_import_batches": {
+        "batch_number": "s64", "import_type": "s32", "batch_state": "s32", "file_name": "s", "file_hash": "s64",
+        "file_size": "i", "total_rows": "i", "valid_rows": "i", "warning_rows": "i", "error_rows": "i",
+        "created_count": "i", "opening_count": "i", "commit_mode": "s32", "uploaded_by": "fk", "uploaded_at": "dt",
+        "committed_by": "fk", "committed_at": "dt", "summary": "j",
+    },
+    "asset_import_rows": {"batch_id": "fk", "row_no": "i", "row_class": "s32", "data": "j", "messages": "j",
+                          "asset_id": "fk", "opening_id": "fk"},
+    "asset_openings": {
+        "doc_state": "s32", "employee_id": "fk", "opening_date": "s32", "project_id": "fk", "work_location_id": "fk",
+        "ga_pic_user_id": "fk", "ga_pic_name": "s", "manual_number": "s", "manual_number_norm": "s", "notes": "t",
+        "bast_id": "fk", "import_batch_id": "fk", "published_at": "dt", "published_by": "fk", "cancelled_at": "dt",
+        "cancelled_by": "fk", "row_version": "i",
+    },
+    "asset_opening_items": {"opening_id": "fk", "asset_id": "fk", "line_no": "i", "condition_id": "fk",
+                            "accessories": "t", "item_notes": "t"},
     "document_sequence_configs": {"sequence_key": "s64", "label": "s", "format": "s", "reset_policy": "s32", "is_system": "b"},
     "document_sequence_counters": {"sequence_key": "s64", "period_key": "s64", "next_value": "bi"},
     # Item terikat ke scope induk (scope_id) + company_id yang sama; ref_id = projects.id pada company tsb.
@@ -879,6 +905,7 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("ix_asset_category", ["company_id", "category_id"], False),
         ("ix_asset_location", ["company_id", "work_location_id"], False),
         ("ix_asset_state", ["company_id", "lifecycle_state"], False),
+        ("ux_asset_legacy_code", ["company_id", "legacy_code_norm"], True),   # CP3; NULL (kosong) boleh berganda
     ],
     "asset_events": [("ix_asset_event_asset", ["company_id", "asset_id", "event_at"], False),
                      ("ix_asset_event_type", ["company_id", "event_type", "event_at"], False)],
@@ -890,7 +917,8 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
                              ("ix_asset_ho_item_asset", ["company_id", "asset_id"], False)],
     "asset_holdings": [("ux_asset_holding_active", ["company_id", "active_lock"], True),   # maks. 1 holding ACTIVE/aset
                        ("ix_asset_holding_asset", ["company_id", "asset_id", "holding_status"], False),
-                       ("ix_asset_holding_employee", ["company_id", "employee_id", "holding_status"], False)],
+                       ("ix_asset_holding_employee", ["company_id", "employee_id", "holding_status"], False),
+                       ("ix_asset_holding_opening", ["company_id", "opening_id"], False)],
     "asset_returns": [("ix_asset_rt_state", ["company_id", "doc_state", "return_date"], False),
                       ("ix_asset_rt_employee", ["company_id", "employee_id"], False),
                       ("ix_asset_rt_project", ["company_id", "project_id"], False),
@@ -905,6 +933,16 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
                     ("ix_asset_bast_type_date", ["company_id", "bast_type", "bast_date"], False),
                     ("ix_asset_bast_manual", ["company_id", "manual_number_norm"], False),
                     ("ix_asset_bast_project", ["company_id", "project_id"], False)],
+    "asset_import_batches": [("ux_asset_import_batch_no", ["company_id", "batch_number"], True),
+                             ("ix_asset_import_batch_type", ["company_id", "import_type", "created_at"], False)],
+    "asset_import_rows": [("ux_asset_import_row", ["company_id", "batch_id", "row_no"], True),
+                          ("ix_asset_import_row_class", ["company_id", "batch_id", "row_class"], False)],
+    "asset_openings": [("ix_asset_op_state", ["company_id", "doc_state", "opening_date"], False),
+                       ("ix_asset_op_employee", ["company_id", "employee_id"], False),
+                       ("ix_asset_op_project", ["company_id", "project_id"], False),
+                       ("ix_asset_op_manual", ["company_id", "manual_number_norm"], False)],
+    "asset_opening_items": [("ux_asset_op_item", ["company_id", "opening_id", "asset_id"], True),
+                            ("ix_asset_op_item_asset", ["company_id", "asset_id"], False)],
     "document_sequence_configs": [("ux_doc_seq_config", ["company_id", "sequence_key"], True)],
     "document_sequence_counters": [("ux_doc_seq_counter", ["company_id", "sequence_key", "period_key"], True)],
     "user_data_scope_items": [
@@ -2007,6 +2045,17 @@ class _TxWriter:
             doc["id"] = new_id()
         await self.conn.execute(sa.insert(table).values(**_doc_to_row(table, doc)))
         return doc["id"]
+
+    async def insert_many(self, table_name: str, docs: List[Dict[str, Any]]) -> int:
+        """Insert massal (executemany) dalam transaksi yang sama - dipakai impor ribuan baris (CP3)."""
+        if not docs:
+            return 0
+        table = get_table(table_name)
+        for d in docs:
+            if not d.get("id"):
+                d["id"] = new_id()
+        await self.conn.execute(sa.insert(table), [_doc_to_row(table, d, full=True) for d in docs])
+        return len(docs)
 
     async def update(self, table_name: str, flt: Dict[str, Any], values: Dict[str, Any]) -> int:
         table = get_table(table_name)

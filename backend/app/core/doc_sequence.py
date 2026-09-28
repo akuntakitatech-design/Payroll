@@ -11,7 +11,8 @@
 
 Token format: {YYYY} {YY} {MM} {ROMAN_MM} {COMPANY} {CAT} {SEQ:n} (n = 3..9).
 CP1 hanya memakai ASSET_CODE dengan default sederhana `AST-{SEQ:6}` (tidak bergantung kategori).
-CP2 menambah seri BAST_HANDOVER / BAST_RETURN (reset tahunan).
+CP2 menambah seri BAST_HANDOVER / BAST_RETURN (reset tahunan); CP3 menambah BAST_EXISTING / ASSET_IMPORT dan
+alokasi massal `allocate_many_in_tx` (satu kunci counter untuk ribuan nomor, tetap tanpa COUNT(*)+1).
 """
 from __future__ import annotations
 
@@ -35,6 +36,9 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
     # Phase 2A CP2 - nomor sistem BAST (per company + tipe + tahun; reset tahunan; tidak pernah dipakai ulang).
     "BAST_HANDOVER": {"label": "Nomor BAST Penyerahan", "format": "BAST-AST/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
     "BAST_RETURN": {"label": "Nomor BAST Pengembalian", "format": "BAST-RTN/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
+    # Phase 2A CP3 - dokumen Saldo Awal (Opening Existing Holding) + nomor batch impor aset.
+    "BAST_EXISTING": {"label": "Nomor Dokumen Saldo Awal Aset", "format": "BAST-EXS/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
+    "ASSET_IMPORT": {"label": "Nomor Batch Impor Aset", "format": "IMP-AST/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
 }
 
 
@@ -124,3 +128,33 @@ async def allocate_in_tx(tx, prepared: Dict[str, Any], *, company_code: str = ""
                             {"next_value": value, "updated_at": now()})
             return candidate
     raise HTTPException(status.HTTP_409_CONFLICT, "Gagal membuat nomor otomatis yang unik. Periksa format penomoran.")
+
+
+async def allocate_many_in_tx(tx, prepared: Dict[str, Any], count: int, *,
+                              taken: Optional[Callable[[list], Awaitable[set]]] = None) -> list:
+    """Alokasi `count` nomor berurutan DI DALAM transaksi pemanggil dengan SATU kunci baris counter (FOR UPDATE).
+    `taken(candidates)` -> himpunan nomor yang sudah terpakai (dilewati; counter tetap maju). Rollback transaksi
+    pemanggil ikut membatalkan kenaikan counter (tidak ada gap/nomor ganda)."""
+    if count <= 0:
+        return []
+    flt = prepared["flt"]
+    row = await tx.select_one_for_update("document_sequence_counters", flt)
+    if not row:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Counter penomoran belum siap. Silakan ulangi.")
+    value = int(row.get("next_value") or 1)
+    fmt = prepared["cfg"]["format"]
+    out: list = []
+    skips = 0
+    while len(out) < count:
+        need = count - len(out)
+        cands = [render(fmt, value + i, prepared["when"], "", prepared["cat"]) for i in range(need)]
+        value += need
+        used = await taken(cands) if taken else set()
+        if used:
+            skips += len(used)
+            if skips > max(MAX_SKIPS, count):
+                raise HTTPException(status.HTTP_409_CONFLICT, "Gagal membuat nomor otomatis yang unik. Periksa format penomoran.")
+        out.extend(c for c in cands if c not in used)
+    await tx.update("document_sequence_counters", {"id": row["id"], "company_id": flt["company_id"]},
+                    {"next_value": value, "updated_at": now()})
+    return out

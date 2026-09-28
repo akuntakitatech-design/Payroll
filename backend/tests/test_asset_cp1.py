@@ -624,11 +624,15 @@ async def t_lifecycle_events_audit(env):
     r2 = await c.get(f"/api/assets/{env.an['id']}", headers=env.ga)
     del_log = await db.audit_logs.count_documents({"company_id": env.cid, "resource": "asset", "record_id": env.an["id"], "action": "delete"})
     check("hapus aset (asset:delete) -> 200, lalu 404, audit tercatat", r.status_code == 200 and r2.status_code == 404 and del_log == 1)
-    # tidak ada endpoint di luar lingkup (CP2 lifecycle sah sejak Phase 2A CP2; import/export/opening/dashboard tetap terlarang)
+    # tidak ada endpoint di luar lingkup. CP2 lifecycle sah sejak Phase 2A CP2; Impor Master Aset + Saldo Awal sah sejak
+    # Phase 2A CP3 HANYA pada router resminya (/api/asset-imports, /api/asset-openings - diuji di test_asset_cp3).
+    # Export / dashboard aset dan impor/opening di jalur lain (mis. /assets/import) tetap terlarang.
     paths = {getattr(rt, "path", "") for rt in server.app.routes}
+    cp3_ok = ("/api/asset-imports", "/api/asset-openings")
     out_scope = [p for p in paths if any(x in p for x in ("asset-import", "/assets/import", "/assets/export", "asset-export",
-                                                         "opening", "asset-dashboard", "/assets/dashboard"))]
-    check("tidak ada endpoint di luar lingkup (import/export/opening holding/dashboard aset)", out_scope == [], str(out_scope))
+                                                         "opening", "asset-dashboard", "/assets/dashboard"))
+                 and not (p == cp3_ok[0] or p.startswith(cp3_ok[0] + "/") or p == cp3_ok[1] or p.startswith(cp3_ok[1] + "/"))]
+    check("tidak ada endpoint di luar lingkup (export/dashboard aset; impor/opening hanya router CP3)", out_scope == [], str(out_scope))
 
 
 async def main():

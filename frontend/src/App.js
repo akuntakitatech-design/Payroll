@@ -64,6 +64,7 @@ import AssetSettingsPage from "@/pages/asset/AssetSettingsPage";
 import AssetHandoverPage from "@/pages/asset/AssetHandoverPage";
 import AssetReturnInspectionPage from "@/pages/asset/AssetReturnInspectionPage";
 import AssetBastPage from "@/pages/asset/AssetBastPage";
+import AssetImportOpeningPage from "@/pages/asset/AssetImportOpeningPage";
 import LeaveOvertimeOverviewPage from "@/pages/leave/LeaveOvertimeOverviewPage";
 import LeaveRequestsPage from "@/pages/leave/LeaveRequestsPage";
 import OvertimePage from "@/pages/leave/OvertimePage";
@@ -200,6 +201,7 @@ const AppRoutes = () => (
         <Route path="handovers" element={<AssetHandoverPage />} />
         <Route path="returns" element={<AssetReturnInspectionPage />} />
         <Route path="basts" element={<AssetBastPage />} />
+        <Route path="imports" element={<AssetImportOpeningPage />} />
         <Route path="settings" element={<AssetSettingsPage />} />
         <Route path="*" element={<Navigate to="/modules/asset" replace />} />
       </Route>

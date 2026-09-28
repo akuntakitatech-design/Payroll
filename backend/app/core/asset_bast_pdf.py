@@ -17,8 +17,12 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-TITLES = {"HANDOVER": "BERITA ACARA SERAH TERIMA ASET", "RETURN": "BERITA ACARA PENGEMBALIAN ASET"}
-SUBTITLES = {"HANDOVER": "Penyerahan aset dari GA kepada karyawan", "RETURN": "Pengembalian aset dari karyawan kepada GA"}
+TITLES = {"HANDOVER": "BERITA ACARA SERAH TERIMA ASET", "RETURN": "BERITA ACARA PENGEMBALIAN ASET",
+          "EXISTING": "DOKUMEN SALDO AWAL / EXISTING HOLDING ASET"}
+SUBTITLES = {"HANDOVER": "Penyerahan aset dari GA kepada karyawan", "RETURN": "Pengembalian aset dari karyawan kepada GA",
+             "EXISTING": "Pencatatan awal aset yang sudah dipegang karyawan - BUKAN penyerahan baru"}
+# Phase 2A CP3 - pernyataan wajib pada dokumen Saldo Awal (Existing Holding).
+EXISTING_STATEMENT = "Aset telah berada dalam penguasaan karyawan pada saat pencatatan awal sistem."
 
 
 BULAN = ("Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober",
@@ -97,7 +101,7 @@ def build_bast_pdf(snapshot: Dict[str, Any]) -> bytes:
     ]
     head = [
         [_p("Nomor BAST", st["b"]), _p(snapshot.get("system_number"), st["n"]),
-         _p("Tanggal", st["b"]), _p(format_tanggal(snapshot.get("bast_date")), st["n"])],
+         _p("Tanggal Saldo Awal" if btype == "EXISTING" else "Tanggal", st["b"]), _p(format_tanggal(snapshot.get("bast_date")), st["n"])],
         [_p("No. Referensi", st["b"]), _p(snapshot.get("manual_number"), st["n"]),
          _p("Project", st["b"]), _p((snapshot.get("project") or {}).get("name"), st["n"])],
         [_p("Karyawan", st["b"]), _p(f"{emp.get('full_name') or '-'} ({emp.get('employee_number') or '-'})", st["n"]),
@@ -110,7 +114,10 @@ def build_bast_pdf(snapshot: Dict[str, Any]) -> bytes:
                            ("TOPPADDING", (0, 0), (-1, -1), 2), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
     story += [t, Spacer(1, 4 * mm)]
 
-    cond_label = "Kondisi Saat Diserahkan" if btype == "HANDOVER" else "Kondisi Saat Diterima GA"
+    cond_label = {"HANDOVER": "Kondisi Saat Diserahkan", "EXISTING": "Kondisi Saat Saldo Awal"}.get(btype, "Kondisi Saat Diterima GA")
+    if btype == "EXISTING":
+        story += [_p(EXISTING_STATEMENT + " Dokumen ini mencatat saldo awal pemegang aset dan tidak menggantikan "
+                     "berita acara serah terima di masa lalu.", st["n"]), Spacer(1, 3 * mm)]
     rows = [[_p(h, st["b"]) for h in ("No", "Kode Aset", "Nama Aset", "Merk / Tipe", "Serial Number", "Satuan",
                                          cond_label, "Kelengkapan", "Catatan")]]
     for it in snapshot.get("items") or []:
@@ -130,6 +137,9 @@ def build_bast_pdf(snapshot: Dict[str, Any]) -> bytes:
 
     if btype == "HANDOVER":
         left, right = "Yang Menyerahkan (GA)", "Yang Menerima (Karyawan)"
+        lname, rname = snapshot.get("ga_pic_name"), emp.get("full_name")
+    elif btype == "EXISTING":
+        left, right = "Dicatat oleh (GA)", "Pemegang Aset (Karyawan)"
         lname, rname = snapshot.get("ga_pic_name"), emp.get("full_name")
     else:
         left, right = "Yang Menyerahkan (Karyawan)", "Yang Menerima (GA)"

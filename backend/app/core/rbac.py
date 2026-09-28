@@ -14,6 +14,7 @@ ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "v
 ACTION_LABELS = {
     "publish": "Terbitkan",
     "complete": "Selesaikan",
+    "commit": "Proses Impor",
     "view": "Lihat",
     "create": "Tambah",
     "edit": "Ubah",
@@ -90,6 +91,9 @@ RESOURCES: Dict[str, tuple] = {
     "asset_return": ("Pengembalian Aset", "asset", ["view", "create", "edit", "publish"]),
     "asset_inspection": ("Pemeriksaan Aset", "asset", ["view", "create", "edit", "complete"]),
     "asset_bast": ("Dokumen BAST Aset", "asset", ["view"]),
+    # Phase 2A CP3 - Impor Master Aset (preview tidak menulis data bisnis; commit = proses impor) & Saldo Awal.
+    "asset_import": ("Impor Aset", "asset", ["view", "create", "commit"]),
+    "asset_opening": ("Saldo Awal Aset (Existing Holding)", "asset", ["view", "create", "edit", "publish"]),
 }
 
 MODULES: List[dict] = [
@@ -257,6 +261,10 @@ def default_role_permissions() -> Dict[str, List[str]]:
                     + _crud(["asset_inspection"], ["view", "create", "edit", "complete"]) + ["asset_bast:view"])
     asset_staff += (_crud(["asset_handover", "asset_return", "asset_inspection"], ["view", "create", "edit"])
                     + ["asset_bast:view"])
+    # Phase 2A CP3 (preset): GA Admin semua; GA Staff boleh preview impor + draft saldo awal, tanpa commit/publish.
+    asset_admin += (_crud(["asset_import"], ["view", "create", "commit"])
+                    + _crud(["asset_opening"], ["view", "create", "edit", "publish"]))
+    asset_staff += (_crud(["asset_import"], ["view", "create"]) + _crud(["asset_opening"], ["view", "create", "edit"]))
     hr_admin = hr_admin + ["asset:view"]
     hr_manager = hr_manager + ["asset:view"]
     finance = finance + ["asset:view", "asset_value:view"]
