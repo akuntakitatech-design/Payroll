@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Download, FileText, Loader2 } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { ChevronsUpDown, Download, Eye, FileText, Loader2, Search, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, errorMessage } from "@/lib/api";
@@ -7,6 +7,9 @@ import { downloadFile } from "@/lib/download";
 import { formatDate } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 // Phase 2A CP2 - komponen bersama siklus Penyerahan / Pengembalian / Pemeriksaan + Dokumen BAST.
@@ -62,6 +65,159 @@ export const todayIso = () => {
 };
 
 export const toOptions = (rows, labelKey = "name") => (rows || []).map((r) => ({ value: r.id, label: r[labelKey] || "-" }));
+
+/** Pesan standar saat BAST terbit (CP2.1). */
+export const bastIssuedMessage = (number) => `BAST berhasil diterbitkan: ${number || "-"}`;
+
+const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+/** Snapshot `issued_at` ("YYYY-MM-DD HH:MM UTC" / ISO) -> "28 September 2026, 15:34 WIB" (Asia/Jakarta, UTC+7). */
+export const formatIssuedWib = (value) => {
+  if (!value) return "-";
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  const d = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5])) : new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  const w = new Date(d.getTime() + 7 * 3600 * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${w.getUTCDate()} ${BULAN[w.getUTCMonth()]} ${w.getUTCFullYear()}, ${pad(w.getUTCHours())}:${pad(w.getUTCMinutes())} WIB`;
+};
+
+/** Aksi utama baris daftar: tombol "Detail" yang terlihat (bukan hanya menu ⋯). */
+export const DetailButton = ({ onClick, testId, label = "Detail" }) => (
+  <Button variant="outline" size="sm" className="h-8" onClick={(e) => { e.stopPropagation(); onClick(); }} data-testid={testId}>
+    <Eye className="h-4 w-4 sm:mr-1.5" /><span className="hidden sm:inline">{label}</span>
+  </Button>
+);
+
+/** Kartu detail per aset di form: judul "Aset n dari N" + kode/nama, isian berlabel jelas. */
+export const AssetItemCard = ({ index, total, code, name, onRemove, children, testId }) => (
+  <div className="rounded-md border border-border bg-card" data-testid={testId}>
+    <div className="flex items-start justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
+      <div className="min-w-0 text-sm">
+        <span className="text-[12px] font-medium text-muted-foreground">Aset {index} dari {total}</span>
+        <span className="block truncate font-semibold">{code} <span className="font-normal text-muted-foreground">— {name}</span></span>
+      </div>
+      {onRemove && (
+        <Button variant="ghost" size="sm" className="h-8 px-2" onClick={onRemove} aria-label={`Hapus ${code} dari daftar`} data-testid={testId && `${testId}-remove`}>
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+    <div className="grid gap-3 p-3 sm:grid-cols-3">{children}</div>
+  </div>
+);
+
+export const ItemField = ({ label, htmlFor, required, children }) => (
+  <div className="min-w-0 space-y-1">
+    <Label htmlFor={htmlFor} className="text-[12px]">{label}{required && <span className="text-danger"> *</span>}</Label>
+    {children}
+  </div>
+);
+
+/**
+ * Pencarian karyawan server-side (CP2.1): debounce, limit + "muat lebih banyak", loading/empty state, hapus pilihan.
+ * Cakupan Data 01I ditegakkan backend di SQL - hasil hanya karyawan dalam scope user.
+ */
+export const EmployeeSearchField = ({ label = "Karyawan", required, endpoint, value, selected, onSelect, testId, disabled, hint }) => {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const reqId = useRef(0);
+  const LIMIT = 20;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const t = setTimeout(async () => {
+      const id = ++reqId.current;
+      setLoading(true);
+      setError("");
+      try {
+        const { data } = await api.get(endpoint, { params: { q: q.trim() || undefined, page, limit: LIMIT } });
+        if (id !== reqId.current) return;
+        setItems((prev) => (page === 1 ? data.items : [...prev, ...data.items]));
+        setTotal(data.total);
+      } catch (e) {
+        if (id === reqId.current) setError(errorMessage(e, "Pencarian karyawan gagal."));
+      } finally {
+        if (id === reqId.current) setLoading(false);
+      }
+    }, page === 1 ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [open, q, page, endpoint]);
+
+  const pick = (e) => {
+    onSelect(e);
+    setOpen(false);
+  };
+  const shown = selected && value ? `${selected.employee_number ? `${selected.employee_number} — ` : ""}${selected.full_name || "-"}` : "";
+
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}{required && <span className="text-danger"> *</span>}</Label>
+      <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) { setQ(""); setPage(1); } }}>
+        <PopoverTrigger asChild>
+          <Button type="button" variant="outline" role="combobox" aria-expanded={open} disabled={disabled}
+            className={cn("h-9 w-full justify-between px-3 font-normal", !shown && "text-muted-foreground")} data-testid={testId}>
+            <span className="flex min-w-0 items-center gap-2"><UserRound className="h-4 w-4 shrink-0 opacity-60" /><span className="truncate">{shown || "Cari nama atau nomor karyawan…"}</span></span>
+            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0" data-testid={testId && `${testId}-popover`}>
+          <div className="relative border-b border-border p-2">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Ketik nama atau nomor karyawan…"
+              className="h-9 pl-8 pr-8" data-testid={testId && `${testId}-input`} />
+            {q && (
+              <button type="button" onClick={() => { setQ(""); setPage(1); }} aria-label="Hapus pencarian"
+                className="absolute right-4 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-testid={testId && `${testId}-clear`}>
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="max-h-64 overflow-y-auto py-1" role="listbox" data-testid={testId && `${testId}-results`}>
+            {error ? (
+              <p className="px-3 py-4 text-sm text-danger" data-testid={testId && `${testId}-error`}>{error}</p>
+            ) : loading && page === 1 ? (
+              <div className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground" data-testid={testId && `${testId}-loading`}>
+                <Loader2 className="h-4 w-4 animate-spin" /> Mencari karyawan…
+              </div>
+            ) : items.length === 0 ? (
+              <p className="px-3 py-4 text-sm text-muted-foreground" data-testid={testId && `${testId}-empty`}>
+                {q.trim() ? `Tidak ada karyawan yang cocok dengan "${q.trim()}".` : "Tidak ada karyawan yang tersedia."}
+              </p>
+            ) : (
+              items.map((e) => (
+                <button type="button" key={e.id} role="option" aria-selected={e.id === value} onClick={() => pick(e)}
+                  className={cn("flex w-full flex-col items-start px-3 py-2 text-left hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+                    e.id === value && "bg-muted")}
+                  data-testid={testId && `${testId}-option-${e.id}`}>
+                  <span className="text-sm font-medium">{e.employee_number ? `${e.employee_number} — ` : ""}{e.full_name}</span>
+                  <span className="text-[12px] text-muted-foreground">
+                    {[e.project_name ? `Proyek: ${e.project_name}` : "Tanpa proyek aktif", e.active_holdings != null ? `${e.active_holdings} aset dipegang` : null].filter(Boolean).join(" · ")}
+                  </span>
+                </button>
+              ))
+            )}
+            {!error && items.length > 0 && items.length < total && (
+              <div className="border-t border-border p-1">
+                <Button type="button" variant="ghost" size="sm" className="w-full" disabled={loading} onClick={() => setPage((p) => p + 1)}
+                  data-testid={testId && `${testId}-more`}>
+                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Muat lebih banyak ({items.length} dari {total})
+                </Button>
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {hint && <p className="text-[12px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+};
 
 export const employeeLabel = (e) => (e ? `${e.full_name || "-"}${e.employee_number ? ` · ${e.employee_number}` : ""}` : "-");
 
@@ -137,7 +293,7 @@ export const SnapshotView = ({ snapshot, testId = "bast-snapshot" }) => {
           ["Project", snapshot.project?.name],
           ["Lokasi Kerja", snapshot.work_location?.name],
           ["PIC GA", snapshot.ga_pic_name],
-          ["Diterbitkan", `${snapshot.issued_at || "-"} · ${snapshot.issued_by_name || "-"}`],
+          ["Diterbitkan", `${formatIssuedWib(snapshot.issued_at)} · ${snapshot.issued_by_name || "-"}`],
           snapshot.notes ? ["Catatan", snapshot.notes] : null,
         ]}
       />
