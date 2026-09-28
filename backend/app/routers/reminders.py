@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Query
 
 from ..core.db import NO_ID, get_db, serialize_list
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, get_auth
 from ..core.expiry import days_left, expiry_state, month_key, month_label
 from ..core.policy import resolve_config
@@ -46,13 +47,14 @@ async def expiry_calendar(
         allowed_kinds.append("document")
 
     wanted = [k for k in allowed_kinds if not kind or k == kind]
+    scope = await dscope.get_scope(ctx)  # Upgrade 01I - kalender mengikuti Cakupan Data (di SQL)
     items: List[Dict[str, Any]] = []
 
     employees: Dict[str, Dict[str, Any]] = {}
     if "contract" in wanted or "certification" in wanted:
         employees = {
             e["id"]: e
-            for e in await db.employees.find({"company_id": cid}, NO_ID).to_list(5000)
+            for e in await db.employees.find(dscope.with_scope({"company_id": cid}, scope), NO_ID).to_list(5000)
         }
 
     if "contract" in wanted:
@@ -62,11 +64,11 @@ async def expiry_calendar(
         }
         rows = serialize_list(
             await db.employee_contracts.find(
-                {
+                dscope.with_scope({
                     "company_id": cid,
                     "status": {"$nin": ["deleted", "archived"]},
                     "end_date": {"$nin": [None, ""]},
-                },
+                }, scope, "employee_id"),
                 NO_ID,
             ).to_list(5000)
         )
@@ -93,11 +95,11 @@ async def expiry_calendar(
         }
         rows = serialize_list(
             await db.employee_certifications.find(
-                {
+                dscope.with_scope({
                     "company_id": cid,
                     "status": {"$nin": ["deleted", "archived"]},
                     "expiry_date": {"$nin": [None, ""]},
-                },
+                }, scope, "employee_id"),
                 NO_ID,
             ).to_list(5000)
         )
@@ -128,7 +130,11 @@ async def expiry_calendar(
                     "company_id": cid,
                     "is_deleted": {"$ne": True},
                     "expiry_date": {"$nin": [None, ""]},
-                },
+                } if scope.is_all else dscope.with_scope({
+                    "company_id": cid, "owner_type": "employee",
+                    "is_deleted": {"$ne": True},
+                    "expiry_date": {"$nin": [None, ""]},
+                }, scope, "owner_id"),
                 NO_ID,
             ).to_list(5000)
         )

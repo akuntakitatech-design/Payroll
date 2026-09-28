@@ -11,6 +11,7 @@ from ..core.db import NO_ID, get_db, now, serialize, serialize_list
 from ..core.deps import AuthContext, require_permission
 from ..core.expiry import expiry_state, parse_date
 from ..core.policy import resolve_config
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.repo import TenantRepository
 from ..schemas import (
     ContractCreate,
@@ -97,6 +98,7 @@ async def list_contracts(
     ):
         if value:
             filters[key] = value
+    filters = dscope.with_scope(filters, await dscope.get_scope(ctx), "employee_id")  # Upgrade 01I - di SQL
     repo = TenantRepository("employee_contracts", ctx.company_id)
     result = await repo.list(
         q=q,
@@ -121,6 +123,7 @@ async def create_contract(
     ctx: AuthContext = Depends(require_permission("contract", "create")),
 ):
     data = payload.model_dump(exclude_none=True)
+    await dscope.ensure_employee_in_scope(ctx, data.get("employee_id"))  # Upgrade 01I - di luar cakupan -> 404
     employee = await _employee(ctx.company_id, data["employee_id"])
     await _validate(ctx.company_id, data)
     repo = TenantRepository("employee_contracts", ctx.company_id)
@@ -147,6 +150,7 @@ async def get_contract(
 ):
     repo = TenantRepository("employee_contracts", ctx.company_id)
     item = await repo.get(contract_id)
+    await dscope.ensure_employee_in_scope(ctx, item.get("employee_id"))  # Upgrade 01I
     reminder = await resolve_config(ctx.company_id, "contract.expiry_reminder_days")
     horizon = int(reminder.get("value") or 30)
     return (await _enrich(ctx.company_id, [item], horizon))[0]
@@ -163,7 +167,10 @@ async def update_contract(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
     repo = TenantRepository("employee_contracts", ctx.company_id)
     existing = await repo.get(contract_id)
+    await dscope.ensure_employee_in_scope(ctx, existing.get("employee_id"))  # Upgrade 01I
     merged = {**existing, **data}
+    if data.get("employee_id") and data["employee_id"] != existing.get("employee_id"):
+        await dscope.ensure_employee_in_scope(ctx, data["employee_id"])  # Upgrade 01I
     await _validate(ctx.company_id, merged)
     if data.get("contract_number"):
         await repo.ensure_unique(
@@ -183,6 +190,7 @@ async def approve_contract(
 ):
     repo = TenantRepository("employee_contracts", ctx.company_id)
     contract = await repo.get(contract_id)
+    await dscope.ensure_employee_in_scope(ctx, contract.get("employee_id"))  # Upgrade 01I
     if contract.get("approval_state") == "approved":
         raise HTTPException(status.HTTP_409_CONFLICT, "Kontrak ini sudah disetujui sebelumnya.")
     before, after = await repo.update(
@@ -215,6 +223,7 @@ async def change_status(
         )
     repo = TenantRepository("employee_contracts", ctx.company_id)
     contract = await repo.get(contract_id)
+    await dscope.ensure_employee_in_scope(ctx, contract.get("employee_id"))  # Upgrade 01I
     before, after = await repo.set_status(contract_id, payload.status, ctx.user_id)
     await log_action(
         ctx,
@@ -235,6 +244,7 @@ async def delete_contract(
 ):
     repo = TenantRepository("employee_contracts", ctx.company_id)
     contract = await repo.get(contract_id)
+    await dscope.ensure_employee_in_scope(ctx, contract.get("employee_id"))  # Upgrade 01I
     before, after = await repo.update(contract_id, {"status": "deleted"}, ctx.user_id)
     await log_action(
         ctx, "delete", "contract", contract_id, contract.get("contract_number"), before=before, after=after
@@ -289,6 +299,7 @@ async def renew_preview(
     cid = ctx.company_id
     repo = TenantRepository("employee_contracts", cid)
     contract = await repo.get(contract_id)
+    await dscope.ensure_employee_in_scope(ctx, contract.get("employee_id"))  # Upgrade 01I
     employee = await _employee(cid, contract["employee_id"])
 
     ctype = await db.contract_types.find_one(
@@ -357,6 +368,7 @@ async def renew_contract(
     cid = ctx.company_id
     repo = TenantRepository("employee_contracts", cid)
     previous = await repo.get(contract_id)
+    await dscope.ensure_employee_in_scope(ctx, previous.get("employee_id"))  # Upgrade 01I
     employee = await _employee(cid, previous["employee_id"])
 
     existing_renewal = await db.employee_contracts.find_one(

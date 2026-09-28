@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from ..core.audit import log_action
 from ..core.db import ASCENDING, NO_ID, get_db, now, serialize_list
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, require_permission
 from ..core.repo import TenantRepository
 from ..core import time_approval as ta
@@ -23,6 +24,12 @@ router = APIRouter(prefix="/leave", tags=["Time Management - Cuti/Izin/Sakit"])
 
 def _perm(action: str):
     return require_permission("leave", action, "leave_overtime")
+
+
+def _self_perm(action: str):
+    """Upgrade 01I: endpoint MANDIRI (pengajuan/daftar/pembatalan milik caller) tidak diblokir guard modul
+    belum-scope-aware; cabang yang menyentuh karyawan lain tetap wajib cakupan penuh (403 untuk restricted)."""
+    return require_permission("leave", action, "leave_overtime", self_service=True)
 
 
 class LeaveRequestInput(BaseModel):
@@ -78,7 +85,7 @@ async def _leave_type(ctx: AuthContext, type_id: str) -> Dict[str, Any]:
 
 
 @router.post("/requests", status_code=status.HTTP_201_CREATED)
-async def create_request(payload: LeaveRequestInput, ctx: AuthContext = Depends(_perm("create"))):
+async def create_request(payload: LeaveRequestInput, ctx: AuthContext = Depends(_self_perm("create"))):
     if payload.day_part not in tk.DAY_PARTS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Pilihan Sehari Penuh / Setengah Hari tidak dikenal.")
     start_date = tk.parse_date_str(payload.start_date, "Tanggal Mulai")
@@ -89,6 +96,7 @@ async def create_request(payload: LeaveRequestInput, ctx: AuthContext = Depends(
         if not ctx.has_permission("leave", "edit"):
             raise HTTPException(status.HTTP_403_FORBIDDEN,
                                 "Anda tidak berhak mengajukan cuti untuk karyawan lain.")
+        await dscope.require_full_scope(ctx)  # Upgrade 01I - untuk karyawan lain: modul belum scope-aware
         employee = await svc.get_employee(ctx.company_id, payload.employee_id)
     else:
         employee = await svc.my_employee(ctx)
@@ -197,8 +205,10 @@ async def list_requests(
     leave_type_id: Optional[str] = None,
     period: Optional[str] = None,
     mine: bool = False,
-    ctx: AuthContext = Depends(_perm("view")),
+    ctx: AuthContext = Depends(_self_perm("view")),
 ):
+    if not mine:
+        await dscope.require_full_scope(ctx)  # Upgrade 01I - daftar lintas karyawan: hanya cakupan penuh
     db = get_db()
     query: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}
     if request_status:
@@ -270,10 +280,13 @@ async def decide(request_id: str, approval_id: str, payload: DecisionInput,
 
 
 @router.post("/requests/{request_id}/cancel")
-async def cancel_request(request_id: str, payload: CancelInput, ctx: AuthContext = Depends(_perm("create"))):
+async def cancel_request(request_id: str, payload: CancelInput, ctx: AuthContext = Depends(_self_perm("create"))):
     db = get_db()
     repo = TenantRepository("leave_requests", ctx.company_id)
     req = await repo.get(request_id)
+    _me = await svc.my_employee(ctx, required=False)
+    if not _me or _me["id"] != req.get("employee_id"):
+        await dscope.require_full_scope(ctx)  # Upgrade 01I - membatalkan milik orang lain
     if req.get("request_status") not in ("pending", "approved"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Pengajuan ini tidak dapat dibatalkan.")
     me = await svc.my_employee(ctx, required=False)
@@ -314,8 +327,10 @@ async def list_balances(
     year: Optional[int] = None,
     employee_id: Optional[str] = None,
     mine: bool = False,
-    ctx: AuthContext = Depends(_perm("view")),
+    ctx: AuthContext = Depends(_self_perm("view")),
 ):
+    if not mine:
+        await dscope.require_full_scope(ctx)  # Upgrade 01I - saldo lintas karyawan: hanya cakupan penuh
     db = get_db()
     year = int(year or tk.now_utc().astimezone(tk.tz_for(ctx.company)).year)
     leave_types = await db.leave_types.find(
@@ -440,7 +455,7 @@ async def export_leave(
     period: Optional[str] = None,
     request_status: Optional[str] = None,
     leave_type_id: Optional[str] = None,
-    ctx: AuthContext = Depends(_perm("export")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(_perm("export"))),
 ):
     db = get_db()
     query: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}

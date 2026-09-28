@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from ..core import completeness  # Upgrade 01F
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.audit import build_audit_entry, log_action
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list, transaction
 from ..core.deps import AuthContext, require_permission
@@ -256,9 +257,12 @@ async def delete_status(status_id: str,
 
 # ------------------------------------------------------------- per karyawan
 async def _get_employee(ctx: AuthContext, employee_id: str) -> Dict[str, Any]:
-    emp = await get_db().employees.find_one(
-        {"company_id": ctx.company_id, "id": employee_id, "status": {"$ne": "deleted"}}, NO_ID
-    )
+    flt: Dict[str, Any] = {"company_id": ctx.company_id, "id": employee_id, "status": {"$ne": "deleted"}}
+    # Upgrade 01I - cakupan data (SQL). Dilewati HANYA bila pemanggil internal (Akhiri Penempatan) sudah
+    # memverifikasi cakupan karyawan yang sama sebelum penempatannya diakhiri.
+    if getattr(ctx, "_scope_verified_employee", None) != employee_id:
+        flt = dscope.with_scope(flt, await dscope.get_scope(ctx))
+    emp = await get_db().employees.find_one(flt, NO_ID)
     if not emp:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Karyawan tidak ditemukan pada perusahaan aktif Anda.")
     return emp

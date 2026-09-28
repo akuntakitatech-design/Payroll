@@ -17,6 +17,7 @@ from ..core.audit import build_audit_entry
 from ..core.db import NO_ID, now, serialize, serialize_list, transaction
 from ..core.deps import AuthContext, require_permission
 from ..core.employee_status import today_local
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.repo import TenantRepository
 from .employee_status import EmployeeStatusChange, change_employee_status
 
@@ -61,6 +62,7 @@ def _check_date(value: str, label: str, not_before: Optional[str] = None) -> str
 
 
 async def _employee(ctx: AuthContext, employee_id: str) -> Dict[str, Any]:
+    await dscope.ensure_employee_in_scope(ctx, employee_id)  # Upgrade 01I - di luar cakupan -> 404
     emp = await TenantRepository("employees", ctx.company_id).get(employee_id)
     if emp.get("status") == "deleted":
         raise _err("Data tidak ditemukan pada perusahaan aktif Anda.", status.HTTP_404_NOT_FOUND)
@@ -99,6 +101,7 @@ def _legacy_sync(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 @router.get("/{employee_id}/assignments")
 async def list_assignments(employee_id: str, ctx: AuthContext = Depends(require_permission("employee", "view"))):
     await TenantRepository("employees", ctx.company_id).get(employee_id)
+    await dscope.ensure_employee_in_scope(ctx, employee_id)  # Upgrade 01I
     rows = serialize_list(await ctx.tdb[asg.TABLE].find(
         {"company_id": ctx.company_id, "employee_id": employee_id}, NO_ID).sort("created_at", -1).to_list(500))
     await _names(ctx, rows)
@@ -157,6 +160,7 @@ async def assign(employee_id: str, payload: PlacementIn, ctx: AuthContext = Depe
     """Tetapkan Penempatan: hanya bila karyawan belum punya assignment ACTIVE."""
     emp = await _employee(ctx, employee_id)
     data = _placement(payload, emp)
+    await dscope.ensure_target_project_allowed(ctx, data.get("project_id"))  # Upgrade 01I
     await asg.validate_placement(ctx.company_id, data)
     start = _check_date(payload.start_date, "tanggal mulai")
     if await asg.active_assignment(ctx.company_id, employee_id):
@@ -177,6 +181,7 @@ async def transfer(employee_id: str, payload: PlacementIn, ctx: AuthContext = De
     if not old:
         raise _err("Karyawan belum memiliki penempatan aktif. Gunakan 'Tetapkan Penempatan'.", status.HTTP_409_CONFLICT)
     data = _placement(payload, emp)
+    await dscope.ensure_target_project_allowed(ctx, data.get("project_id"))  # Upgrade 01I - tujuan wajib dalam cakupan
     await asg.validate_placement(ctx.company_id, data)
     start = _check_date(payload.start_date, "tanggal mulai", not_before=old.get("start_date"))
     prev_day = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
@@ -223,6 +228,9 @@ async def end(employee_id: str, payload: EndIn, ctx: AuthContext = Depends(requi
         # flow 01B yang sama (riwayat status + audit 01B). Sudah divalidasi di atas; bila tetap gagal,
         # penempatan tetap berakhir dan pesan dikembalikan agar HR bisa mengulang lewat "Ubah Status".
         try:
+            # Upgrade 01I: cakupan sudah diverifikasi di awal (_employee); setelah penempatan berakhir karyawan
+            # keluar dari cakupan restricted, jadi pemeriksaan ulang untuk karyawan INI saja dilewati.
+            object.__setattr__(ctx, "_scope_verified_employee", employee_id)
             status_result = await change_employee_status(employee_id, status_payload, ctx)
         except HTTPException as exc:
             status_error = str(exc.detail)

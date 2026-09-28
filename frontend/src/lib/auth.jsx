@@ -43,6 +43,7 @@ export const AuthProvider = ({ children }) => {
       permissions: data.permissions || [],
       is_super_admin: !!data.is_super_admin,
       modules: data.modules || [],
+      data_scope: data.data_scope || null, // Upgrade 01I
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(stored));
     setSession(stored);
@@ -84,6 +85,7 @@ export const AuthProvider = ({ children }) => {
         permissions: data.permissions || [],
         is_super_admin: !!data.is_super_admin,
         modules: data.modules || [],
+        data_scope: data.data_scope || null, // Upgrade 01I
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(stored));
       setSession(stored);
@@ -166,6 +168,7 @@ export const AuthProvider = ({ children }) => {
       companies: session?.companies || [],
       roleKeys: session?.role_keys || [],
       isSuperAdmin: !!session?.is_super_admin,
+      dataScope: session?.data_scope || null, // Upgrade 01I - indikator saja; penegakan di backend
       loading,
       switching,
       login,

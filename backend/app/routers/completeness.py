@@ -19,11 +19,12 @@ from ..core import completeness as engine
 from ..core import completeness_mapping as M
 from ..core.audit import build_audit_entry, log_action
 from ..core.db import NO_ID, audit_fields, get_engine, get_table, new_id, now, serialize, serialize_list
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, require_permission
 
 router = APIRouter(tags=["completeness"])
 _view = require_permission("employee", "view")
-_conf = require_permission("employee_completeness", "configure")
+_conf = dscope.full_scope_dependency(require_permission("employee_completeness", "configure"))  # 01I: konfigurasi/bulk tenant-wide -> 403 restricted
 _edit = require_permission("employee", "edit")
 
 SCOPE_COLLECTIONS = {"branch": "branches", "position": "positions", "project": "projects", "work_location": "work_locations",
@@ -108,8 +109,8 @@ async def catalog(ctx: AuthContext = Depends(_view)):
 
 @router.get("/employees/{employee_id}/completeness")
 async def employee_completeness(employee_id: str, ctx: AuthContext = Depends(_view)):
-    emp = await ctx.tdb.employees.find_one({"company_id": ctx.company_id, "id": employee_id, "status": {"$ne": "deleted"}},
-                                           {"id": 1})
+    emp = await ctx.tdb.employees.find_one(dscope.with_scope(  # Upgrade 01I - di luar cakupan -> 404
+        {"company_id": ctx.company_id, "id": employee_id, "status": {"$ne": "deleted"}}, await dscope.get_scope(ctx)), {"id": 1})
     if not emp:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Karyawan tidak ditemukan.")
     data = await _requirements(ctx.company_id)
@@ -143,7 +144,18 @@ async def summary(ctx: AuthContext = Depends(_view)):
     data = await _requirements(ctx.company_id)
     h = data["rules"]["rules_hash"]
     ec, e, j = _base_join()
-    alive = sa.and_(ec.c.company_id == ctx.company_id, e.c.status.notin_(list(engine.EXCLUDED_EMP_STATUS)))
+    scope = await dscope.get_scope(ctx)  # Upgrade 01I - agregat mengikuti cakupan (di SQL)
+    sc_ec, sc_e = dscope.employee_scope_clause(scope, ec.c.employee_id), dscope.employee_scope_clause(scope, e.c.id)
+    alive = sa.and_(ec.c.company_id == ctx.company_id, e.c.status.notin_(list(engine.EXCLUDED_EMP_STATUS)),
+                    *([sc_ec] if sc_ec is not None else []))
+    miss_scope, miss_params = "", {"cid": ctx.company_id}
+    if scope.restricted:
+        if scope.project_ids:
+            miss_scope = (" AND ec.employee_id IN (SELECT a.employee_id FROM employee_assignments a WHERE a.company_id = :cid"
+                          " AND a.assignment_status = 'ACTIVE' AND a.project_id IN :pids)")
+            miss_params["pids"] = sorted(scope.project_ids)
+        else:
+            miss_scope = " AND 1 = 0"
     counts = {M.LENGKAP: 0, M.BELUM_LENGKAP: 0, M.EXCLUDED: 0}
     score_sum = score_n = pending = total = 0
     last = None
@@ -158,13 +170,17 @@ async def summary(ctx: AuthContext = Depends(_view)):
             score_n += int(sn or 0)
             pending += int(pend or 0)
             last = mx if mx and (last is None or mx > last) else last
-        miss_rows = (await conn.execute(text(
+        miss_stmt = text(
             "SELECT jt.code, COUNT(*) FROM employee_completeness ec "
             "JOIN employees e ON e.id = ec.employee_id AND e.company_id = ec.company_id AND e.status NOT IN ('deleted','archived') "
             "CROSS JOIN JSON_TABLE(ec.missing_codes, '$[*]' COLUMNS (code VARCHAR(64) PATH '$')) jt "
-            "WHERE ec.company_id = :cid GROUP BY jt.code ORDER BY COUNT(*) DESC"), {"cid": ctx.company_id})).fetchall()
+            "WHERE ec.company_id = :cid" + miss_scope + " GROUP BY jt.code ORDER BY COUNT(*) DESC")
+        if "pids" in miss_params:
+            miss_stmt = miss_stmt.bindparams(sa.bindparam("pids", expanding=True))
+        miss_rows = (await conn.execute(miss_stmt, miss_params)).fetchall()
         active_emp = (await conn.execute(sa.select(func.count()).select_from(e).where(
-            sa.and_(e.c.company_id == ctx.company_id, e.c.status.notin_(list(engine.EXCLUDED_EMP_STATUS)))))).scalar() or 0
+            sa.and_(e.c.company_id == ctx.company_id, e.c.status.notin_(list(engine.EXCLUDED_EMP_STATUS)),
+                    *([sc_e] if sc_e is not None else []))))).scalar() or 0
     by_code = data["by_code"]
     per_cat: Dict[str, int] = {}
     for code, n in miss_rows:
@@ -194,6 +210,9 @@ async def list_employees(completeness_status: Optional[str] = Query(None, max_le
     h = (await engine.load_rules(ctx.company_id))["rules_hash"]
     ec, e, j = _base_join()
     conds = [ec.c.company_id == ctx.company_id, e.c.status.notin_(list(engine.EXCLUDED_EMP_STATUS))]
+    sc = dscope.employee_scope_clause(await dscope.get_scope(ctx), ec.c.employee_id)  # Upgrade 01I - di SQL
+    if sc is not None:
+        conds.append(sc)
     if completeness_status:
         conds.append(ec.c.completeness_status == completeness_status.strip().upper())
     if missing:
@@ -254,8 +273,8 @@ async def _names(ctx: AuthContext, rows) -> Dict[str, Dict[str, str]]:
 
 @router.post("/employees/{employee_id}/completeness/reevaluate")
 async def reevaluate_employee(employee_id: str, ctx: AuthContext = Depends(_edit)):
-    emp = await ctx.tdb.employees.find_one({"company_id": ctx.company_id, "id": employee_id, "status": {"$ne": "deleted"}},
-                                           {"id": 1})
+    emp = await ctx.tdb.employees.find_one(dscope.with_scope(  # Upgrade 01I - di luar cakupan -> 404
+        {"company_id": ctx.company_id, "id": employee_id, "status": {"$ne": "deleted"}}, await dscope.get_scope(ctx)), {"id": 1})
     if not emp:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Karyawan tidak ditemukan.")
     res = await engine.refresh(ctx.company_id, [employee_id], "manual_employee", ctx.user_id)

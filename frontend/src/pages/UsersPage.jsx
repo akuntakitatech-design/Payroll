@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Plus, Pencil, Power, RotateCcw, UserMinus, Building2 } from "lucide-react";
+import { MoreHorizontal, Plus, Pencil, Power, RotateCcw, UserMinus, Building2, FolderKanban } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -9,6 +9,9 @@ import DataTable, { FilterBar, FilterSelect, Pagination, TableCard } from "@/com
 import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import StatusBadge from "@/components/common/StatusBadge";
+import { DataScopeBadge, scopeState } from "@/components/access/DataScopeBadge";
+import { DataScopePicker } from "@/components/access/DataScopePicker";
+import { DataScopeDialog } from "@/components/access/DataScopeDialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -32,7 +35,12 @@ const ROLE_LABELS = {
 };
 
 const UsersPage = () => {
-  const { can, isSuperAdmin, user: me, company, companies } = useAuth();
+  const { can, isSuperAdmin, user: me, company, companies, dataScope: myScope } = useAuth();
+  // Upgrade 01I - Cakupan Data (hanya admin dengan cakupan penuh yang dapat mengatur; ditegakkan di backend)
+  const canManageScope = can("user", "edit") && scopeState(myScope).kind === "all";
+  const [scopeUser, setScopeUser] = useState(null);
+  const [scopeProjects, setScopeProjects] = useState([]);
+  const [newScope, setNewScope] = useState({ mode: "ALL_TENANT", projectIds: [] });
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20, total_pages: 1 });
   const [loading, setLoading] = useState(true);
@@ -142,6 +150,13 @@ const UsersPage = () => {
   const openCreate = () => {
     setEditing(null);
     setValues({});
+    setNewScope({ mode: "ALL_TENANT", projectIds: [] });
+    if (canManageScope) {
+      api
+        .get("/users/data-scope/options")
+        .then((res) => setScopeProjects(res.data.projects || []))
+        .catch(() => setScopeProjects([]));
+    }
     setSelectedRoles(["employee"]);
     setErrors({});
     setDialogOpen(true);
@@ -176,6 +191,8 @@ const UsersPage = () => {
       nextErrors.password = "Kata sandi baru minimal 8 karakter.";
     if (!selectedRoles.length)
       nextErrors.__form__ = "Pilih minimal satu peran agar pengguna tahu apa yang boleh dikerjakan.";
+    if (!editing && newScope.mode === "SELECTED_PROJECTS" && newScope.projectIds.length === 0)
+      nextErrors.__scope__ = "Pilih minimal satu project untuk Cakupan 'Project Tertentu'.";
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
       return;
@@ -204,6 +221,9 @@ const UsersPage = () => {
           employee_number: values.employee_number || null,
           phone: values.phone || null,
           role_keys: selectedRoles,
+          ...(canManageScope
+            ? { data_scope_mode: newScope.mode, data_scope_project_ids: newScope.projectIds }
+            : {}),
         });
         toast.success(`Pengguna ${values.full_name} berhasil ditambahkan.`);
       }
@@ -291,6 +311,14 @@ const UsersPage = () => {
       hideOnMobile: true,
       render: (row) => (row.last_login_at ? formatDateTime(row.last_login_at) : "Belum pernah"),
     },
+    {
+      key: "data_scope",
+      header: "Cakupan",
+      hideOnMobile: true,
+      render: (row) => (
+        <DataScopeBadge scope={row.data_scope} compact className="max-w-[15rem]" testId={`user-scope-${row.id}`} />
+      ),
+    },
     { key: "status", header: "Status", render: (row) => <StatusBadge status={row.status} /> },
     {
       key: "actions",
@@ -307,6 +335,11 @@ const UsersPage = () => {
             {can("user", "edit") && (
               <DropdownMenuItem onClick={() => openEdit(row)} data-testid={`user-edit-${row.id}`}>
                 <Pencil className="mr-2 h-4 w-4" /> Ubah data &amp; peran
+              </DropdownMenuItem>
+            )}
+            {canManageScope && row.id !== me?.id && (
+              <DropdownMenuItem onClick={() => setScopeUser(row)} data-testid={`user-scope-edit-${row.id}`}>
+                <FolderKanban className="mr-2 h-4 w-4" /> Atur Cakupan Data
               </DropdownMenuItem>
             )}
             {can("user", "edit") && isSuperAdmin && companies.length > 1 && (
@@ -511,7 +544,54 @@ const UsersPage = () => {
         onSubmit={handleSubmit}
         submitting={submitting}
         submitLabel={editing ? "Simpan perubahan" : "Simpan Pengguna"}
-        extra={rolePicker(selectedRoles, toggleRole, "user-role-checkbox")}
+        extra={
+          <>
+            {rolePicker(selectedRoles, toggleRole, "user-role-checkbox")}
+            {!editing && canManageScope && (
+              <DataScopePicker
+                mode={newScope.mode}
+                projectIds={newScope.projectIds}
+                projects={scopeProjects}
+                onChange={(v) => {
+                  setNewScope(v);
+                  setErrors((p) => ({ ...p, __scope__: undefined }));
+                }}
+                fullScopeRole={selectedRoles.some((r) => ["tenant_admin", "company_owner"].includes(r))}
+                error={errors.__scope__}
+                testPrefix="user-create-scope"
+              />
+            )}
+            {editing && (
+              <div className="space-y-1.5 sm:col-span-2" data-testid="user-edit-scope-summary">
+                <Label className="text-sm font-medium">Cakupan Data</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <DataScopeBadge scope={editing.data_scope} />
+                  {canManageScope && editing.id !== me?.id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setScopeUser(editing)}
+                      data-testid="user-edit-scope-button"
+                    >
+                      Atur Cakupan Data
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        }
+      />
+
+      <DataScopeDialog
+        user={scopeUser}
+        open={!!scopeUser}
+        onOpenChange={(v) => !v && setScopeUser(null)}
+        onSaved={() => {
+          setDialogOpen(false);
+          load();
+        }}
       />
 
       <FormDialog

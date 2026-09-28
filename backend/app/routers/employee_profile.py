@@ -16,6 +16,7 @@ from ..core.audit import log_action
 from ..core.branding_assets import read_image_upload
 from ..core.db import NO_ID, new_id
 from ..core.deps import AuthContext, require_permission
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.repo import TenantRepository
 from ..core.sensitive import can_view_sensitive, mask_value
 from ..core.storage import APP_NAME, StorageError, delete_object, get_object, put_object
@@ -90,6 +91,7 @@ class FamilyInput(BaseModel):
 
 
 async def _employee(ctx: AuthContext, employee_id: str) -> Dict[str, Any]:
+    await dscope.ensure_employee_in_scope(ctx, employee_id)  # Upgrade 01I - di luar cakupan -> 404
     emp = await TenantRepository("employees", ctx.company_id).get(employee_id)
     if emp.get("status") == "deleted":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Data tidak ditemukan pada perusahaan aktif Anda.")

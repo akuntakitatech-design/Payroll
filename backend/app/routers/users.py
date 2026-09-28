@@ -2,12 +2,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.audit import log_action
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.rbac import PLATFORM_ADMIN_ROLE, PLATFORM_ONLY_PERMISSIONS, WILDCARD
 from ..core.security import hash_password
-from ..schemas import RoleCreate, RolePermissionUpdate, RoleUpdate, UserCreate, UserUpdate
+from ..schemas import DataScopeUpdate, RoleCreate, RolePermissionUpdate, RoleUpdate, UserCreate, UserUpdate
 
 router = APIRouter(tags=["Pengguna & Peran"])
 
@@ -111,9 +112,14 @@ async def list_users(
         .to_list(limit)
     )
     items = []
+    scopes = await dscope.scope_labels_for_users(ctx.company_id, [u["id"] for u in rows])  # Upgrade 01I (tanpa N+1)
     for u in serialize_list(rows):
         item = _public(u)
         item["role_keys"] = sorted(roles_by_user.get(u["id"], []))
+        sc = dict(scopes.get(u["id"]) or {"mode": dscope.ALL_TENANT, "projects": [], "no_access": False})
+        if dscope.FULL_SCOPE_ROLES & set(item["role_keys"]):
+            sc.update({"mode": dscope.ALL_TENANT, "full_scope_role": True, "no_access": False})
+        item["data_scope"] = sc
         items.append(item)
     return {
         "items": items,
@@ -142,6 +148,9 @@ async def create_user(payload: UserCreate, ctx: AuthContext = Depends(require_pe
         )
     if payload.is_super_admin and not ctx.is_super_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Super Admin yang dapat membuat Super Admin.")
+    # Upgrade 01I: validasi Cakupan Data SEBELUM akun dibuat (tidak ada akun setengah jadi).
+    scope_mode = payload.data_scope_mode or dscope.ALL_TENANT
+    await _validate_scope_input(ctx, scope_mode, payload.data_scope_project_ids)
 
     doc = {
         "id": new_id(),
@@ -185,9 +194,81 @@ async def create_user(payload: UserCreate, ctx: AuthContext = Depends(require_pe
                 **audit_fields(ctx.user_id, creating=True),
             }
         )
+    # Upgrade 01I: baris scope eksplisit per (company, user)
+    await dscope.set_user_scope(ctx.company_id, doc["id"], scope_mode, payload.data_scope_project_ids, ctx.user_id)
     out = _public({k: v for k, v in doc.items() if k != "_id"})
     out["role_keys"] = role_keys
     await log_action(ctx, "create", "user", doc["id"], email, after=out)
+    return out
+
+
+# ------------------------------------------------------- Upgrade 01I: Cakupan Data
+async def _validate_scope_input(ctx: AuthContext, mode: str, project_ids: List[str]) -> None:
+    if mode not in dscope.MODES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Mode Cakupan Data tidak dikenal.")
+    # Mengatur Cakupan Data = kewenangan admin full-scope (cegah eskalasi oleh user restricted).
+    await dscope.require_full_scope(ctx)
+    if mode == dscope.SELECTED_PROJECTS:
+        ids = sorted({str(p).strip() for p in project_ids or [] if str(p or "").strip()})
+        if not ids:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Pilih minimal satu project untuk Cakupan 'Project Tertentu'.")
+        found = await get_db().projects.count_documents({"company_id": ctx.company_id, "id": {"$in": ids},
+                                                         "status": {"$in": list(dscope.VALID_PROJECT_STATUSES)}})
+        if found != len(ids):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                "Satu atau lebih project tidak ditemukan / tidak aktif pada perusahaan aktif Anda.")
+
+
+async def _target_roles(ctx: AuthContext, user_id: str) -> List[str]:
+    rows = await get_db().user_company_roles.find({"user_id": user_id, "status": "active"}, NO_ID).to_list(500)
+    if not any(r.get("company_id") == ctx.company_id for r in rows):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pengguna tidak ditemukan di perusahaan aktif Anda.")
+    return sorted({r["role_key"] for r in rows if r.get("company_id") in (None, ctx.company_id)})
+
+
+async def _project_options(company_id: str) -> List[Dict[str, Any]]:
+    rows = await get_db().projects.find({"company_id": company_id, "status": {"$in": list(dscope.VALID_PROJECT_STATUSES)}},
+                                        {"id": 1, "name": 1, "code": 1, "status": 1}).sort("name", 1).to_list(2000)
+    return [{"id": r["id"], "name": r.get("name"), "code": r.get("code"), "status": r.get("status")} for r in rows]
+
+
+@router.get("/users/data-scope/options")
+async def data_scope_options(ctx: AuthContext = Depends(require_permission("user", "view"))):
+    """Pilihan project (company aktif) untuk pemilih Cakupan Data."""
+    return {"projects": await _project_options(ctx.company_id), "modes": list(dscope.MODES)}
+
+
+@router.get("/users/me/data-scope")
+async def my_data_scope(ctx: AuthContext = Depends(get_auth)):
+    """Cakupan data efektif user yang sedang login pada perusahaan aktif (indikator UI)."""
+    return await dscope.describe_scope(ctx.company_id, ctx.user_id, ctx.role_keys)
+
+
+@router.get("/users/{user_id}/data-scope")
+async def get_user_data_scope(user_id: str, ctx: AuthContext = Depends(require_permission("user", "view"))):
+    roles = await _target_roles(ctx, user_id)
+    out = await dscope.describe_scope(ctx.company_id, user_id, roles)
+    out["role_keys"] = roles
+    out["can_manage"] = ctx.has_permission("user", "edit") and (await dscope.has_all_tenant(ctx)) and user_id != ctx.user_id
+    out["available_projects"] = await _project_options(ctx.company_id)
+    return out
+
+
+@router.put("/users/{user_id}/data-scope")
+async def set_user_data_scope(user_id: str, payload: DataScopeUpdate,
+                              ctx: AuthContext = Depends(require_permission("user", "edit"))):
+    """Simpan Cakupan Data (company aktif, user target). RBAC tetap menentukan aksi; ini hanya menentukan data."""
+    if user_id == ctx.user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Anda tidak dapat mengubah Cakupan Data akun Anda sendiri.")
+    roles = await _target_roles(ctx, user_id)
+    await _guard_platform_user(ctx, user_id)
+    await _validate_scope_input(ctx, payload.mode, payload.project_ids)
+    change = await dscope.set_user_scope(ctx.company_id, user_id, payload.mode, payload.project_ids, ctx.user_id)
+    user = await get_db().users.find_one({"id": user_id}, {"email": 1})
+    await log_action(ctx, "data_scope_update", "user", user_id, (user or {}).get("email"),
+                     before=change["before"], after=change["after"], notes="Cakupan Data diubah")
+    out = await dscope.describe_scope(ctx.company_id, user_id, roles)
+    out["role_keys"] = roles
     return out
 
 
@@ -300,9 +381,11 @@ async def remove_user_from_company(
     result = await db.user_company_roles.delete_many({"user_id": user_id, "company_id": ctx.company_id})
     if result.deleted_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pengguna ini bukan anggota perusahaan aktif Anda.")
+    # Upgrade 01I - scope + item company INI saja dibersihkan (tombstone); company lain tidak disentuh.
+    await dscope.revoke_user_scope(ctx.company_id, user_id, ctx.user_id)
     await log_action(
         ctx, "revoke_access", "user", user_id, user.get("email"), before=user,
-        notes="Akses pengguna dicabut dari perusahaan aktif",
+        notes="Akses pengguna dicabut dari perusahaan aktif (Cakupan Data perusahaan ini ikut dibersihkan)",
     )
     return {"message": f"Akses {user.get('full_name')} pada perusahaan ini berhasil dicabut."}
 
@@ -341,6 +424,8 @@ async def grant_company_access(
                 **audit_fields(ctx.user_id, creating=True),
             }
         )
+    # Upgrade 01I - re-add/grant tanpa pilihan eksplisit -> "Tidak ada akses data" sampai admin mengatur cakupan.
+    await dscope.ensure_default_scope(target_company, user_id, ctx.user_id)
     await log_action(
         ctx, "grant_access", "user", user_id, user.get("email"),
         after={"company_id": target_company, "role_keys": role_keys},

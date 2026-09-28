@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from ..core.db import DESCENDING
 
 from ..core.db import NO_ID, get_db, serialize, serialize_list
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.rbac import MODULES, RESOURCES
 from ..core.sensitive import mask_for_audit
@@ -157,7 +158,7 @@ async def export_audit_logs(
     module: Optional[str] = None,
     action: Optional[str] = None,
     limit: int = 2000,
-    ctx: AuthContext = Depends(require_permission("audit_log", "export")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(require_permission("audit_log", "export"))),
 ):
     db = get_db()
     query: Dict[str, Any] = {"company_id": ctx.company_id}

@@ -21,6 +21,7 @@ from ..core.audit import log_action
 from ..core.employee_status import ensure_default_statuses
 from ..core.config import settings
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, require_platform_admin
 from ..core.rbac import TENANT_ADMIN_ROLE
 from ..core.tenant_subscription import SUBSCRIPTION_FIELDS, parse_date, subscription_info
@@ -477,6 +478,7 @@ async def revoke_tenant_admin(tenant_id: str, user_id: str, ctx: AuthContext = D
     )
     if not getattr(res, "deleted_count", 0):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pengguna tersebut bukan Tenant Admin tenant ini.")
+    await dscope.revoke_if_no_membership(tenant_id, user_id, ctx.user_id)  # Upgrade 01I - tanpa keanggotaan tersisa -> scope dibersihkan
     await log_action(ctx, "revoke_tenant_admin", "tenant", tenant_id, tenant.get("name"),
                      before={"user_id": user_id, "role_key": TENANT_ADMIN_ROLE}, company_id=tenant_id)
     return {"message": "Peran Tenant Admin dicabut. Akun pengguna dan peran lainnya tidak diubah.",
@@ -521,6 +523,8 @@ async def add_tenant_user(tenant_id: str, payload: TenantUserAdd, ctx: AuthConte
         "id": new_id(), "user_id": user["id"], "company_id": tenant_id, "role_key": role_key, "status": "active",
         **audit_fields(ctx.user_id, creating=True),
     })
+    # Upgrade 01I - anggota baru / re-add tanpa pilihan cakupan -> "Tidak ada akses data" (bukan ALL_TENANT).
+    await dscope.ensure_default_scope(tenant_id, user["id"], ctx.user_id)
     if created:
         await log_action(ctx, "create", "user", user["id"], email,
                          after={k: v for k, v in user.items() if k != "password_hash"}, company_id=tenant_id,

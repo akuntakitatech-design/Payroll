@@ -18,6 +18,7 @@ from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.db import NO_ID, new_id, now, serialize, serialize_list
 from ..core.tenancy import get_tenant_db
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.payroll import (
     JKK_RISK_CLASSES,
@@ -1083,7 +1084,7 @@ async def statutory_report(
 @router.get("/runs/{run_id}/statutory-report/export")
 async def export_statutory_report(
     run_id: str,
-    ctx: AuthContext = Depends(require_permission("payroll", "export")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(require_permission("payroll", "export"))),
 ):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -1300,7 +1301,7 @@ async def payslip_email_logs(
 @router.get("/runs/{run_id}/export")
 async def export_run(
     run_id: str,
-    ctx: AuthContext = Depends(require_permission("payroll", "export")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(require_permission("payroll", "export"))),
 ):
     """Ekspor rekap payroll ke Excel (untuk transfer bank / arsip Finance)."""
     from openpyxl import Workbook

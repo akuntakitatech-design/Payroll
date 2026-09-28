@@ -484,7 +484,10 @@ export const EmploymentTab = ({ employee, company, onEdit }) => (
         value={
           employee.supervisor_name
             ? `${employee.supervisor_name}${employee.supervisor_position_name ? ` (${employee.supervisor_position_name})` : ""}`
-            : employee.supervisor_position_name
+            : employee.supervisor_out_of_scope
+              ? /* Upgrade 01I: atasan di luar cakupan -> identitas tidak ditampilkan */
+                `${employee.supervisor_name_label || "Di luar cakupan akses"}${employee.supervisor_position_name ? ` (${employee.supervisor_position_name})` : ""}`
+              : employee.supervisor_position_name
         }
         testId="employment-supervisor"
       />

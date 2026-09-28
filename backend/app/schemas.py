@@ -101,6 +101,15 @@ class UserCreate(BaseModel):
     employee_number: Optional[str] = None
     role_keys: List[str] = Field(default_factory=list)
     is_super_admin: bool = False
+    # Upgrade 01I - Cakupan Data awal (opsional; default ALL_TENANT). Divalidasi sebelum akun dibuat.
+    data_scope_mode: Optional[str] = None
+    data_scope_project_ids: List[str] = Field(default_factory=list, max_length=500)
+
+
+class DataScopeUpdate(BaseModel):
+    """Upgrade 01I - body PUT /users/{id}/data-scope."""
+    mode: str = Field(..., max_length=32)
+    project_ids: List[str] = Field(default_factory=list, max_length=500)
 
 
 class UserUpdate(BaseModel):

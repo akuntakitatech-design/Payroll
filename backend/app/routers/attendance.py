@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from ..core.audit import log_action
 from ..core.db import ASCENDING, NO_ID, audit_fields, get_db, new_id, now, serialize_list
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.repo import TenantRepository
 from ..core import time_approval as ta
@@ -26,6 +27,12 @@ router = APIRouter(prefix="/attendance", tags=["Time Management - Absensi"])
 
 def _perm(action: str):
     return require_permission("attendance", action, "attendance")
+
+
+def _self_perm(action: str):
+    """Upgrade 01I: endpoint absensi MANDIRI (data milik caller sendiri) tidak diblokir guard modul
+    belum-scope-aware; cabang yang menyentuh karyawan lain tetap wajib cakupan penuh."""
+    return require_permission("attendance", action, "attendance", self_service=True)
 
 
 def _can_see_gps(ctx: AuthContext) -> bool:
@@ -132,7 +139,7 @@ def _today_status(context: Dict[str, Any], row: Optional[Dict[str, Any]]) -> Dic
 
 
 @router.get("/me/today")
-async def my_today(ctx: AuthContext = Depends(_perm("view"))):
+async def my_today(ctx: AuthContext = Depends(_self_perm("view"))):
     employee = await svc.my_employee(ctx, required=False)
     if not employee:
         return {"linked": False,
@@ -193,7 +200,7 @@ def _clock_response(saved: Dict[str, Any], geo: Optional[Dict[str, Any]], messag
 
 
 @router.post("/check-in")
-async def check_in(payload: CheckInput, ctx: AuthContext = Depends(_perm("create"))):
+async def check_in(payload: CheckInput, ctx: AuthContext = Depends(_self_perm("create"))):
     _validate_source(payload.source)
     employee = await svc.my_employee(ctx)
     db = get_db()
@@ -295,7 +302,7 @@ async def check_in(payload: CheckInput, ctx: AuthContext = Depends(_perm("create
 
 
 @router.post("/check-out")
-async def check_out(payload: CheckInput, ctx: AuthContext = Depends(_perm("create"))):
+async def check_out(payload: CheckInput, ctx: AuthContext = Depends(_self_perm("create"))):
     _validate_source(payload.source)
     employee = await svc.my_employee(ctx)
     db = get_db()
@@ -389,7 +396,7 @@ async def check_out(payload: CheckInput, ctx: AuthContext = Depends(_perm("creat
 @router.get("/me")
 async def my_attendance(
     period: Optional[str] = None,
-    ctx: AuthContext = Depends(_perm("view")),
+    ctx: AuthContext = Depends(_self_perm("view")),
 ):
     employee = await svc.my_employee(ctx, required=False)
     if not employee:
@@ -815,7 +822,7 @@ async def export_recap(
     work_location_id: Optional[str] = None,
     attendance_status: Optional[str] = None,
     source: Optional[str] = None,
-    ctx: AuthContext = Depends(_perm("export")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(_perm("export"))),
 ):
     tz = tk.tz_for(ctx.company)
     period = period or tk.period_key_of(tk.now_utc().astimezone(tz).date().isoformat())
@@ -932,7 +939,7 @@ class CorrectionInput(BaseModel):
 
 
 @router.post("/corrections", status_code=status.HTTP_201_CREATED)
-async def create_correction(payload: CorrectionInput, ctx: AuthContext = Depends(_perm("create"))):
+async def create_correction(payload: CorrectionInput, ctx: AuthContext = Depends(_self_perm("create"))):
     if payload.correction_type not in tk.CORRECTION_TYPES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Jenis koreksi tidak dikenal.")
     work_date = tk.parse_date_str(payload.work_date, "Tanggal")
@@ -987,7 +994,7 @@ async def create_correction(payload: CorrectionInput, ctx: AuthContext = Depends
 async def list_corrections(
     request_status: Optional[str] = None,
     mine: bool = False,
-    ctx: AuthContext = Depends(_perm("view")),
+    ctx: AuthContext = Depends(_self_perm("view")),
 ):
     db = get_db()
     query: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}
@@ -997,6 +1004,8 @@ async def list_corrections(
     if mine or scoped_employee:
         employee = await svc.my_employee(ctx, required=False)
         query["employee_id"] = employee["id"] if employee else "-"
+    else:
+        await dscope.require_full_scope(ctx)  # Upgrade 01I - daftar koreksi seluruh karyawan
     rows = await db.attendance_corrections.find(query, NO_ID).sort("submitted_at", -1).to_list(500)
     out = []
     for r in serialize_list(rows):
