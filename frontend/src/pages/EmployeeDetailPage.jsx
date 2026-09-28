@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { EmployeeAsset360 } from "@/pages/asset/EmployeeAsset360";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -160,6 +161,7 @@ const EmployeeDetailPage = () => {
   }, [load, loadCatalog]);
 
   const payrollVisible = hasModule("payroll") && can("employee_salary", "view");
+  const assetVisible = hasModule("asset") && can("asset", "view");   // Phase 2A CP4 - Employee Asset 360
 
   const loadSalary = useCallback(async () => {
     setSalaryLoading(true);
@@ -683,6 +685,7 @@ const EmployeeDetailPage = () => {
               <TabsTrigger value="documents" data-testid="tab-documents">Dokumen ({data.documents.length})</TabsTrigger>
               <TabsTrigger value="contracts" data-testid="tab-contracts">Kontrak ({data.contracts.length})</TabsTrigger>
               <TabsTrigger value="certifications" data-testid="tab-certifications">Sertifikasi ({data.certifications.length})</TabsTrigger>
+              {assetVisible && <TabsTrigger value="assets" data-testid="tab-assets">Aset</TabsTrigger>}
               <TabsTrigger value="history" data-testid="tab-history">Riwayat</TabsTrigger>
               {payrollVisible && (
                 <TabsTrigger value="payroll" data-testid="tab-payroll">Gaji &amp; Payroll</TabsTrigger>
@@ -723,6 +726,11 @@ const EmployeeDetailPage = () => {
           <TabsContent value="bpjs" className="mt-4">
             <BpjsTab employee={employee} onEdit={can("employee", "edit") ? () => setEditSection("bpjs") : undefined} />
           </TabsContent>
+          {assetVisible && (
+            <TabsContent value="assets" className="mt-4">
+              {tab === "assets" && <EmployeeAsset360 employeeId={employee.id} />}
+            </TabsContent>
+          )}
           <TabsContent value="history" className="mt-4">
             <HistoryTab employeeId={employee.id} refreshKey={historyKey} />
           </TabsContent>
