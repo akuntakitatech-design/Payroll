@@ -103,6 +103,7 @@ export const NAV_GROUPS = [
       { key: "employees", label: "Data Karyawan", to: "/employees", icon: Users, resource: "employee", action: "view", module: "employee_core" },
       { key: "employee-completeness", label: "Kelengkapan Data", to: "/employees/completeness", icon: ClipboardCheck, resource: "employee", action: "view", module: "employee_core" },
       { key: "employee-update-form", label: "Form Pembaruan Data", to: "/employees/update-form", icon: ClipboardList, resource: "employee", action: "view", module: "employee_core" },
+      { key: "employee-update-verifications", label: "Verifikasi Pembaruan Data", to: "/employees/update-verifications", icon: UserCheck, resource: "employee_form", action: "verify", module: "employee_core" },
       { key: "reminders", label: "Kalender Masa Berlaku", to: "/reminders", icon: CalendarClock, resource: "document", action: "view" },
     ],
   },

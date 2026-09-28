@@ -133,6 +133,23 @@ def get_object(path: str) -> Tuple[bytes, str]:
     return body, resp.get("ContentType") or "application/octet-stream"
 
 
+def copy_object(src: str, dst: str, content_type: Optional[str] = None) -> dict:
+    """Upgrade 01H: salin objek di bucket yang sama (server-side CopyObject; tanpa unduh/unggah ulang).
+    Dipakai saat lampiran formulir publik dipromosikan menjadi dokumen/foto resmi."""
+    _guard_storage_write("copy")
+    client = init_storage()
+    params = {"Bucket": settings.R2_BUCKET_NAME, "Key": dst,
+              "CopySource": {"Bucket": settings.R2_BUCKET_NAME, "Key": src}}
+    if content_type:
+        params.update({"ContentType": content_type, "MetadataDirective": "REPLACE"})
+    try:
+        client.copy_object(**params)
+    except (ClientError, BotoCoreError) as exc:
+        logger.error("Gagal menyalin objek R2 (%s -> %s): %s", src, dst, exc)
+        raise StorageError(f"Gagal menyalin berkas di object storage: {exc}") from exc
+    return {"path": dst, "bucket": settings.R2_BUCKET_NAME}
+
+
 def delete_object(path: str) -> None:
     if getattr(settings, "READ_ONLY", False):
         logger.warning("READ-ONLY aktif: hapus objek R2 dilewati (%s).", path)

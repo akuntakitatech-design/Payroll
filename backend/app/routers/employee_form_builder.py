@@ -50,12 +50,16 @@ SELECT COUNT(*) AS active_employees,
        COALESCE(SUM(s.employee_id IS NULL), 0) AS not_started,
        COALESCE(SUM(s.has_draft), 0) AS draft,
        COALESCE(SUM(s.has_submitted), 0) AS submitted,
-       COALESCE(SUM(s.has_pending), 0) AS pending_hr
+       COALESCE(SUM(s.has_pending), 0) AS pending_hr,
+       COALESCE(SUM(s.has_revision), 0) AS revision_requested,
+       COALESCE(SUM(s.has_approved), 0) AS approved,
+       COALESCE(SUM(s.has_rejected), 0) AS rejected
 FROM employees e
 {assign_join}
 LEFT JOIN (
     SELECT employee_id, MAX(status = :draft) AS has_draft, MAX(submitted_at IS NOT NULL) AS has_submitted,
-           MAX(status = :pending) AS has_pending
+           MAX(status = :pending) AS has_pending, MAX(status = :revision) AS has_revision,
+           MAX(status = :approved) AS has_approved, MAX(status = :rejected) AS has_rejected
     FROM employee_update_submissions WHERE company_id = :cid GROUP BY employee_id
 ) s ON s.employee_id = e.id
 WHERE e.company_id = :cid AND e.status = 'active' {where}
@@ -71,7 +75,8 @@ async def monitoring_summary(cid: str, project_id: Optional[str] = None, departm
     """DB-side aggregate (1 query, tenant-scoped, no N+1). Semantics identical to the 01G state:
     not_started = active employee without any submission row; draft = has a DRAFT; submitted = ever submitted
     (submitted_at set); pending_hr = has a PENDING_HR_VERIFICATION submission. Project = active assignment, else employee.project_id."""
-    where, params = [], {"cid": cid, "draft": P.DRAFT, "pending": P.PENDING}
+    where, params = [], {"cid": cid, "draft": P.DRAFT, "pending": P.PENDING, "revision": P.REVISION,
+                         "approved": P.APPROVED, "rejected": P.REJECTED}
     if project_id:
         where.append("AND COALESCE(a.project_id, e.project_id) = :project_id")
         params["project_id"] = project_id
@@ -84,7 +89,8 @@ async def monitoring_summary(cid: str, project_id: Optional[str] = None, departm
     q = _MON_SQL.format(assign_join=_ASSIGN_JOIN if project_id else "", where=" ".join(where))
     async with get_engine().connect() as conn:
         row = (await conn.execute(sa.text(q), params)).mappings().one()
-    return {k: int(row[k] or 0) for k in ("active_employees", "not_started", "draft", "submitted", "pending_hr")}
+    return {k: int(row[k] or 0) for k in ("active_employees", "not_started", "draft", "submitted", "pending_hr",
+                                          "revision_requested", "approved", "rejected")}  # 01H: status keputusan HR
 
 
 @router.get("/monitoring")
@@ -97,7 +103,7 @@ async def monitoring(project_id: Optional[str] = Query(None, max_length=64), dep
         rows = await tdb[coll].find({"company_id": cid, "status": {"$nin": ["deleted", "inactive"]}}, {"id": 1, "name": 1, "code": 1}).to_list(1000)
         opts[key] = sorted([{"id": r["id"], "label": r.get("name") or r.get("code") or r["id"]} for r in rows], key=lambda x: x["label"])
     return {"summary": summary, "filters": opts,
-            "note": "Draft & kiriman belum mengubah data master. Verifikasi HR dikerjakan pada modul 01H."}
+            "note": "Draft & kiriman belum mengubah data master sampai disetujui di menu Verifikasi Pembaruan Data (01H)."}
 
 
 # =================================================================== configure

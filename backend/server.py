@@ -17,6 +17,7 @@ from app.routers import (
     branding,
     public_employee_form,
     employee_form_builder,
+    employee_update_verification,
     certifications,
     companies,
     completeness,
@@ -117,6 +118,7 @@ api.include_router(branding.public_router)
 api.include_router(public_employee_form.hr_router)
 api.include_router(public_employee_form.public_router)
 api.include_router(employee_form_builder.router)  # Enhancement 01G Form Builder
+api.include_router(employee_update_verification.router)  # Upgrade 01H HR Verification
 api.include_router(master.router)
 api.include_router(users.router)
 api.include_router(approvals.router)

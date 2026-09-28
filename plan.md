@@ -18,7 +18,7 @@ Batasan tambahan (untuk fase upgrade saat ini):
 - Tenant **`ZT01B170909`**: **jangan disentuh** (catat sebagai existing test tenant di luar scope 01E-B).
 
 ### Update fokus (fase saat ini) — 2026-09-27
-**Enhancement 01G — Flexible Employee Form Builder: LOCKED ✅** (see §15.4e). 01F LOCKED ✅ · 01G LOCKED ✅ · 01H NOT STARTED. Branch `feature/upgrade-01g-form-builder`. Production Changed: NO.
+**Enhancement 01G — Flexible Employee Form Builder: LOCKED ✅** (see §15.4e). 01F LOCKED ✅ · 01G LOCKED ✅ · 01H LOCKED ✅ (see §16.7). Branch `feature/upgrade-01g-form-builder`. Production Changed: NO.
 
 (Historical focus, older phases:)
 1) **01C Employee Profile 360** — **COMPLETED & LOCKED**.
@@ -704,12 +704,96 @@ Locked decisions: core level = 01F (OFF = Tidak Dinilai, not Optional); 01F REQU
 - Environment event: container reset → MariaDB binary missing → reinstalled per `/app/ops/README.md` (datadir not re-initialized).
 - 15.4e.4 FINAL CLOSING: targeted DnD PASS → cleanup apply → integrity 17/17 → post-cleanup smoke PASS → **LOCKED ✅** (details `/app/UPGRADE_01G_FORM_BUILDER_PROGRESS.md` §L). Known non-blockers: core REQUIRED server-side at submit = existing 01G behavior; G5 cleanup deferred (cross-module/01F); 10 old storage orphans not owned by the FB. Hygiene: `a8a6e9c` holds an unredacted iteration_14.json (synthetic, local, not pushed; working copy redacted).
 - Next: STOP for review. Do not start 01H. No push/PR/merge/deploy.
-### 15.5 — 01H HR Verification (inbox/compare/approve/reject/apply-to-master) (STATUS: TODO / NOT STARTED) — not part of 01G.
+- 15.4e.5 PR hygiene: local commit cleaned (`.gitignore` + test reports removed; sensitive scan 0) → pushed (force-with-lease back to clean `70634e7` after a platform auto-commit) → **PR #16 open** (1 commit, 22 files; not merged). PR #15 closed as superseded (not merged).
+
+## Phase 16 — Upgrade 01H: HR Verification (STATUS: **LOCKED ✅** — implementation, staging E2E incl. real staging storage, final regression 70/70 + 12/12, cleanup DONE; push/PR pending user approval)
+Report: `/app/UPGRADE_01H_HR_VERIFICATION_AUDIT.md` (read-only code audit + 1 read-only staging count query; agent-inspected, no functional tests yet).
+Local branch: `feature/upgrade-01h-hr-verification` (from local HEAD with platform auto-commit `9b54a61`; must be cleaned before any 01H PR). Local 01G ref reset to `70634e7` (= remote PR #16). Nothing pushed.
+### 16.1 Audit findings (summary)
+- REUSE: `employee_update_submissions` (proposed + baseline + version + open_slot unique), `employee_custom_field_values` (official, written only by 01H; 0 rows), `employee_submission_files`, `documents` (owner_type/owner_id), photo pattern, `TenantRepository.update`, `EDITABLE_FIELDS`/validators/`FamilyInput`/`FB.validate_custom`, `transaction()` + `build_audit_entry` + `mask_for_audit`, `completeness.safe_refresh`, tenant `ctx.tdb`, `can_view_sensitive`.
+- GAP: no APPROVED/REJECTED/REVISION_REQUESTED statuses, no reviewer columns, no HR review/decision endpoints, no apply logic, no conflict detection, no verify permission, no diff UI.
+- NOT reused: `approval_workflows` (metadata-only multi-step for other modules) → DEFER. No new tables proposed.
+### 16.2 Proposed design (awaiting review — open questions Q1–Q8 in the report §13)
+- Decision per submission (Approve all / Reject / Request Revision) + explicit resolution only for CONFLICT items; no HR editing of proposed values.
+- Revision reuses the same submission row (REVISION_REQUESTED stays open; resubmit recaptures baseline).
+- Conflict = baseline vs current official data; approve blocked (409) until each conflict gets use_proposed/keep_current.
+- Files: DOCUMENT → new `documents` row (object copied to official path); PHOTO → photo prefix; CUSTOM file → reference in `employee_custom_field_values`; reject → file REJECTED.
+- `no_npwp` → info only (touches payroll `employee_salaries.has_npwp`) → DEFER.
+- Schema: m0010, additive NULL columns on `employee_update_submissions` (reviewed_by/_name/_at, review_note, revision_count, review_history, apply_result, completeness_after) + `employee_submission_files` (document_id, review_status_at); new permission `employee_form:verify` (hr_admin, hr_manager; tenant_admin/company_owner implicit).
+- API `/api/employees/update-verifications` (summary, list, detail, file, approve, reject, request-revision); UI Kepegawaian → Verifikasi Pembaruan Data.
+### 16.3 Implementation steps
+1 m0010 + specs → 2 core/hr_verification.py (diff/conflict/apply) → 3 HR router → 6 backend tests → 4 public revision banner/last decision → 5 monitoring counts → 7 UI → 8 public UI banner → 9 testing agent → 10 docs.
+- Superseded note: implementation was later approved by the user (see 16.4).
+
+### 16.4 Step 2 — Implementation + targeted verification (STATUS: **PARTIAL** — implementation DONE, targeted checks PASS; E2E/regression/cleanup/PR NOT STARTED) — 2026-09-27
+| Item | Status | Evidence (agent-tested, NOT user-confirmed) |
+|---|---|---|
+| Branch/base | DONE | `feature/upgrade-01h-hr-verification` rebased on `origin/main` `7c0460a` (PR #16); 0 behind main. Local only — remote branch NOT rewritten, nothing pushed. |
+| Local MariaDB (dev only, `hris_dev` @127.0.0.1) | DONE | Supervisor `payroll-dev-mariadb` was FATAL (binary not found at pod start); binary present again → `supervisorctl restart` → RUNNING. Existing data intact (76 tables, ledger m0003–m0010; m0001/m0002 do not use the ledger). No reinit/reset/reseed. AUTO_SEED=false, ENABLE_SCHEDULER=false, R2 not configured. Production MariaDB/R2 NOT touched. |
+| Backend `/api/health` | PASS | `{"status":"healthy","database":"mariadb:connected","read_only":false}` (storage: R2 not configured — expected for dev). |
+| m0010_hr_verification | DONE | Additive/idempotent; apply OK, rerun SKIP; grants `employee_form:verify` (tenant_admin, hr_admin, hr_manager). |
+| Backend scope | DONE | RBAC `verify`; `core/hr_verification.py` (diff, conflict detection/resolution, transactional apply incl. family, custom official values/files, document/photo promotion via `storage.copy_object`, completeness refresh, audit); router `/api/employees/update-verifications` (summary, list, detail, file, approve, reject, request-revision) registered before `/api/employees/{employee_id}`, no duplicate routes; public form revision flow (REVISION_REQUESTED editable, resubmit, last decision, `photo_version` baseline); Form Builder monitoring counts (revision/approved/rejected). |
+| Minimal 01G touch | NOTE | Public form prefill of custom official values now uses the DB-decoded value directly (previous `_json()` re-decode turned plain strings into `None`). Only affects values written by 01H. |
+| Frontend scope | DONE | Pages `EmployeeUpdateVerificationPage` / `EmployeeUpdateVerificationDetailPage`, `ChangeCompareTable`, routes `/employees/update-verifications[/:id]`, sidebar item (employee_form:verify), public revision/last-decision banner. |
+| `tests/test_hr_verification_01h.py` | PASS | **66/66 PASS** (in-process ASGI + local MariaDB; R2 stubbed in-memory because dev R2 is not available). |
+| Frontend compile/build | PASS | esbuild bundle OK; webpack "Compiled successfully"; smoke render of list page OK. |
+| Local checkpoint commit | DONE (local only) | 1 commit on the 01H branch in `/app/.repo_work/Payroll`; no push/PR. |
+
+Remaining gaps before E2E / regression / cleanup / PR:
+- Browser E2E (testing agent) of list/detail/approve/reject/revision + public revision banner: NOT STARTED.
+- Broad regression: NOT STARTED. Known env issues from an earlier attempt: `aiosqlite` missing (tenant isolation test); `test_development_core.py` expects a clean DB but `hris_dev` now holds T01H test data → needs a fresh dev DB, not a code fix.
+- Real R2 copy path (`copy_object`) not exercised against a real dev bucket (no dev R2).
+- Remote branch history must be handled (force-with-lease after rebase) when the user approves a push; PR body/docs report not written.
+- Final cleanup (test data, artifacts) NOT STARTED.
+- Production Changed: NO.
+
+### 16.5 Staging environment for 01H testing (STATUS: **DONE — setup verified; 01H browser E2E NOT STARTED**) — 2026-09-27
+- Where: Emergent Live Preview (separate service from production `hris.akuntakita.com`, which was NOT modified/stopped/redeployed; no DNS changes). A dedicated `staging.hris.akuntakita.com` subdomain was NOT created (DNS/infra out of agent scope).
+- DB: separate database `hris_staging` + dedicated user on the local MariaDB (127.0.0.1); schema from startup `ensure_schema` + migrations m0001–m0010 `--apply` (ledger m0003–m0010; m0010 rerun SKIP); 76 tables, 0 column difference vs baseline; `employee_form:verify` granted to tenant_admin/hr_admin/hr_manager. `hris_dev` left intact (dev env backup: `backend/dev.env.bak`, gitignored).
+- Runtime: APP_ENV=staging, READ_ONLY=false, AUTO_SEED=false, ENABLE_SCHEDULER=false, new JWT secret, no R2 keys. Synthetic data only: tenant STG + 1 staging platform admin + 1 HR user; 0 employees.
+- Storage: **Staging R2 integration: NOT CONFIGURED** (uploads/promotion will fail at runtime until a staging bucket exists).
+- Staging HR account: `hr.verifier.staging@kelolakita.dev`, role `hr_admin` (narrowest built-in role with `employee_form:verify`), created via `POST /api/users` (bcrypt), first-login password change completed, password rotated once after a test script hardcoded it (script deleted, never committed). Credential only in gitignored `memory/test_credentials.md`.
+- Verification (testing agent iteration_14 + iteration_15, 100%): health healthy; system mode staging; HR login 200; `/api/auth/me` hr_admin, not super admin, has employee_form:verify; verification list/summary 200; sidebar "Verifikasi Pembaruan Data" visible; page renders empty state.
+- Note: the UI environment badge only shows for APP_ENV=development, so staging shows no badge (no code change made).
+
+### 16.6 Targeted staging E2E (STATUS: **PASS for all non-storage scenarios; storage promotion PARTIAL; 01H NOT LOCKED**) — 2026-09-27
+Fixtures (synthetic, via authorized admin/HR APIs; scripts in /root/t01h, not in repo): masters T01H-OPS/T01H-PRJ/T01H-PKWT/T01H-STAF/T01H-SITE; employees T01H-STG-E1..E8 (E1..E4 API run, E5..E8 browser run); custom field `cf_t01h_ukuran_baju` (dropdown); user without verify (role manager); tenant B `T01HB` (employee_core enabled) with 1 pending submission (left undecided).
+| Scenario | Result | Evidence |
+|---|---|---|
+| 1 APPROVE | PASS | Browser E5: compare HP 081200000005→081377770005, address, custom —→L; approve; master + custom official value written; portal "telah disetujui HR". 01F re-evaluation: E1 93.8%→100% immediately after approve (completeness_after + evaluated_at). |
+| 2 REQUEST REVISION | PASS | Browser E6: note shown in portal banner; previous proposal kept; same submission id, status back to PENDING, revision_count 1, baseline/submitted_at recaptured; history keeps revision entry. |
+| 3 REJECT | PASS | Browser E6: master unchanged (081200000006); portal "ditolak" + reason. |
+| 4 CONFLICT | PASS | Browser E7 after HR PUT: conflict alert, approve disabled ("2 konflik belum diputuskan"), API approve w/o resolutions 409 (iter 18); use_proposed phone + keep_current address applied exactly. |
+| 5 IDENTITY | PASS | Browser E8: identity alert; confirm disabled until checkbox; API approve w/o confirm_identity 422 (iter 18); name updated. |
+| 6 SECURITY | PASS | No-verify user: menu hidden, page denied, API 403; portal session token → 401; tenant B submission → 404 (detail + approve). |
+| Document/photo promotion | PARTIAL | Real staging storage integration not yet tested (Staging R2 NOT CONFIGURED); covered only by mocked-storage unit test (66/66, dev). |
+- Product bug fixed (low, UI): identity confirmation label showed raw key "(full_name)" → now shows field label ("Nama lengkap (sesuai KTP)"). File: EmployeeUpdateVerificationDetailPage.jsx (frontend only; esbuild OK; verified by testing agent iteration_20). Synced to repo working tree, NOT committed.
+- Not bugs (automation errors by testing agent): "phone not updated after approve" (E5 first submission only proposed marital_status) and "0 changes detected" (fields filled on wrong step).
+- Fixture/env notes: E1 has a leftover empty DRAFT from a testing-agent retry; testing agent hardcoded passwords in scratch scripts 3×; scripts deleted (never committed) and passwords rotated each time.
+- Ready for: final regression + cleanup once staging storage is tested (or the user accepts PARTIAL). 01H NOT LOCKED. Production Changed: NO.
+
+### 16.7 Storage gap closed + final verification (STATUS: **DONE — 01H — HR Verification: LOCKED ✅**) — 2026-09-27
+- Staging storage: dedicated bucket `payroll-hris-staging` (prefix `staging`) with a separate bucket-scoped token (same Cloudflare account, different keys from production — verified by comparison, no values printed). Guard checked before any write: bucket == payroll-hris-staging, != media-akunkita. Credentials only in gitignored `backend/.env`; local temp copies deleted. Production R2 never used.
+| Storage scenario (browser, synthetic E9–E11) | Result |
+|---|---|
+| Document pending → approve → new official `documents` row, object copied to documents area; previous same-type document kept; pending file PROMOTED | PASS |
+| Photo pending → approve → `employees.photo_path` points to new staging photo object (served 200 image/png) | PASS |
+| Custom-field file → approve → retained official custom attachment (`employee_custom_field_values.files`), NO `documents` row | PASS |
+| REJECT → files REJECTED, nothing promoted, no photo/doc | PASS |
+| REQUEST REVISION → file stays active on same submission; replaced file `removed` (not promoted); only resubmitted file PROMOTED | PASS |
+| All objects exist in staging bucket only (11/11 paths under `staging/`) | PASS |
+- Product bug found + fixed (medium, display only): detail of an already DECIDED submission re-evaluated against live data → approved photo shown as "Konflik", other rows "Akan diterapkan". Fix: `hr_verification.decided_view()` + router `_detail()` derive states from the decision (`Diterapkan` / `Data saat ini dipertahankan` / `Tidak diterapkan`); `ChangeCompareTable` styles. Apply logic untouched. Verified by testing agent iteration_21 (100%).
+- Also included: identity checkbox label fix (`full_name` → "Nama lengkap (sesuai KTP)", iteration_20).
+- Final targeted regression: `test_hr_verification_01h.py` **70/70 PASS** (66 + 4 new decided-view assertions; covers 01G revision/public form + prefill, 01F re-evaluation, docs/photo/custom-file with mocked storage, security + cross-tenant 404, race, atomic rollback) on `hris_dev` (env override, storage stub); `tests/test_tenant_isolation.py` **12/12 PASS** (aiosqlite installed temporarily then removed — ENVIRONMENT); frontend esbuild OK. Not run: `test_stage3_rbac_tenant.py` (needs live backend with APP_ENV=development — EXPECTED); no separate 01F/01G suites exist in repo. Unrelated payroll/recruitment/attendance suites not run.
+- Cleanup (dry-run → apply, hris_staging + bucket): 266 unique DB rows + 38 portal-verify audit rows + 11 objects removed (E1–E11 incl. leftover E1 draft, submissions/history, files, custom values, documents, masters T01H-*, fields cf_t01h_*, no-verify user, tenant T01HB). Integrity: 0 orphans, 0 T01H traces, bucket 0 objects, ledger m0003–m0010 intact, STG tenant + staging admin + HR verifier kept. 1 anonymous `public_rate_limits` row left (not attributable; expires).
+- Credential hygiene: all browser E2E run with passwords read at runtime; HR verifier password rotated after E2E; automation artifacts containing passwords purged; no credential in repo/commit.
+- Observation (pre-existing, not 01H): `GET /api/documents` list includes `storage_path` field.
+- Production Changed: NO.
 
 
 
 ## 3) Next Actions (immediate)
-**Current status (2026-09-27): 01F LOCKED ✅ · UPGRADE 01G — PUBLIC EMPLOYEE FORM: LOCKED ✅ (agent-tested final gate, STOP waiting for user review) · 01H NOT STARTED · Production Changed: NO.**
+**Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 merged) · 01H — HR Verification: LOCKED ✅ (see §16.7) — final local commit, push/PR pending user approval · Production Changed: NO.**
 
 Status 01E (history): **01E-A DONE (checkpoint)** + **01E-B IN PROGRESS**.
 

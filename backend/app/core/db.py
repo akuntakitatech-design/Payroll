@@ -473,12 +473,17 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "employee_id": "fk", "link_id": "fk", "source": "s32", "open_slot": "s64", "proposed": "j",
         "baseline": "j", "changed_fields": "j", "identity_change": "b", "version": "i",
         "draft_saved_at": "dt", "submitted_at": "dt", "submit_ip": "s64", "completeness_before": "j",
+        # Upgrade 01H - HR Verification (m0010, kolom aditif NULL). review_history/apply_result TANPA nilai data.
+        "reviewed_by": "fk", "reviewed_by_name": "s", "reviewed_at": "dt", "review_note": "t",
+        "revision_count": "i", "review_history": "j", "apply_result": "j", "completeness_after": "j",
     },
     "employee_submission_files": {
         "submission_id": "fk", "employee_id": "fk", "document_type_id": "fk", "document_type_code": "s64",
         "purpose": "s32", "file_name": "s", "file_extension": "s32", "mime_type": "s64", "file_size": "bi",
         "sha256": "s64", "storage_path": "s512", "uploaded_at": "dt",
         "field_key": "s64",  # Enhancement 01G Form Builder: lampiran untuk custom field tipe file
+        # Upgrade 01H: status PROMOTED/REJECTED + dokumen resmi hasil promosi
+        "document_id": "fk", "review_status_at": "dt",
     },
     # Enhancement 01G - Form Builder (m0009). section_key sistem: personal/family/bank_tax/bpjs/documents;
     # custom: cs_*. status: active | inactive (tidak ada hard delete).

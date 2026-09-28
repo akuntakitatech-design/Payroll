@@ -9,7 +9,7 @@ by the seeder.
 from typing import Dict, List
 
 ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "view_own", "manage", "change", "import",
-           "configure"]
+           "configure", "verify"]
 
 ACTION_LABELS = {
     "view": "Lihat",
@@ -27,6 +27,8 @@ ACTION_LABELS = {
     "import": "Impor Massal",
     # Upgrade 01F - kelola Master Kelengkapan Data
     "configure": "Kelola Konfigurasi",
+    # Upgrade 01H - Verifikasi Pembaruan Data (keputusan HR atas pengajuan karyawan)
+    "verify": "Verifikasi",
 }
 
 # resource_key -> (label_id, module_key, [allowed actions])
@@ -62,7 +64,8 @@ RESOURCES: Dict[str, tuple] = {
     # Upgrade 01F - Master Kelengkapan Data (melihat kelengkapan cukup employee:view)
     "employee_completeness": ("Master Kelengkapan Data", "employee_core", ["configure"]),
     # Enhancement 01G - Form Builder (Pengaturan Form Pembaruan Data). Melihat form aktif/monitoring = employee:view
-    "employee_form": ("Form Pembaruan Data", "employee_core", ["configure"]),
+    # Upgrade 01H - verify = Verifikasi Pembaruan Data (setujui/tolak/minta perbaikan pengajuan karyawan)
+    "employee_form": ("Form Pembaruan Data", "employee_core", ["configure", "verify"]),
     "certification": ("Sertifikasi Karyawan", "employee_core", ["view", "create", "edit", "delete", "export"]),
     "recruitment": ("Rekrutmen", "recruitment", ["view", "create", "edit", "delete", "approve", "export"]),
     "contract": ("Kontrak Kerja", "employee_core", ["view", "create", "edit", "delete", "approve"]),
@@ -166,6 +169,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
         + ["employee_completeness:configure"]
         # Enhancement 01G - Form Builder
         + ["employee_form:configure"]
+        # Upgrade 01H - Verifikasi Pembaruan Data (hr_manager mewarisi)
+        + ["employee_form:verify"]
     )
     # hr_manager mewarisi hr_admin; hak Status Karyawan 01B dan impor massal 01E hanya untuk
     # Tenant Admin / Company Owner / HR Admin (keputusan user) -> dikeluarkan.
