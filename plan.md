@@ -792,6 +792,29 @@ Fixtures (synthetic, via authorized admin/HR APIs; scripts in /root/t01h, not in
 
 
 
+## Phase 18 — Phase 2A: Manajemen Aset (STATUS: **CP0 DONE · CP1 DONE — agent-tested, STOP waiting for user review** · CP2+ NOT STARTED) — 2026-09-28
+Acuan wajib: `ASSET_BAST_FINAL_BLUEPRINT.md` (SHA256 `2d750349…8f67`). Canonical worktree `/app/.repo_work/Payroll`,
+branch `feature/hrga-phase2a-asset-management` (basis `c93012c` = origin/main saat branch dibuat). Belum commit/push/PR.
+Dev/test HANYA di `hris_dev` lokal via `backend/tests/dev_env_run.sh`. `/app/backend` & `/app/frontend` TIDAK dimirror.
+
+### 18.0 CP0 — Worktree & blueprint (DONE)
+- Canonical worktree + branch disetujui user; blueprint final dibaca penuh & disalin ke repo.
+
+### 18.1 CP1 — Manajemen Aset (DONE — agent-tested, BELUM direview/di-lock user)
+- Backend: modul `asset` ("Manajemen Aset"); permission `asset:{view,create,edit,delete}`, `asset_master:{view,create,edit,delete}`,
+  `asset_value:{view,edit}`; preset GA Admin / GA Staff (tanpa logic berbasis nama role); master Kategori/Satuan/Kondisi/Status
+  via generic master engine (7 kategori sistem tetap + validator mapping); CRUD aset + detail, status manual, relokasi,
+  histori dasar (CREATED/UPDATED/STATUS_CHANGE/RELOCATION); kode otomatis `AST-{SEQ:6}` per company (alokasi + insert dalam
+  satu transaksi, tanpa COUNT+1); `acquisition_value` DECIMAL(18,2) + redaksi backend; scope 01I di level SQL (reuse
+  `core/data_scope.py`); audit log.
+- Migration `m0012_asset_management`: dry-run/apply di hris_dev; rerun = SKIP (idempoten, tanpa duplikat, row count tetap).
+- Frontend: grup sidebar top-level "Manajemen Aset" → hanya Daftar Aset + Pengaturan. Tanpa screenshot/Preview (instruksi user).
+- Verifikasi (agent-tested): CP1 146/146 (+1 assertion AST-000001 company baru) · 01I 176/176 · 01H 70/70 · esbuild + `yarn build` PASS (warning pre-existing) ·
+  `git diff --check` bersih · CP2 boundary scan PASS.
+- Cleanup residue fixture 01H di hris_dev (marker T01H-/`PT Lain {RUN}`/`t01h.*@`); 30 audit public_form anonim tanpa marker dibiarkan.
+- Known staging residue: 8 tabel aset kosong (0 row) di hris_staging — tidak disentuh; keputusan cleanup/retensi setelah review.
+- Next (menunggu user): review CP1 → keputusan commit/push/PR, mirror/staging, cleanup residue staging; CP2 BELUM dimulai.
+
 ## Phase 17 — Upgrade 01I: Role & Data Scope (STATUS: **LOCKED ✅** — gap closing + targeted + staging m0011 + staging E2E + final regression DONE) — 2026-09-28
 
 ### 17.3 Gap closing + staging + final regression (2026-09-28) — 01I: LOCKED ✅
@@ -902,6 +925,8 @@ Fixtures (synthetic, via authorized admin/HR APIs; scripts in /root/t01h, not in
 
 ## 3) Next Actions (immediate)
 **Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 merged) · 01H — HR Verification: LOCKED ✅ (see §16.7) — final local commit, push/PR pending user approval · 01I — Role & Data Scope: **LOCKED ✅** (01I 176/176, 01H 70/70, staging m0011 + E2E done; local clean commit on branch `feature/upgrade-01i-role-data-scope`, push/PR pending user approval; see §17.3) · Production Changed: NO.**
+
+**Update 2026-09-28: Phase 2A — Manajemen Aset: CP0 DONE · CP1 DONE (agent-tested, STOP waiting for user review; see §18.1) · CP2+ NOT STARTED · Production Changed: NO · Staging Changed: NO additional changes.**
 
 Status 01E (history): **01E-A DONE (checkpoint)** + **01E-B IN PROGRESS**.
 

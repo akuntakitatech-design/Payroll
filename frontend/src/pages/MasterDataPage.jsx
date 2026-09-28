@@ -5,7 +5,7 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { MASTER_CONFIG, COLUMN_LABELS, LOCATION_TYPE_LABELS } from "@/lib/masterConfig";
 import { formatCurrency, formatDate, boolLabel } from "@/lib/format";
-import PageHeader, { PageBody } from "@/components/common/PageHeader";
+import PageHeader, { PageBody, SectionHeader } from "@/components/common/PageHeader";
 import DataTable, { FilterBar, FilterSelect, Pagination, TableCard } from "@/components/common/DataTable";
 import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
@@ -24,7 +24,8 @@ const STATUS_OPTIONS = [
   { value: "archived", label: "Diarsipkan" },
 ];
 
-const MasterDataPage = ({ resourcePath }) => {
+// `embedded` (Phase 2A): dipakai di dalam halaman modul lain (mis. Manajemen Aset → Pengaturan) tanpa PageHeader sendiri.
+const MasterDataPage = ({ resourcePath, embedded = false }) => {
   const config = MASTER_CONFIG[resourcePath];
   const { can } = useAuth();
 
@@ -64,8 +65,8 @@ const MasterDataPage = ({ resourcePath }) => {
     setStatusFilter("active");
     setRelationFilter({});
     setPage(1);
-    document.title = `${config?.label || "Master Data"} · HRIS Suite`;
-  }, [resourcePath, config?.label]);
+    if (!embedded) document.title = `${config?.label || "Master Data"} · HRIS Suite`;
+  }, [resourcePath, config?.label, embedded]);
 
   const loadOptions = useCallback(async () => {
     const uniquePaths = [...new Set(relationFields.map((f) => f.relation))];
@@ -224,6 +225,7 @@ const MasterDataPage = ({ resourcePath }) => {
     if (config.currencyFields?.includes(key)) return formatCurrency(value);
     if (config.dateFields?.includes(key)) return formatDate(value);
     if (key === "location_type") return LOCATION_TYPE_LABELS[value] || value || "-";
+    if (config.valueLabels?.[key]) return config.valueLabels[key][value] || value || "-";
     if (typeof value === "boolean") return boolLabel(value);
     if (key === "code") return <span className="font-medium">{value}</span>;
     if (key === "name") return <span className="font-medium">{value}</span>;
@@ -323,20 +325,21 @@ const MasterDataPage = ({ resourcePath }) => {
 
   const hasFilters = !!debounced || statusFilter !== "active" || Object.values(relationFilter).some(Boolean);
 
+  const headerActions = can(config.resource, "create") && (
+    <Button onClick={openCreate} data-testid={embedded ? `master-add-${resourcePath}` : "page-header-primary-action"}>
+      <Plus className="mr-2 h-4 w-4" /> Tambah {config.singular}
+    </Button>
+  );
+  const Body = embedded ? "div" : PageBody;
+
   return (
     <>
-      <PageHeader
-        title={config.label}
-        subtitle={config.subtitle}
-        actions={
-          can(config.resource, "create") && (
-            <Button onClick={openCreate} data-testid="page-header-primary-action">
-              <Plus className="mr-2 h-4 w-4" /> Tambah {config.singular}
-            </Button>
-          )
-        }
-      />
-      <PageBody>
+      {embedded ? (
+        <SectionHeader title={config.label} description={config.subtitle} actions={headerActions} />
+      ) : (
+        <PageHeader title={config.label} subtitle={config.subtitle} actions={headerActions} />
+      )}
+      <Body className={embedded ? "space-y-4" : undefined}>
         <FilterBar
           search={search}
           onSearchChange={(v) => {
@@ -408,7 +411,7 @@ const MasterDataPage = ({ resourcePath }) => {
             />
           )}
         </TableCard>
-      </PageBody>
+      </Body>
 
       <FormDialog
         open={dialogOpen}

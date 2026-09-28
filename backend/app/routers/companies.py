@@ -66,6 +66,10 @@ async def seed_company_modules(company_id: str, active_keys: List[str], user_id:
         }
         doc.update(audit_fields(user_id, creating=True))
         await db.company_modules.insert_one(dict(doc))
+        if doc["is_active"] and mod["key"] == "asset":
+            from ..core.asset_service import seed_defaults  # Phase 2A: master default (idempoten)
+
+            await seed_defaults(company_id, user_id)
 
 
 # ----------------------------------------------------------------- companies
@@ -344,6 +348,11 @@ async def toggle_module(
         }
         doc.update(audit_fields(ctx.user_id, creating=True))
         await db.company_modules.insert_one(dict(doc))
+    if payload.is_active and payload.module_key == "asset":
+        # Phase 2A: master default Manajemen Aset (idempoten; tidak menimpa konfigurasi tenant).
+        from ..core.asset_service import seed_defaults
+
+        await seed_defaults(ctx.company_id, ctx.user_id)
     after = serialize(await db.company_modules.find_one(
         {"company_id": ctx.company_id, "module_key": payload.module_key}, NO_ID
     ))

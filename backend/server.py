@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import settings
 from app.core.db import close_db, ensure_indexes, get_db, warm_pool
 from app.routers import (
+    assets,
     approvals,
     attendance,
     audit_logs,
@@ -146,6 +147,7 @@ api.include_router(schedules.router)
 api.include_router(attendance.router)
 api.include_router(leave.router)
 api.include_router(overtime.router)
+api.include_router(assets.router)  # Phase 2A CP1 - Manajemen Aset
 
 app.include_router(api)
 
