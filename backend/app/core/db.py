@@ -23,6 +23,7 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import sqlalchemy as sa
@@ -187,6 +188,17 @@ TENANT_COLLECTIONS = [
     "employee_form_fields",
     "employee_form_field_scopes",
     "employee_custom_field_values",
+    # Phase 2A CP1 - Manajemen Aset (foundation). 1 baris `assets` = 1 unit fisik (tanpa kuantitas).
+    # Master configurable per tenant; `lifecycle_state` = kategori sistem otoritatif (status tenant = label).
+    "asset_categories",
+    "asset_units",
+    "asset_conditions",
+    "asset_statuses",
+    "assets",
+    "asset_events",
+    # Engine penomoran generik (CP1: ASSET_CODE; seri BAST ditambahkan di CP BAST).
+    "document_sequence_configs",
+    "document_sequence_counters",
 ]
 
 ALL_COLLECTIONS = GLOBAL_COLLECTIONS + TENANT_COLLECTIONS
@@ -203,6 +215,8 @@ _TYPES = {
     "i": lambda: Integer,
     "bi": lambda: BigInteger,
     "f": lambda: mysql.DOUBLE(),
+    # Nilai uang presisi (Phase 2A: acquisition_value). Field nominal lama tetap "f".
+    "dec": lambda: sa.Numeric(18, 2),
     "b": lambda: Boolean,
     "dt": lambda: mysql.DATETIME(fsp=6),
     "j": lambda: JSON,
@@ -467,6 +481,29 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
     # Upgrade 01I - cakupan data. Tidak ada baris = ALL_TENANT (kompatibel mundur).
     # Scope SELALU per (company_id, user_id): company_id eksplisit (juga ada di COMMON), bukan scope global per user.
     "user_data_scopes": {"company_id": "fk", "user_id": "fk", "mode": "s32", "notes": "s512"},
+    # Phase 2A CP1 - Manajemen Aset
+    "asset_categories": {"code": "s64", "name": "s", "code_prefix": "s32", "serial_number_required": "b",
+                         "default_unit_id": "fk", "description": "t", "sort_order": "i"},
+    "asset_units": {"code": "s64", "name": "s", "description": "t", "sort_order": "i"},
+    "asset_conditions": {"code": "s64", "name": "s", "is_usable": "b", "severity": "i", "description": "t", "sort_order": "i"},
+    "asset_statuses": {"code": "s64", "name": "s", "system_state": "s32", "is_default": "b", "color": "s32",
+                       "description": "t", "sort_order": "i"},
+    "assets": {
+        "asset_code": "s64", "asset_code_norm": "s64", "name": "s", "category_id": "fk", "unit_id": "fk",
+        "brand": "s", "model": "s", "serial_number": "s", "serial_number_norm": "s",
+        "acquisition_date": "s32", "acquisition_year": "i", "acquisition_value": "dec",
+        "project_id": "fk", "work_location_id": "fk", "condition_id": "fk", "status_id": "fk",
+        "lifecycle_state": "s32", "notes": "t", "source": "s32", "row_version": "i",
+    },
+    # Histori append-only (tidak ada endpoint ubah/hapus). CP1: CREATED / UPDATED / STATUS_CHANGE / RELOCATION.
+    # Kolom terkait pemegang/BAST ditambahkan aditif pada CP berikutnya (m0013+).
+    "asset_events": {
+        "asset_id": "fk", "event_type": "s32", "event_at": "dt", "actor_user_id": "fk", "from_state": "s32",
+        "to_state": "s32", "project_id": "fk", "work_location_id": "fk", "condition_id": "fk", "status_id": "fk",
+        "changes": "j", "notes": "t",
+    },
+    "document_sequence_configs": {"sequence_key": "s64", "label": "s", "format": "s", "reset_policy": "s32", "is_system": "b"},
+    "document_sequence_counters": {"sequence_key": "s64", "period_key": "s64", "next_value": "bi"},
     # Item terikat ke scope induk (scope_id) + company_id yang sama; ref_id = projects.id pada company tsb.
     "user_data_scope_items": {"company_id": "fk", "scope_id": "fk", "user_id": "fk", "dimension": "s32", "ref_id": "fk"},
     "employee_public_links": {
@@ -783,6 +820,24 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "completeness_rules": [("ux_completeness_rule_code", ["company_id", "requirement_code"], True)],
     "completeness_rule_scopes": [("ix_completeness_scope_code", ["company_id", "requirement_code"], False)],
     "user_data_scopes": [("ux_user_data_scope", ["company_id", "user_id"], True)],
+    # Phase 2A CP1 - Manajemen Aset
+    "asset_categories": [("ux_asset_category_code", ["company_id", "code"], True)],
+    "asset_units": [("ux_asset_unit_code", ["company_id", "code"], True)],
+    "asset_conditions": [("ux_asset_condition_code", ["company_id", "code"], True)],
+    "asset_statuses": [("ux_asset_status_code", ["company_id", "code"], True),
+                       ("ix_asset_status_state", ["company_id", "system_state"], False)],
+    "assets": [
+        ("ux_asset_code", ["company_id", "asset_code_norm"], True),
+        ("ux_asset_serial", ["company_id", "serial_number_norm"], True),   # NULL (SN kosong) boleh berganda
+        ("ix_asset_project_state", ["company_id", "project_id", "lifecycle_state"], False),
+        ("ix_asset_category", ["company_id", "category_id"], False),
+        ("ix_asset_location", ["company_id", "work_location_id"], False),
+        ("ix_asset_state", ["company_id", "lifecycle_state"], False),
+    ],
+    "asset_events": [("ix_asset_event_asset", ["company_id", "asset_id", "event_at"], False),
+                     ("ix_asset_event_type", ["company_id", "event_type", "event_at"], False)],
+    "document_sequence_configs": [("ux_doc_seq_config", ["company_id", "sequence_key"], True)],
+    "document_sequence_counters": [("ux_doc_seq_counter", ["company_id", "sequence_key", "period_key"], True)],
     "user_data_scope_items": [
         ("ux_user_data_scope_item_ref", ["company_id", "scope_id", "dimension", "ref_id"], True),
         ("ix_user_data_scope_item_user", ["company_id", "user_id", "dimension"], False),
@@ -1033,6 +1088,12 @@ def _coerce_in(column: Column, value: Any) -> Any:
         try:
             return int(float(value))
         except (TypeError, ValueError):
+            return None
+    if isinstance(t, sa.Numeric) and not isinstance(t, (mysql.DOUBLE, sa.Float)):
+        # DECIMAL presisi (uang): tidak lewat float. Validasi skala dilakukan di service pemanggil.
+        try:
+            return Decimal(str(value)).quantize(Decimal("0.01"))
+        except (InvalidOperation, TypeError, ValueError):
             return None
     if isinstance(t, (mysql.DOUBLE, sa.Float, sa.Numeric)):
         try:
@@ -1861,6 +1922,13 @@ class _TxWriter:
         res = await self.conn.execute(
             sa.select(table).where(compile_filter(table, flt)).limit(1).with_for_update()
         )
+        row = res.fetchone()
+        return _row_to_doc(row) if row is not None else None
+
+    async def select_one(self, table_name: str, flt: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Baca tanpa lock di dalam transaksi yang sama (tidak membuat gap-lock)."""
+        table = get_table(table_name)
+        res = await self.conn.execute(sa.select(table).where(compile_filter(table, flt)).limit(1))
         row = res.fetchone()
         return _row_to_doc(row) if row is not None else None
 

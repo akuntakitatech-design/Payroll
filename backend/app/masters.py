@@ -148,6 +148,56 @@ MASTERS: Dict[str, Dict[str, Any]] = {
         "search": ["code", "name", "category"],
         "refs": [("documents", "document_type_id", "Dokumen")],
     },
+    # ---------------------------------------------------------------- Phase 2A CP1 - Manajemen Aset
+    # Master configurable per tenant (modul `asset`, izin `asset_master`). Seed default dapat diubah.
+    "asset-categories": {
+        "resource": "asset_master",
+        "module": "asset",
+        "collection": "asset_categories",
+        "label": "Kategori Aset",
+        "fields": ["code", "name", "code_prefix", "serial_number_required", "default_unit_id", "description", "sort_order"],
+        "required": ["code", "name"],
+        "unique": ["code"],
+        "search": ["code", "name"],
+        "relations": {"default_unit_id": "asset_units"},
+        "refs": [("assets", "category_id", "Aset")],
+    },
+    "asset-units": {
+        "resource": "asset_master",
+        "module": "asset",
+        "collection": "asset_units",
+        "label": "Satuan Aset",
+        "fields": ["code", "name", "description", "sort_order"],
+        "required": ["code", "name"],
+        "unique": ["code"],
+        "search": ["code", "name"],
+        "refs": [("assets", "unit_id", "Aset"), ("asset_categories", "default_unit_id", "Kategori Aset")],
+    },
+    "asset-conditions": {
+        "resource": "asset_master",
+        "module": "asset",
+        "collection": "asset_conditions",
+        "label": "Kondisi Aset",
+        "fields": ["code", "name", "is_usable", "severity", "description", "sort_order"],
+        "required": ["code", "name"],
+        "unique": ["code"],
+        "search": ["code", "name"],
+        "refs": [("assets", "condition_id", "Aset")],
+    },
+    "asset-statuses": {
+        "resource": "asset_master",
+        "module": "asset",
+        "collection": "asset_statuses",
+        "label": "Status Aset",
+        "fields": ["code", "name", "system_state", "is_default", "color", "description", "sort_order"],
+        "required": ["code", "name", "system_state"],
+        "unique": ["code"],
+        "search": ["code", "name"],
+        # Kategori sistem lifecycle (tetap) -> label tenant configurable. Validasi di core/asset_service.py.
+        "choices": {"system_state": ["READY", "IN_USE", "PENDING_INSPECTION", "MAINTENANCE", "DAMAGED", "LOST", "DISPOSED"]},
+        "validator": "asset_status",
+        "refs": [("assets", "status_id", "Aset")],
+    },
 }
 
 MASTER_ORDER: List[str] = list(MASTERS.keys())
@@ -156,8 +206,10 @@ NUMERIC_FIELDS = {
     "latitude", "longitude", "radius_meter", "gps_accuracy_max_meter", "level", "min_salary", "max_salary",
     "duration_months", "max_extension", "validity_months", "reminder_days",
     "contract_value", "max_size_mb",
+    "severity", "sort_order",  # Phase 2A master aset
 }
 BOOLEAN_FIELDS = {
     "is_head_office", "is_supervisory", "is_permanent", "requires_contract",
     "is_extendable", "is_mandatory", "has_expiry", "geofence_enabled",
+    "serial_number_required", "is_usable", "is_default",  # Phase 2A master aset
 }

@@ -36,6 +36,9 @@ import {
   Palette,
   Gauge,
   UserCheck,
+  Package,
+  PackageSearch,
+  Settings2,
 } from "lucide-react";
 
 /**
@@ -118,6 +121,16 @@ export const NAV_GROUPS = [
       { key: "my-payslips", label: "Slip Gaji Saya", to: "/payroll/my-payslips", icon: Receipt, resource: null, module: "payroll" },
     ],
   },
+  // Phase 2A CP1 - Manajemen Aset: grup top-level tersendiri (bukan submenu Data Karyawan).
+  // Visibilitas murni modul `asset` aktif + permission (tanpa cek nama role). CP1 hanya Daftar Aset + Pengaturan.
+  {
+    key: "asset",
+    label: "Manajemen Aset",
+    items: [
+      { key: "asset-list", label: "Daftar Aset", to: "/modules/asset/assets", icon: PackageSearch, resource: "asset", action: "view", module: "asset" },
+      { key: "asset-settings", label: "Pengaturan", to: "/modules/asset/settings", icon: Settings2, resource: "asset_master", action: "view", module: "asset" },
+    ],
+  },
   {
     key: "documents",
     label: "Dokumen",
@@ -152,6 +165,17 @@ export const NAV_GROUPS = [
 ];
 
 export const MODULE_INFO = {
+  asset: {
+    name: "Manajemen Aset",
+    icon: Package,
+    summary: "Master aset per unit fisik dengan kategori, lokasi, kondisi, dan status yang dapat dikonfigurasi.",
+    features: [
+      "Satu kode aset untuk satu unit fisik, kode manual atau otomatis",
+      "Serial number unik per perusahaan, wajib sesuai kategori",
+      "Project & lokasi kerja memakai master yang sudah ada",
+      "Akses mengikuti hak akses dan cakupan data project",
+    ],
+  },
   employee_core: {
     name: "Data Karyawan",
     icon: Users,

@@ -79,6 +79,10 @@ RESOURCES: Dict[str, tuple] = {
     "mobilization": ("Mobilisasi", "mobilization", ["view", "create", "edit", "delete", "approve"]),
     "finance_request": ("Permintaan Keuangan", "finance_request", ["view", "create", "edit", "delete", "approve", "export"]),
     "accounting": ("Akuntansi", "accounting", ["view", "create", "edit", "delete", "export"]),
+    # Phase 2A CP1 - Manajemen Aset (modul `asset`). Otorisasi murni berbasis permission, bukan nama role.
+    "asset": ("Aset", "asset", ["view", "create", "edit", "delete"]),
+    "asset_value": ("Nilai Perolehan Aset", "asset", ["view", "edit"]),
+    "asset_master": ("Master Aset (Kategori/Satuan/Kondisi/Status)", "asset", ["view", "create", "edit", "delete"]),
 }
 
 MODULES: List[dict] = [
@@ -92,6 +96,7 @@ MODULES: List[dict] = [
     {"key": "mobilization", "name": "Mobilisasi", "description": "Penempatan proyek, mobilisasi & demobilisasi.", "is_core": False, "icon": "Plane", "sort_order": 8, "status": "planned"},
     {"key": "finance_request", "name": "Permintaan Keuangan", "description": "Kasbon, reimbursement, permintaan dana.", "is_core": False, "icon": "Receipt", "sort_order": 9, "status": "planned"},
     {"key": "accounting", "name": "Akuntansi", "description": "Modul akuntansi opsional.", "is_core": False, "icon": "BookOpen", "sort_order": 10, "status": "planned"},
+    {"key": "asset", "name": "Manajemen Aset", "description": "Master aset per unit fisik: kategori, lokasi, kondisi, dan status aset.", "is_core": False, "icon": "Package", "sort_order": 11, "status": "available"},
 ]
 
 ROLES: List[dict] = [
@@ -104,6 +109,9 @@ ROLES: List[dict] = [
     {"key": "manager", "name": "Manager", "description": "Menyetujui pengajuan tim dan melihat data unit.", "is_system": True, "scope": "company", "sort_order": 6},
     {"key": "supervisor", "name": "Supervisor", "description": "Persetujuan tingkat pertama untuk tim.", "is_system": True, "scope": "company", "sort_order": 7},
     {"key": "employee", "name": "Karyawan", "description": "Akses self-service karyawan.", "is_system": True, "scope": "company", "sort_order": 8},
+    # Phase 2A: preset permission General Affairs (dapat diubah tenant; tidak ada logic berbasis nama role).
+    {"key": "ga_admin", "name": "GA Admin", "description": "Preset General Affairs: kelola Manajemen Aset penuh termasuk nilai perolehan dan master aset.", "is_system": True, "scope": "company", "sort_order": 20},
+    {"key": "ga_staff", "name": "GA Staff", "description": "Preset staf General Affairs: kelola data aset harian tanpa nilai perolehan dan konfigurasi master.", "is_system": True, "scope": "company", "sort_order": 21},
 ]
 
 WILDCARD = "*:*"
@@ -231,6 +239,16 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "payslip:view_own",
     ]
 
+    # Phase 2A CP1 - Manajemen Aset (preset; tenant bebas mengubah / memberi ke role lain mis. HRGA Admin)
+    asset_admin = (["dashboard:view", "company:view", "project:view", "work_location:view",
+                    "asset_value:view", "asset_value:edit"]
+                   + _crud(["asset", "asset_master"], ["view", "create", "edit", "delete"]))
+    asset_staff = ["dashboard:view", "company:view", "project:view", "work_location:view",
+                   "asset:view", "asset:create", "asset:edit", "asset_master:view"]
+    hr_admin = hr_admin + ["asset:view"]
+    hr_manager = hr_manager + ["asset:view"]
+    finance = finance + ["asset:view", "asset_value:view"]
+
     return {
         "super_admin": [WILDCARD],
         "tenant_admin": sorted(k for k in all_permission_keys() if k not in PLATFORM_ONLY_PERMISSIONS),
@@ -241,6 +259,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "manager": sorted(set(manager)),
         "supervisor": sorted(set(supervisor)),
         "employee": sorted(set(employee)),
+        "ga_admin": sorted(set(asset_admin)),
+        "ga_staff": sorted(set(asset_staff)),
     }
 
 

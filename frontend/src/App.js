@@ -58,6 +58,9 @@ import TimeImportPage from "@/pages/attendance/TimeImportPage";
 import TimeSettingsPage from "@/pages/attendance/TimeSettingsPage";
 // Time Management V1 — Cuti & Lembur
 import LeaveOvertimeModuleLayout from "@/pages/leave/LeaveOvertimeModuleLayout";
+import AssetModuleLayout from "@/pages/asset/AssetModuleLayout";
+import AssetListPage from "@/pages/asset/AssetListPage";
+import AssetSettingsPage from "@/pages/asset/AssetSettingsPage";
 import LeaveOvertimeOverviewPage from "@/pages/leave/LeaveOvertimeOverviewPage";
 import LeaveRequestsPage from "@/pages/leave/LeaveRequestsPage";
 import OvertimePage from "@/pages/leave/OvertimePage";
@@ -187,6 +190,12 @@ const AppRoutes = () => (
         <Route path="lembur" element={<OvertimePage />} />
         <Route path="saldo" element={<LeaveBalancesPage />} />
         <Route path="persetujuan" element={<LeaveOvertimeApprovalsPage />} />
+      </Route>
+      {/* Phase 2A CP1 - Manajemen Aset: hanya Daftar Aset + Pengaturan. /modules/asset -> halaman pertama yang diizinkan. */}
+      <Route path="/modules/asset" element={<AssetModuleLayout />}>
+        <Route path="assets" element={<AssetListPage />} />
+        <Route path="settings" element={<AssetSettingsPage />} />
+        <Route path="*" element={<Navigate to="/modules/asset" replace />} />
       </Route>
       <Route path="/modules/:moduleKey" element={<ModulePlaceholderPage />} />
       <Route path="*" element={<NotFoundPage />} />

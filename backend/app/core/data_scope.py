@@ -159,6 +159,35 @@ def with_scope(flt: Optional[Dict[str, Any]], scope: DataScope, field_name: str 
     return out
 
 
+# ------------------------------------------------------------------ project-scoped records (Phase 2A: aset)
+# Record yang punya kolom project_id sendiri (mis. `assets.project_id`). Filosofi sama dengan 01I:
+# ALL_TENANT = tanpa batasan; SELECTED_PROJECTS = project_id IN allowed (NULL/tanpa project TIDAK terlihat);
+# scope kosong = tidak ada data. Dieksekusi di SQL (fragmen `$sql`), bukan difilter di Python.
+def project_scope_clause(scope: DataScope, column):
+    if scope.is_all:
+        return None
+    if not scope.project_ids:
+        return sa.false()
+    return sa.and_(column.isnot(None), column.in_(sorted(scope.project_ids)))
+
+
+def with_project_scope(flt: Optional[Dict[str, Any]], scope: DataScope, field_name: str = "project_id") -> Dict[str, Any]:
+    out: Dict[str, Any] = dict(flt or {})
+    if scope.is_all:
+        return out
+    frag = (lambda t, s=scope, f=field_name: project_scope_clause(s, t.c[f]))
+    prev = out.get("$sql")
+    out["$sql"] = ([*prev] if isinstance(prev, (list, tuple)) else ([prev] if prev else [])) + [frag]
+    return out
+
+
+def assert_project_record_visible(scope: DataScope, record: Optional[Dict[str, Any]], field_name: str = "project_id") -> Dict[str, Any]:
+    """404 generik bila record tidak ada atau project-nya di luar scope caller (tanpa membocorkan keberadaan)."""
+    if not record or not scope.allows_project(record.get(field_name)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND_MSG)
+    return record
+
+
 # ------------------------------------------------------------------ checks
 async def employee_in_scope(scope: DataScope, employee_id: Optional[str]) -> bool:
     if not employee_id:

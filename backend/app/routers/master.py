@@ -13,11 +13,38 @@ from ..masters import BOOLEAN_FIELDS, MASTERS, NUMERIC_FIELDS
 router = APIRouter(prefix="/master", tags=["Master Data"])
 
 
-def _cfg(resource_path: str) -> Dict[str, Any]:
+def _cfg(resource_path: str, ctx: Optional[AuthContext] = None) -> Dict[str, Any]:
     cfg = MASTERS.get(resource_path)
     if not cfg:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Jenis master data tidak dikenal.")
+    # Phase 2A: master milik modul non-core (mis. `asset`) mengikuti Aktivasi Modul, sama seperti require_permission.
+    if ctx is not None and cfg.get("module") and not ctx.has_module(cfg["module"]):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Modul terkait belum diaktifkan untuk perusahaan {(ctx.company or {}).get('name')}. "
+            "Aktifkan modul di menu Aktivasi Modul.",
+        )
     return cfg
+
+
+async def _run_validator(cfg: Dict[str, Any], company_id: str, op: str, data: Dict[str, Any],
+                         record_id: Optional[str] = None) -> None:
+    """Validator khusus per master (opsional, kunci `validator` di MASTERS). op: create|update|status|delete."""
+    name = cfg.get("validator")
+    if not name:
+        return
+    from ..core.asset_service import MASTER_VALIDATORS  # import lokal: hindari siklus
+    await MASTER_VALIDATORS[name](company_id, op, data, record_id)
+
+
+async def _run_post_hook(cfg: Dict[str, Any], company_id: str, record: Optional[Dict[str, Any]]) -> None:
+    name = cfg.get("validator")
+    if not name or not record:
+        return
+    from ..core.asset_service import MASTER_POST_HOOKS
+    hook = MASTER_POST_HOOKS.get(name)
+    if hook:
+        await hook(company_id, record)
 
 
 def _coerce(cfg: Dict[str, Any], payload: Dict[str, Any], partial: bool) -> Dict[str, Any]:
@@ -59,6 +86,12 @@ def _coerce(cfg: Dict[str, Any], payload: Dict[str, Any], partial: bool) -> Dict
             )
     if "code" in data and data["code"]:
         data["code"] = str(data["code"]).upper()
+    for field, allowed_values in (cfg.get("choices") or {}).items():
+        if field in data and data[field] not in allowed_values:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Nilai kolom '{field}' tidak valid. Pilihan: {', '.join(allowed_values)}.",
+            )
     return data
 
 
@@ -134,7 +167,7 @@ async def list_master(
     sort_dir: str = "desc",
     ctx: AuthContext = Depends(get_auth),
 ):
-    cfg = _cfg(resource_path)
+    cfg = _cfg(resource_path, ctx)
     if not ctx.has_permission(cfg["resource"], "view"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"Anda tidak memiliki hak akses untuk melihat {cfg['label']}.")
     filters: Dict[str, Any] = {}
@@ -157,7 +190,9 @@ async def list_master(
 @router.get("/{resource_path}/options")
 async def options_master(resource_path: str, ctx: AuthContext = Depends(get_auth)):
     """Lightweight list for dropdowns - avoids repeated data entry."""
-    cfg = _cfg(resource_path)
+    cfg = _cfg(resource_path, ctx)
+    if cfg.get("module") and not (ctx.has_permission(cfg["resource"], "view") or ctx.has_permission(cfg["module"], "view")):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"Anda tidak memiliki hak akses untuk melihat {cfg['label']}.")
     repo = TenantRepository(cfg["collection"], ctx.company_id)
     rows = await repo.all(filters={"status": "active"})
     return {
@@ -171,7 +206,7 @@ async def options_master(resource_path: str, ctx: AuthContext = Depends(get_auth
 async def create_master(
     resource_path: str, payload: Dict[str, Any] = Body(...), ctx: AuthContext = Depends(get_auth)
 ):
-    cfg = _cfg(resource_path)
+    cfg = _cfg(resource_path, ctx)
     if not ctx.has_permission(cfg["resource"], "create"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"Anda tidak memiliki hak akses untuk menambah {cfg['label']}.")
     data = _coerce(cfg, payload, partial=False)
@@ -179,14 +214,16 @@ async def create_master(
     for field in cfg.get("unique", []):
         await repo.ensure_unique(field, data.get(field), label=field.upper())
     await _validate_relations(cfg, ctx.company_id, data)
+    await _run_validator(cfg, ctx.company_id, "create", data)
     created = await repo.create(data, ctx.user_id)
+    await _run_post_hook(cfg, ctx.company_id, created)
     await log_action(ctx, "create", cfg["resource"], created["id"], created.get("name"), after=created)
     return created
 
 
 @router.get("/{resource_path}/{record_id}")
 async def get_master(resource_path: str, record_id: str, ctx: AuthContext = Depends(get_auth)):
-    cfg = _cfg(resource_path)
+    cfg = _cfg(resource_path, ctx)
     if not ctx.has_permission(cfg["resource"], "view"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Anda tidak memiliki hak akses untuk data ini.")
     repo = TenantRepository(cfg["collection"], ctx.company_id)
@@ -202,7 +239,7 @@ async def update_master(
     payload: Dict[str, Any] = Body(...),
     ctx: AuthContext = Depends(get_auth),
 ):
-    cfg = _cfg(resource_path)
+    cfg = _cfg(resource_path, ctx)
     if not ctx.has_permission(cfg["resource"], "edit"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"Anda tidak memiliki hak akses untuk mengubah {cfg['label']}.")
     data = _coerce(cfg, payload, partial=True)
@@ -214,7 +251,9 @@ async def update_master(
         if field in data:
             await repo.ensure_unique(field, data[field], exclude_id=record_id, label=field.upper())
     await _validate_relations(cfg, ctx.company_id, data, record_id=record_id)
+    await _run_validator(cfg, ctx.company_id, "update", data, record_id)
     before, after = await repo.update(record_id, data, ctx.user_id)
+    await _run_post_hook(cfg, ctx.company_id, after)
     await log_action(ctx, "update", cfg["resource"], record_id, after.get("name"), before=before, after=after)
     return after
 
@@ -226,7 +265,7 @@ async def set_master_status(
     payload: Dict[str, Any] = Body(...),
     ctx: AuthContext = Depends(get_auth),
 ):
-    cfg = _cfg(resource_path)
+    cfg = _cfg(resource_path, ctx)
     if not ctx.has_permission(cfg["resource"], "edit"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Anda tidak memiliki hak akses untuk mengubah status data ini.")
     new_status = payload.get("status")
@@ -236,6 +275,8 @@ async def set_master_status(
             "Status harus salah satu dari: active, inactive, archived.",
         )
     repo = TenantRepository(cfg["collection"], ctx.company_id)
+    await repo.get(record_id)
+    await _run_validator(cfg, ctx.company_id, "status", {"status": new_status}, record_id)
     before, after = await repo.set_status(record_id, new_status, ctx.user_id)
     label = {"active": "diaktifkan", "inactive": "dinonaktifkan", "archived": "diarsipkan"}[new_status]
     await log_action(
@@ -247,7 +288,7 @@ async def set_master_status(
 @router.delete("/{resource_path}/{record_id}")
 async def delete_master(resource_path: str, record_id: str, ctx: AuthContext = Depends(get_auth)):
     """Hard delete is only allowed when the record is not referenced anywhere."""
-    cfg = _cfg(resource_path)
+    cfg = _cfg(resource_path, ctx)
     if not ctx.has_permission(cfg["resource"], "delete"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"Anda tidak memiliki hak akses untuk menghapus {cfg['label']}.")
     repo = TenantRepository(cfg["collection"], ctx.company_id)
@@ -260,6 +301,7 @@ async def delete_master(resource_path: str, record_id: str, ctx: AuthContext = D
                 f"{cfg['label']} '{doc.get('name')}' masih dipakai oleh {used} data {label}. "
                 f"Nonaktifkan data ini agar riwayat tetap aman, atau pindahkan {label} tersebut terlebih dahulu.",
             )
+    await _run_validator(cfg, ctx.company_id, "delete", {}, record_id)
     before = await repo.hard_delete(record_id)
     await log_action(ctx, "delete", cfg["resource"], record_id, doc.get("name"), before=before)
     return {"message": f"{cfg['label']} '{doc.get('name')}' berhasil dihapus."}
