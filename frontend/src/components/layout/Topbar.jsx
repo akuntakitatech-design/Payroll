@@ -18,6 +18,7 @@ import { SidebarContent, usePlatformMode } from "./Sidebar";
 import GlobalSearch from "./GlobalSearch";
 import NotificationBell from "./NotificationBell";
 import ReadOnlyPill from "./ReadOnlyPill";
+import { DataScopeBadge, scopeState } from "@/components/access/DataScopeBadge";
 
 const ROLE_LABELS = {
   super_admin: "Platform Admin",
@@ -32,7 +33,7 @@ const ROLE_LABELS = {
 };
 
 const Topbar = () => {
-  const { user, roleKeys, logout, isSuperAdmin } = useAuth();
+  const { user, roleKeys, logout, isSuperAdmin, dataScope, company } = useAuth();
   const navigate = useNavigate();
   const platformMode = usePlatformMode();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -91,6 +92,14 @@ const Topbar = () => {
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
         <ReadOnlyPill />
+        {!platformMode && company && dataScope && scopeState(dataScope).kind !== "all" && (
+          <DataScopeBadge
+            scope={dataScope}
+            compact
+            className="hidden max-w-[16rem] md:inline-flex"
+            testId="topbar-data-scope-indicator"
+          />
+        )}
         {!platformMode && <NotificationBell />}
 
         <span className="hidden h-6 w-px bg-border sm:inline-block" aria-hidden="true" />
@@ -123,6 +132,12 @@ const Topbar = () => {
             <DropdownMenuLabel className="space-y-0.5">
               <p className="text-sm font-semibold">{user?.full_name}</p>
               <p className="truncate text-xs font-normal text-muted-foreground">{user?.email}</p>
+              {!platformMode && company && (
+                <div className="pt-1.5" data-testid="user-menu-data-scope">
+                  <p className="text-[11px] font-normal text-muted-foreground">Cakupan Data</p>
+                  <DataScopeBadge scope={dataScope} className="mt-0.5" testId="user-menu-data-scope-badge" />
+                </div>
+              )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {isSuperAdmin && (

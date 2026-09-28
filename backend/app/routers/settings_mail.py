@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from ..core.audit import log_action
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize_list
+from ..core.data_scope import full_scope_dependency  # Upgrade 01I
 from ..core.deps import AuthContext, require_permission
 from ..core.mailer import SECURITY_MODES, MailerError, SmtpConfig, send_test_email
 from ..core.reminder_mail import DEFAULT_WINDOWS
@@ -205,7 +206,8 @@ async def update_reminder(
 
 
 @router.get("/reminder/preview")
-async def preview_reminder(ctx: AuthContext = Depends(require_permission("settings", "view"))):
+# Upgrade 01I: digest berisi kontrak/sertifikasi/dokumen seluruh karyawan (tenant-wide) -> cakupan penuh saja.
+async def preview_reminder(ctx: AuthContext = Depends(full_scope_dependency(require_permission("settings", "view")))):
     """Pratinjau isi digest tanpa mengirim email."""
     from ..core.reminder_mail import build_reminder_digest
 
@@ -235,7 +237,7 @@ async def preview_reminder(ctx: AuthContext = Depends(require_permission("settin
 @router.post("/reminder/send-now")
 async def send_now(
     request: Request,
-    ctx: AuthContext = Depends(require_permission("settings", "config")),
+    ctx: AuthContext = Depends(full_scope_dependency(require_permission("settings", "config"))),  # Upgrade 01I
 ):
     """Kirim digest pengingat sekarang (mengabaikan jadwal & status aktif)."""
     db = get_db()

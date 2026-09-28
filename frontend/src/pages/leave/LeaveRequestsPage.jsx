@@ -28,12 +28,14 @@ import { asOptions, currentPeriodKey, dayLabel, periodOptions, useTimeCatalog } 
 import { formatDateTime } from "@/lib/format";
 
 const LeaveRequestsPage = () => {
-  const { can } = useAuth();
+  const { can, dataScope } = useAuth();
+  // Upgrade 01I: Cakupan Data terbatas -> modul ini hanya tersedia untuk data milik sendiri.
+  const scopeRestricted = dataScope?.effective_mode === "SELECTED_PROJECTS";
   const { catalog } = useTimeCatalog();
   const [period, setPeriod] = useState(currentPeriodKey());
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
-  const [mineOnly, setMineOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useState(scopeRestricted);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState([]);
@@ -64,7 +66,7 @@ const LeaveRequestsPage = () => {
           period,
           request_status: statusFilter || undefined,
           leave_type_id: typeFilter || undefined,
-          mine: mineOnly || undefined,
+          mine: mineOnly || scopeRestricted || undefined,
         },
       });
       setItems(data?.items || []);
@@ -73,7 +75,7 @@ const LeaveRequestsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [period, statusFilter, typeFilter, mineOnly]);
+  }, [period, statusFilter, typeFilter, mineOnly, scopeRestricted]);
 
   useEffect(() => {
     load();
@@ -256,7 +258,7 @@ const LeaveRequestsPage = () => {
           testId="leave-filter-type"
         />
         <div className="flex items-center gap-2 self-end pb-1">
-          <Switch id="leave-mine" checked={mineOnly} onCheckedChange={setMineOnly} data-testid="leave-filter-mine" />
+          <Switch id="leave-mine" checked={mineOnly || scopeRestricted} disabled={scopeRestricted} onCheckedChange={setMineOnly} data-testid="leave-filter-mine" />
           <Label htmlFor="leave-mine" className="text-[13px]">
             Hanya pengajuan saya
           </Label>

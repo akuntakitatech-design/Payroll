@@ -18,7 +18,7 @@ Batasan tambahan (untuk fase upgrade saat ini):
 - Tenant **`ZT01B170909`**: **jangan disentuh** (catat sebagai existing test tenant di luar scope 01E-B).
 
 ### Update fokus (fase saat ini) — 2026-09-27
-**Enhancement 01G — Flexible Employee Form Builder: LOCKED ✅** (see §15.4e). 01F LOCKED ✅ · 01G LOCKED ✅ · 01H LOCKED ✅ (see §16.7). Branch `feature/upgrade-01g-form-builder`. Production Changed: NO.
+**Enhancement 01G — Flexible Employee Form Builder: LOCKED ✅** (see §15.4e). 01F LOCKED ✅ · 01G LOCKED ✅ · 01H LOCKED ✅ (see §16.7).  **01I — Role & Data Scope: LOCKED ✅** (see Phase 17 §17.3). Branch `feature/upgrade-01g-form-builder`. Production Changed: NO.
 
 (Historical focus, older phases:)
 1) **01C Employee Profile 360** — **COMPLETED & LOCKED**.
@@ -792,8 +792,116 @@ Fixtures (synthetic, via authorized admin/HR APIs; scripts in /root/t01h, not in
 
 
 
+## Phase 17 — Upgrade 01I: Role & Data Scope (STATUS: **LOCKED ✅** — gap closing + targeted + staging m0011 + staging E2E + final regression DONE) — 2026-09-28
+
+### 17.3 Gap closing + staging + final regression (2026-09-28) — 01I: LOCKED ✅
+- **Non-Core-HR fail-closed** (`deps.require_permission` terpusat, `UNSCOPED_MODULES` = attendance, leave_overtime, payroll,
+  recruitment, performance, mobilization, finance_request, accounting + resource `audit_log`): SELECTED_PROJECTS -> **403**
+  ("Cakupan Data") untuk list/detail/write/approval operasional. Mencakup Attendance, Cuti, Lembur, Payroll, Recruitment
+  (+pipeline/konversi), Schedules/Shift/kalender/periode (`/time/*`, `/schedules`), Audit Logs; digest pengingat
+  `/mail/reminder/preview|send-now` -> full scope. ALL_TENANT tidak berubah. **Approval Workflow** (konfigurasi company-level)
+  tetap RBAC.
+  - Pengecualian **self-service** eksplisit (`require_permission(..., self_service=True)`): absen mandiri (`/attendance/me/today`,
+    `/check-in`, `/check-out`, `/attendance/me`, koreksi milik sendiri), cuti/lembur milik sendiri (`mine=true`, ajukan untuk diri
+    sendiri, batalkan milik sendiri), saldo `mine=true`, master Jenis Cuti (read). Cabang yang menyentuh karyawan lain di handler
+    tetap `require_full_scope` -> 403. `/payroll/my/*` tidak berubah.
+  - UI: Cuti & Lembur memaksa "Hanya pengajuan saya" ON + disabled untuk user restricted.
+- **Atasan di luar scope**: `GET /employees/{id}` tidak mengirim nama/ID atasan bila di luar scope caller -> `supervisor_out_of_scope: true`
+  + label "Di luar cakupan akses" (jabatan master tetap). Profil utama tetap 200. ALL_TENANT tetap melihat nama.
+- **Revoke/re-add**: cabut akses company -> semua item `(company,user)` dihapus + baris scope jadi tombstone `status=revoked`,
+  mode SELECTED_PROJECTS (company lain tidak disentuh; juga via Platform cabut Tenant Admin bila keanggotaan habis). Re-add
+  (grant akses company / Platform tambah peran dari Tenant Detail) -> **SELECTED_PROJECTS tanpa project = "Tidak ada akses data"**
+  sampai admin mengatur ulang. ALL_TENANT otomatis hanya untuk user existing saat m0011.
+- Karyawan tanpa ACTIVE assignment: tetap hanya ALL_TENANT (tidak berubah).
+- **Tests (agent-run):** `test_data_scope_01i.py` **176/176 PASS** (dev `hris_dev`, cleanup 0 sisa) · `test_hr_verification_01h.py`
+  **70/70 PASS** · `test_tenant_isolation.py` **1 passed** (aiosqlite sementara lalu dihapus; requirements tidak berubah) ·
+  frontend esbuild OK + webpack compiled (1 warning lama di EmployeeMigrationPage, tidak terkait).
+- **m0011 di `hris_staging`** (lokal): DRY-RUN -> APPLY (tabel/index sudah ada; 1 default ALL_TENANT untuk 1 keanggotaan aktif)
+  -> RERUN SKIP. Hitungan companies/users/memberships/employees/assignments tidak berubah; orphan item 0.
+- **Staging E2E** (Live Preview, fixture sintetis T01ISTG): API smoke 14/14; browser: restricted list hanya Proyek Alpha, UUID luar
+  scope -> "Data karyawan tidak ditemukan", atasan "Di luar cakupan akses (Pos Atasan …)", modul non-Core-HR 403, switch
+  "Hanya pengajuan saya" terkunci; ALL_TENANT melihat 5 karyawan + nama atasan; UsersPage kolom Cakupan, dialog ubah ke
+  Proyek Beta lalu kembali ke Semua Data; cabut akses -> baris hilang; re-add -> "Tidak ada akses data"; halaman 01H OK.
+  Testing agent iteration_22: tanpa bug produk (route Cuti yang dicoba agen salah; diverifikasi ulang manual).
+- **Cleanup**: fixture T01ISTG dihapus (0 sisa; scan teks seluruh tabel staging 0 residu); kredensial uji dihapus dari memory;
+  skrip sementara dihapus. Staging kembali ke baseline + 1 baris scope m0011.
+- Known (bukan blocker): DataTable merender kolom aksi di tabel desktop + list mobile sehingga `data-testid` aksi ganda (pola lama,
+  bukan dari 01I). Modul non-Core-HR akan dibuat scope-aware di fase berikutnya (saat ini fail-closed).
+- Production Changed: **NO**. Tidak ada push/PR/merge/deploy. 01J belum dimulai.
+
+### 17.2 Implementation checkpoint (2026-09-27) — history (superseded by §17.3)
+- Branch `feature/upgrade-01i-role-data-scope` in `/app/.repo_work/Payroll`, based on 01H `630ce8b`. Changes are synced into the working tree and **NOT committed** (per user). No push, PR, merge, deploy, or 01J.
+- **Model** (`db.py`): `user_data_scopes` stores company_id + user_id + mode (unique `(company_id,user_id)`). `user_data_scope_items` stores company_id + scope_id + user_id + dimension='project' + ref_id (unique `(company_id,scope_id,dimension,ref_id)`). New indexes: `employees(company_id,project_id)` and `employee_assignments(company_id,assignment_status,project_id,employee_id)`. The adapter supports a server-built `$sql` filter key.
+- **m0011** `migrations/m0011_role_data_scope.py` (additive, idempotent, ledger). Run on `hris_dev` only:
+  - DRY-RUN, then APPLY: 2 tables + 2 indexes created; 10 ALL_TENANT defaults, exactly one per active membership (company,user); 0 cross-company rows.
+  - RERUN: SKIP, 0 duplicates.
+  - Employee and assignment checksums unchanged.
+  - NOT run on staging. Staging tables are auto-created empty by startup `ensure_schema`; a missing row = ALL_TENANT, so staging behaviour is unchanged. The empty draft tables created by hot-reload were dropped (0 rows) and recreated with the final schema.
+- **Engine** `app/core/data_scope.py`:
+  - Scope is computed per (company, user) on every request and memoized on the request AuthContext only.
+  - super_admin, tenant_admin and company_owner always get full scope.
+  - A missing row = ALL_TENANT.
+  - SELECTED_PROJECTS uses a SQL subquery on ACTIVE `employee_assignments` (the `employees.project_id` mirror is NOT used).
+  - Fail-closed on empty items, invalid or foreign projects, or an unknown mode.
+  - Helpers: `get_scope`, `with_scope`/`scope_filter`, `employee_scope_clause`, `ensure_employee_in_scope` (generic 404), `allowed_project_ids`, `has_all_tenant`, `require_full_scope`/`full_scope_dependency` (403), `ensure_target_project_allowed`, `set_user_scope` (transactional; validates projects belong to the same company).
+- **Scope-aware endpoints:**
+  - employees: list, stats, catalog projects, detail, PUT, PATCH status, DELETE, and create (target project must be in scope).
+  - Profile 360: family, photo, timeline.
+  - 01D: assignments list, assign, transfer (target in scope), end.
+  - 01B: status-history, status-change.
+  - Documents: list, detail, preview, download, PUT, DELETE, upload. Restricted users only get employee documents in scope; company and applicant documents return 404/403.
+  - Contracts and certifications: list and all detail/write routes.
+  - 01F completeness: employee detail, reevaluate, summary, list.
+  - 01G monitoring (SQL) and its filter options.
+  - 01H: summary (SQL count), list (SQL), detail, file, approve, reject, request-revision. Scope uses the employee's current project at review time.
+  - Dashboard summary (employee-based counts; recent tenant activity hidden for restricted users).
+  - Expiry calendar (`/reminders/expiry`).
+- **Deliberately 403 for restricted users (full scope only):**
+  - Employee import: `/employees/import/*` and all of `/employee-import/*`.
+  - Config: 01F config (`employee_completeness:configure`, including bulk reevaluate) and 01G Form Builder config/preview.
+  - Exports: attendance recap, leave, overtime, audit-log, payroll run export, statutory export.
+  - Managing Cakupan Data (create user with scope / PUT scope).
+- **API:**
+  - `GET /api/users/data-scope/options`, `GET /api/users/me/data-scope`, `GET/PUT /api/users/{id}/data-scope` (audit `data_scope_update`; editing your own scope → 403).
+  - `/users` list includes `data_scope`.
+  - `POST /users` accepts optional `data_scope_mode` / `data_scope_project_ids`, validated before the account is created.
+  - `/auth/me`, login and switch-company include `data_scope`.
+- **UI:**
+  - New components: `components/access/DataScopeBadge|DataScopePicker|DataScopeDialog.jsx`.
+  - UsersPage: "Cakupan" column; "Atur Cakupan Data" action and dialog (mode + searchable multi-select + selected chips); scope picker in Tambah Pengguna; scope summary in the Edit dialog.
+  - Topbar: pill shown for restricted or no-access users; the user menu always shows "Cakupan Data".
+  - Restricted with no valid project is shown as "Tidak ada akses data".
+  - No role rename and no master Project rename.
+- **Tests (agent-run, dev `hris_dev`, R2 stub):**
+  - `tests/test_data_scope_01i.py`: **101/101 PASS**, cleanup verified (0 leftover).
+  - `tests/test_hr_verification_01h.py`: **70/70 PASS** (no 01H regression).
+  - `tests/test_tenant_isolation.py`: **PASS** (aiosqlite installed temporarily, then removed; requirements unchanged).
+  - Frontend: esbuild bundle OK and CRA "Compiled successfully".
+- **Remaining gaps before LOCKED (all closed in §17.3):**
+  1. Staging E2E: browser UI flow for Cakupan Data plus restricted-user journeys on the Live Preview.
+  2. Final regression (broad suites, plus testing agent with strict credential hygiene).
+  3. Run m0011 on staging (`hris_staging`) with dry-run → apply → rerun.
+  4. Non-Core-HR list and detail endpoints (attendance/leave/overtime/payroll/recruitment views) are NOT scope-aware yet. Only their exports are blocked, so restricted users with those permissions can still see tenant-wide rows there. Decide: block or scope in a later phase.
+  5. Employee detail supervisor name may reference an out-of-scope holder (org info only).
+  6. Scope rows are not removed when access is revoked (re-grant reuses the old scope; fail-closed direction).
+  7. Legacy employees without an ACTIVE assignment are visible only to ALL_TENANT users (by design).
+- Production Changed: **NO**.
+
+### 17.1 Audit (history)
+- Audit document: `/app/UPGRADE_01I_ROLE_DATA_SCOPE_AUDIT.md`. Baseline: 01H LOCKED (local commit `630ce8b`, unpushed).
+- Findings: RBAC = action-only (roles/permissions/user_company_roles, `require_permission`); **no data scope exists**. All Core HR employee routes (list, detail, profile, 01B, 01D, 01F, 01G links/monitoring, 01H, documents, contracts, certifications, dashboard) are TENANT + PERMISSION only, so any `employee:view/edit` holder can read and modify any tenant employee through a direct UUID. Exports (attendance/leave/overtime/payroll/audit) are unscoped.
+- Authoritative placement: 01D ACTIVE `employee_assignments`; `employees.project_id` etc. are mirrors synced in the same transaction (direct edits blocked). STANDBY (01B) does not end the assignment. Future assignments are not supported.
+- Recommended model: per user × company scope `ALL | PROJECTS(1..n)`. tenant_admin, company_owner and super_admin are forced ALL. Fail-closed (PROJECTS with no valid project → nothing visible). A missing row means ALL (keeps existing users unchanged; shown explicitly). Department/division/site: DEFER, with a dimension-generic schema.
+- Proposed additive schema (not implemented): `m0011_data_scope` → `user_data_scopes`, `user_data_scope_items(dimension='project')`, index `employees(company_id, project_id)`.
+- Enforcement: resolve scope once per request in AuthContext. SQL predicate for lists/counts/joins (01H in-Python filter becomes SQL). `get_scoped_employee()` returns a generic 404 on detail/sub-routes/writes/01H decisions. ALL-only guard for import/config/bulk. Restricted users get 403 on non-Core-HR exports (fail-closed). A route-coverage test is added.
+- Critical cases: transfer A→B means access moves at commit. Standby with no assignment is visible to ALL-scope users only. A restricted user sees full history only while the employee is in scope. 01H follows the employee's current project and approve re-checks scope.
+- UI: UsersPage "Cakupan Data" (Semua Data Perusahaan / Project Tertentu with searchable multi-select), "Cakupan" column, Topbar scope indicator, list banners.
+- Sequence (6 steps). Risk: MEDIUM-HIGH (breadth). Next: STOP for review. No code, push, PR, merge, deploy, or 01J. Production Changed: NO.
+
+
+
 ## 3) Next Actions (immediate)
-**Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 merged) · 01H — HR Verification: LOCKED ✅ (see §16.7) — final local commit, push/PR pending user approval · Production Changed: NO.**
+**Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 merged) · 01H — HR Verification: LOCKED ✅ (see §16.7) — final local commit, push/PR pending user approval · 01I — Role & Data Scope: **LOCKED ✅** (01I 176/176, 01H 70/70, staging m0011 + E2E done; local clean commit on branch `feature/upgrade-01i-role-data-scope`, push/PR pending user approval; see §17.3) · Production Changed: NO.**
 
 Status 01E (history): **01E-A DONE (checkpoint)** + **01E-B IN PROGRESS**.
 

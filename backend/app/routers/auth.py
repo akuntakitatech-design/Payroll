@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from ..core.audit import log_action, log_auth_event
 from ..core.config import settings
 from ..core.db import NO_ID, get_db, now
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import (
     AuthContext,
     accessible_companies,
@@ -67,6 +68,8 @@ async def build_session(user: Dict[str, Any], company_id: Optional[str]) -> Dict
         "permissions": sorted(info["permissions"]),
         "is_super_admin": info["is_super_admin"],
         "modules": sorted(modules),
+        # Upgrade 01I - indikator Cakupan Data (company aktif)
+        "data_scope": (await dscope.describe_scope(company_id, user["id"], info["role_keys"])) if company_id else None,
     }
 
 
@@ -201,6 +204,8 @@ async def me(ctx: AuthContext = Depends(get_auth_optional_company)):
         "permissions": sorted(ctx.permissions),
         "is_super_admin": ctx.is_super_admin,
         "modules": sorted(ctx.modules),
+        # Upgrade 01I - indikator Cakupan Data (company aktif)
+        "data_scope": (await dscope.describe_scope(ctx.company_id, ctx.user_id, ctx.role_keys)) if ctx.company_id else None,
     }
 
 

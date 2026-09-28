@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core import completeness  # Upgrade 01F
 from ..core import employee_import as engine
 from ..core.audit import log_action
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/employee-import", tags=["employee-import"])
 
 BATCHES, ROWS = "employee_import_batches", "employee_import_rows"
 COMMITTED_STATES = ("COMMITTED", "PARTIAL")
-_perm = require_permission("employee", "import")
+_perm = dscope.full_scope_dependency(require_permission("employee", "import"))  # 01I: impor massal tenant-wide -> 403 restricted
 
 
 async def _batch(ctx: AuthContext, batch_id: str) -> Dict[str, Any]:

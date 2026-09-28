@@ -10,6 +10,7 @@ from ..core.db import NO_ID, get_db
 from ..core.deps import AuthContext, require_permission
 from ..core.expiry import expiry_state, parse_date
 from ..core.policy import resolve_config
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.repo import TenantRepository
 from ..schemas import CertificationCreate, CertificationUpdate, StatusChange
 
@@ -91,6 +92,7 @@ async def list_certifications(
     ):
         if value:
             filters[key] = value
+    filters = dscope.with_scope(filters, await dscope.get_scope(ctx), "employee_id")  # Upgrade 01I - di SQL
     repo = TenantRepository("employee_certifications", ctx.company_id)
     result = await repo.list(
         q=q,
@@ -115,6 +117,7 @@ async def create_certification(
     ctx: AuthContext = Depends(require_permission("certification", "create")),
 ):
     data = payload.model_dump(exclude_none=True)
+    await dscope.ensure_employee_in_scope(ctx, data.get("employee_id"))  # Upgrade 01I - di luar cakupan -> 404
     await _validate(ctx.company_id, data, require_employee=True)
     repo = TenantRepository("employee_certifications", ctx.company_id)
     created = await repo.create(data, ctx.user_id)
@@ -130,6 +133,7 @@ async def get_certification(
 ):
     repo = TenantRepository("employee_certifications", ctx.company_id)
     item = await repo.get(certification_id)
+    await dscope.ensure_employee_in_scope(ctx, item.get("employee_id"))  # Upgrade 01I
     reminder = await resolve_config(ctx.company_id, "contract.expiry_reminder_days")
     horizon = int(reminder.get("value") or 30)
     return (await _enrich(ctx.company_id, [item], horizon))[0]
@@ -146,6 +150,9 @@ async def update_certification(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
     repo = TenantRepository("employee_certifications", ctx.company_id)
     existing = await repo.get(certification_id)
+    await dscope.ensure_employee_in_scope(ctx, existing.get("employee_id"))  # Upgrade 01I
+    if data.get("employee_id") and data["employee_id"] != existing.get("employee_id"):
+        await dscope.ensure_employee_in_scope(ctx, data["employee_id"])  # Upgrade 01I
     await _validate(ctx.company_id, {**existing, **data})
     before, after = await repo.update(certification_id, data, ctx.user_id)
     await log_action(
@@ -174,6 +181,7 @@ async def change_status(
         )
     repo = TenantRepository("employee_certifications", ctx.company_id)
     item = await repo.get(certification_id)
+    await dscope.ensure_employee_in_scope(ctx, item.get("employee_id"))  # Upgrade 01I
     before, after = await repo.set_status(certification_id, payload.status, ctx.user_id)
     await log_action(
         ctx,
@@ -195,6 +203,7 @@ async def delete_certification(
 ):
     repo = TenantRepository("employee_certifications", ctx.company_id)
     item = await repo.get(certification_id)
+    await dscope.ensure_employee_in_scope(ctx, item.get("employee_id"))  # Upgrade 01I
     before, after = await repo.update(certification_id, {"status": "deleted"}, ctx.user_id)
     await log_action(
         ctx, "delete", "certification", certification_id, item.get("name"), before=before, after=after

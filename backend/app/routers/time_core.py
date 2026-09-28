@@ -356,7 +356,9 @@ def _decorate_leave_type(row: Dict[str, Any]) -> Dict[str, Any]:
 async def list_leave_types(
     q: Optional[str] = None,
     include_inactive: bool = True,
-    ctx: AuthContext = Depends(_leave("view")),
+    # Upgrade 01I: master Jenis Cuti = konfigurasi company-level (tanpa data karyawan), dibutuhkan form
+    # pengajuan cuti mandiri -> tidak diblokir guard modul belum-scope-aware.
+    ctx: AuthContext = Depends(require_permission("leave", "view", "leave_overtime", self_service=True)),
 ):
     repo = TenantRepository("leave_types", ctx.company_id)
     filters: Dict[str, Any] = {} if include_inactive else {"status": "active"}

@@ -17,12 +17,13 @@ from ..core import form_builder as FB
 from ..core import public_form as P
 from ..core.audit import log_action
 from ..core.db import NO_ID, audit_fields, get_engine, new_id, now
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, require_permission
 from .completeness import SCOPE_COLLECTIONS
 
 router = APIRouter(prefix="/employees/update-form", tags=["employee-form-builder"])
 _view = require_permission("employee", "view")
-_conf = require_permission("employee_form", "configure")
+_conf = dscope.full_scope_dependency(require_permission("employee_form", "configure"))  # 01I: konfigurasi tenant-wide -> 403 restricted
 MODULE, RESOURCE = "employee_core", "employee_form"
 _ID_RE = re.compile(r"^[A-Za-z0-9\-]{1,64}$")
 
@@ -71,7 +72,7 @@ _ASSIGN_JOIN = """LEFT JOIN (
 
 
 async def monitoring_summary(cid: str, project_id: Optional[str] = None, department_id: Optional[str] = None,
-                             employee_status_id: Optional[str] = None) -> Dict[str, int]:
+                             employee_status_id: Optional[str] = None, scope_project_ids=None) -> Dict[str, int]:
     """DB-side aggregate (1 query, tenant-scoped, no N+1). Semantics identical to the 01G state:
     not_started = active employee without any submission row; draft = has a DRAFT; submitted = ever submitted
     (submitted_at set); pending_hr = has a PENDING_HR_VERIFICATION submission. Project = active assignment, else employee.project_id."""
@@ -86,9 +87,21 @@ async def monitoring_summary(cid: str, project_id: Optional[str] = None, departm
     if employee_status_id:
         where.append("AND e.current_employee_status_id = :status_id")
         params["status_id"] = employee_status_id
+    # Upgrade 01I: scope_project_ids None = ALL_TENANT; set (bisa kosong) = hanya karyawan dengan assignment
+    # ACTIVE pada project tsb (sumber otoritatif 01D), di SQL. Kosong -> 0 (fail-closed).
+    if scope_project_ids is not None:
+        if scope_project_ids:
+            where.append("AND e.id IN (SELECT sa1.employee_id FROM employee_assignments sa1 WHERE sa1.company_id = :cid"
+                         " AND sa1.assignment_status = 'ACTIVE' AND sa1.project_id IN :scope_pids)")
+            params["scope_pids"] = sorted(scope_project_ids)
+        else:
+            where.append("AND 1 = 0")
     q = _MON_SQL.format(assign_join=_ASSIGN_JOIN if project_id else "", where=" ".join(where))
+    stmt = sa.text(q)
+    if "scope_pids" in params:
+        stmt = stmt.bindparams(sa.bindparam("scope_pids", expanding=True))
     async with get_engine().connect() as conn:
-        row = (await conn.execute(sa.text(q), params)).mappings().one()
+        row = (await conn.execute(stmt, params)).mappings().one()
     return {k: int(row[k] or 0) for k in ("active_employees", "not_started", "draft", "submitted", "pending_hr",
                                           "revision_requested", "approved", "rejected")}  # 01H: status keputusan HR
 
@@ -97,10 +110,13 @@ async def monitoring_summary(cid: str, project_id: Optional[str] = None, departm
 async def monitoring(project_id: Optional[str] = Query(None, max_length=64), department_id: Optional[str] = Query(None, max_length=64),
                      employee_status_id: Optional[str] = Query(None, max_length=64), ctx: AuthContext = Depends(_view)):
     cid, tdb = ctx.company_id, ctx.tdb
-    summary = await monitoring_summary(cid, project_id, department_id, employee_status_id)
+    allowed = await dscope.allowed_project_ids(ctx)  # Upgrade 01I
+    summary = await monitoring_summary(cid, project_id, department_id, employee_status_id, scope_project_ids=allowed)
     opts = {}
     for key, coll in (("projects", "projects"), ("departments", "departments"), ("employee_statuses", "employee_business_statuses")):
         rows = await tdb[coll].find({"company_id": cid, "status": {"$nin": ["deleted", "inactive"]}}, {"id": 1, "name": 1, "code": 1}).to_list(1000)
+        if coll == "projects" and allowed is not None:
+            rows = [r for r in rows if r["id"] in allowed]
         opts[key] = sorted([{"id": r["id"], "label": r.get("name") or r.get("code") or r["id"]} for r in rows], key=lambda x: x["label"])
     return {"summary": summary, "filters": opts,
             "note": "Draft & kiriman belum mengubah data master sampai disetujui di menu Verifikasi Pembaruan Data (01H)."}

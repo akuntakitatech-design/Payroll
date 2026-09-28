@@ -27,11 +27,13 @@ import { useAuth } from "@/lib/auth";
 import { asOptions, currentPeriodKey, dayLabel, minutesToLabel, periodOptions, useTimeCatalog } from "@/lib/timeCatalog";
 
 const OvertimePage = () => {
-  const { can } = useAuth();
+  const { can, dataScope } = useAuth();
+  // Upgrade 01I: Cakupan Data terbatas -> modul ini hanya tersedia untuk data milik sendiri.
+  const scopeRestricted = dataScope?.effective_mode === "SELECTED_PROJECTS";
   const { catalog } = useTimeCatalog();
   const [period, setPeriod] = useState(currentPeriodKey());
   const [statusFilter, setStatusFilter] = useState("");
-  const [mineOnly, setMineOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useState(scopeRestricted);
   const [items, setItems] = useState([]);
   const [policy, setPolicy] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +61,7 @@ const OvertimePage = () => {
     setLoading(true);
     try {
       const { data } = await api.get("/overtime/requests", {
-        params: { period, request_status: statusFilter || undefined, mine: mineOnly || undefined },
+        params: { period, request_status: statusFilter || undefined, mine: mineOnly || scopeRestricted || undefined },
       });
       setItems(data?.items || []);
       setPolicy(data?.policy || null);
@@ -68,7 +70,7 @@ const OvertimePage = () => {
     } finally {
       setLoading(false);
     }
-  }, [period, statusFilter, mineOnly]);
+  }, [period, statusFilter, mineOnly, scopeRestricted]);
 
   useEffect(() => {
     load();
@@ -264,7 +266,7 @@ const OvertimePage = () => {
           testId="overtime-filter-status"
         />
         <div className="flex items-center gap-2 self-end pb-1">
-          <Switch id="ot-mine" checked={mineOnly} onCheckedChange={setMineOnly} data-testid="overtime-filter-mine" />
+          <Switch id="ot-mine" checked={mineOnly || scopeRestricted} disabled={scopeRestricted} onCheckedChange={setMineOnly} data-testid="overtime-filter-mine" />
           <Label htmlFor="ot-mine" className="text-[13px]">
             Hanya pengajuan saya
           </Label>

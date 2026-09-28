@@ -1,4 +1,6 @@
 import logging
+
+from sqlalchemy import false as sa_false  # Upgrade 01I
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -9,6 +11,7 @@ from ..core.audit import log_action
 from ..core.config import settings
 from ..core.db import NO_ID, get_db, new_id, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.repo import TenantRepository
 from ..core.storage import StorageError, get_object, guess_mime, object_path, put_object
 from ..schemas import DocumentUpdate
@@ -62,6 +65,7 @@ async def list_documents(
     ):
         if value:
             filters[key] = value
+    filters = await _scoped_doc_filters(ctx, filters)  # Upgrade 01I
     repo = TenantRepository("documents", ctx.company_id)
     result = await repo.list(
         q=q,
@@ -83,6 +87,35 @@ async def list_documents(
         item["document_type_name"] = t.get("name")
         item["document_type_category"] = t.get("category")
     return result
+
+
+async def _scoped_doc_filters(ctx: AuthContext, filters: Dict[str, Any]) -> Dict[str, Any]:
+    """Upgrade 01I: user restricted hanya melihat dokumen KARYAWAN dalam cakupannya (di SQL).
+    Dokumen perusahaan/kandidat tidak termasuk cakupan project -> tidak ditampilkan (fail-closed)."""
+    scope = await dscope.get_scope(ctx)
+    if scope.is_all:
+        return filters
+    if filters.get("owner_type") not in (None, "employee"):
+        return {**filters, "$sql": lambda t: sa_false()}
+    return dscope.with_scope({**filters, "owner_type": "employee"}, scope, "owner_id")
+
+
+async def _ensure_doc_in_scope(ctx: AuthContext, doc: Optional[Dict[str, Any]]) -> None:
+    """Upgrade 01I: dokumen di luar cakupan -> 404 generik (sama dengan tidak ada)."""
+    scope = await dscope.get_scope(ctx)
+    if scope.is_all or not doc:
+        return
+    if doc.get("owner_type") != "employee" or not await dscope.employee_in_scope(scope, doc.get("owner_id")):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, dscope.NOT_FOUND_MSG)
+
+
+async def _ensure_owner_writable_in_scope(ctx: AuthContext, owner_type: Optional[str], owner_id: Optional[str]) -> None:
+    scope = await dscope.get_scope(ctx)
+    if scope.is_all:
+        return
+    if owner_type != "employee":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, dscope.FULL_SCOPE_MSG)
+    await dscope.ensure_employee_in_scope(ctx, owner_id)
 
 
 async def _assert_applicant_writable(ctx: AuthContext, owner_type: Optional[str], owner_id: Optional[str]) -> None:
@@ -113,6 +146,7 @@ async def upload_document(
     notes: Optional[str] = Form(None),
     ctx: AuthContext = Depends(require_permission("document", "create")),
 ):
+    await _ensure_owner_writable_in_scope(ctx, owner_type, owner_id)  # Upgrade 01I
     await _assert_applicant_writable(ctx, owner_type, owner_id)
     db = get_db()
     doc_type = serialize(
@@ -190,7 +224,9 @@ async def upload_document(
 @router.get("/{document_id}")
 async def get_document(document_id: str, ctx: AuthContext = Depends(require_permission("document", "view"))):
     repo = TenantRepository("documents", ctx.company_id)
-    return await repo.get(document_id)
+    doc = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
+    return doc
 
 
 PREVIEWABLE = {
@@ -212,6 +248,7 @@ def _previewable(doc: Dict[str, Any]) -> bool:
 async def _fetch_file(document_id: str, ctx: AuthContext):
     repo = TenantRepository("documents", ctx.company_id)
     doc = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
     if not doc.get("storage_path") or doc.get("is_deleted"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Dokumen ini belum memiliki berkas terlampir.")
     try:
@@ -232,6 +269,7 @@ async def preview_info(
     """Metadata ringan untuk menampilkan pratinjau di layar tanpa mengunduh berkas."""
     repo = TenantRepository("documents", ctx.company_id)
     doc = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
     ext = (doc.get("file_extension") or "").lower()
     mime = (doc.get("mime_type") or "").lower()
     if mime.startswith("image/") or ext in {"png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"}:
@@ -305,6 +343,7 @@ async def update_document(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
     repo = TenantRepository("documents", ctx.company_id)
     existing = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, existing)  # Upgrade 01I
     await _assert_applicant_writable(ctx, existing.get("owner_type"), existing.get("owner_id"))
     before, after = await repo.update(document_id, data, ctx.user_id)
     await log_action(ctx, "update", "document", document_id, after.get("name"), before=before, after=after)
@@ -319,6 +358,7 @@ async def delete_document(
     """Soft delete - object storage has no delete API, and history must stay auditable."""
     repo = TenantRepository("documents", ctx.company_id)
     doc = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
     await _assert_applicant_writable(ctx, doc.get("owner_type"), doc.get("owner_id"))
     before, after = await repo.update(
         document_id, {"is_deleted": True, "status": "archived"}, ctx.user_id

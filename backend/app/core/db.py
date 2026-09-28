@@ -177,6 +177,10 @@ TENANT_COLLECTIONS = [
     "employee_public_links",
     "employee_update_submissions",
     "employee_submission_files",
+    # Upgrade 01I - Role & Data Scope: cakupan data per user per tenant (mode ALL_TENANT | SELECTED_PROJECTS)
+    # + item cakupan (dimension="project" di 01I; skema generik untuk dimensi berikutnya).
+    "user_data_scopes",
+    "user_data_scope_items",
     # Enhancement 01G - Form Builder: konfigurasi section/field per tenant (core field = katalog whitelist
     # 01G; custom field = definisi `cf_*`), scope tampil per field, dan nilai custom resmi (ditulis 01H).
     "employee_form_sections",
@@ -460,6 +464,11 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
     # Upgrade 01F - snapshot. completeness_status: LENGKAP | BELUM_LENGKAP | EXCLUDED
     # Upgrade 01G - hanya HASH token yang disimpan (token mentah tidak pernah disimpan/di-log).
     # Sesi publik (setelah verifikasi identitas) melekat pada link: satu sesi aktif per link.
+    # Upgrade 01I - cakupan data. Tidak ada baris = ALL_TENANT (kompatibel mundur).
+    # Scope SELALU per (company_id, user_id): company_id eksplisit (juga ada di COMMON), bukan scope global per user.
+    "user_data_scopes": {"company_id": "fk", "user_id": "fk", "mode": "s32", "notes": "s512"},
+    # Item terikat ke scope induk (scope_id) + company_id yang sama; ref_id = projects.id pada company tsb.
+    "user_data_scope_items": {"company_id": "fk", "scope_id": "fk", "user_id": "fk", "dimension": "s32", "ref_id": "fk"},
     "employee_public_links": {
         "employee_id": "fk", "token_hash": "s64", "token_hint": "s32", "verification_mode": "s32",
         "expires_at": "dt", "failed_attempts": "i", "total_failed_attempts": "i", "locked_until": "dt",
@@ -717,6 +726,7 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("ix_employee_number", ["company_id", "employee_number"], False),
         ("ix_employee_name", ["company_id", "full_name"], False),
         ("ix_employee_department", ["company_id", "department_id"], False),
+        ("ix_employee_project", ["company_id", "project_id"], False),  # Upgrade 01I - filter cakupan
         # Satu kandidat hanya boleh menjadi satu karyawan (NULL dibolehkan untuk karyawan non-rekrutmen)
         ("uq_employee_candidate", ["company_id", "candidate_id"], True),
     ],
@@ -759,6 +769,8 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     ],
     "employee_assignments": [
         ("ix_employee_assignment_employee", ["company_id", "employee_id", "assignment_status"], False),
+        # Upgrade 01I - subquery cakupan: assignment ACTIVE per project (sumber otoritatif 01D).
+        ("ix_employee_assignment_project", ["company_id", "assignment_status", "project_id", "employee_id"], False),
     ],
     "employee_import_batches": [
         ("ix_employee_import_batch_recent", ["company_id", "created_at"], False),
@@ -770,6 +782,11 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     ],
     "completeness_rules": [("ux_completeness_rule_code", ["company_id", "requirement_code"], True)],
     "completeness_rule_scopes": [("ix_completeness_scope_code", ["company_id", "requirement_code"], False)],
+    "user_data_scopes": [("ux_user_data_scope", ["company_id", "user_id"], True)],
+    "user_data_scope_items": [
+        ("ux_user_data_scope_item_ref", ["company_id", "scope_id", "dimension", "ref_id"], True),
+        ("ix_user_data_scope_item_user", ["company_id", "user_id", "dimension"], False),
+    ],
     "employee_public_links": [
         ("ux_public_link_token", ["token_hash"], True),
         ("ux_public_link_session", ["session_hash"], True),
@@ -1197,6 +1214,12 @@ def compile_filter(table: Table, flt: Optional[Dict[str, Any]]):
         if key == "$and":
             subs = [compile_filter(table, sub) for sub in (value or [])]
             clauses.append(and_(*subs) if subs else sa.true())
+            continue
+        if key == "$sql":
+            # Upgrade 01I - klausa SQL mentah (mis. subquery cakupan data) yang dibangun di server,
+            # BUKAN dari input pengguna. Nilai: callable(table) -> ClauseElement, atau list-nya.
+            for fn in (value if isinstance(value, (list, tuple)) else [value]):
+                clauses.append(fn(table) if callable(fn) else fn)
             continue
         if key == "$nor":
             subs = [compile_filter(table, sub) for sub in (value or [])]

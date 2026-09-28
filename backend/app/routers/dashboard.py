@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends
 
 from ..core.db import ASCENDING, DESCENDING, NO_ID, get_db, serialize_list
+from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, get_auth
 from ..core.policy import resolve_config
 from ..core.rbac import MODULES
@@ -63,6 +64,14 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
     reminder = await resolve_config(cid, "contract.expiry_reminder_days")
     horizon_days = int(reminder.get("value") or 30)
     horizon = today + timedelta(days=horizon_days)
+    # Upgrade 01I - angka berbasis karyawan mengikuti Cakupan Data (di SQL). ALL_TENANT -> tidak berubah.
+    scope = await dscope.get_scope(ctx)
+
+    def _emp(flt, field="id"):
+        return dscope.with_scope(flt, scope, field)
+
+    def _doc(flt):
+        return flt if scope.is_all else dscope.with_scope({**flt, "owner_type": "employee"}, scope, "owner_id")
 
     # ------------------------------------------------------------------
     # Gelombang 1: seluruh query yang tidak saling bergantung, dijalankan
@@ -74,35 +83,35 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
     ]
 
     other_tasks = [
-        db.documents.count_documents({"company_id": cid, "is_deleted": {"$ne": True}}),
-        db.employees.count_documents({"company_id": cid, "status": "active"}),
+        db.documents.count_documents(_doc({"company_id": cid, "is_deleted": {"$ne": True}})),
+        db.employees.count_documents(_emp({"company_id": cid, "status": "active"})),
         db.employee_contracts.count_documents(
-            {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}
+            _emp({"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}, "employee_id")
         ),
         db.employee_certifications.count_documents(
-            {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}
+            _emp({"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}, "employee_id")
         ),
         db.company_modules.count_documents({"company_id": cid, "is_active": True}),
         db.config_overrides.count_documents({"company_id": cid, "status": "active"}),
         db.user_company_roles.find({"company_id": cid, "status": "active"}, NO_ID).to_list(5000),
         db.documents.find(
-            {"company_id": cid, "is_deleted": {"$ne": True}, "expiry_date": {"$nin": [None, ""]}},
+            _doc({"company_id": cid, "is_deleted": {"$ne": True}, "expiry_date": {"$nin": [None, ""]}}),
             NO_ID,
         ).to_list(2000),
         db.employee_contracts.find(
-            {
+            _emp({
                 "company_id": cid,
                 "status": {"$nin": ["deleted", "archived"]},
                 "end_date": {"$nin": [None, ""]},
-            },
+            }, "employee_id"),
             NO_ID,
         ).to_list(5000),
         db.employee_certifications.find(
-            {
+            _emp({
                 "company_id": cid,
                 "status": {"$nin": ["deleted", "archived"]},
                 "expiry_date": {"$nin": [None, ""]},
-            },
+            }, "employee_id"),
             NO_ID,
         ).to_list(5000),
         db.projects.find(
@@ -110,11 +119,12 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
         ).to_list(1000),
         db.company_modules.find({"company_id": cid}, NO_ID).to_list(200),
         db.modules.find({}, NO_ID).sort("sort_order", ASCENDING).to_list(200),
-        db.audit_logs.find({"company_id": cid}, NO_ID)
+        # 01I: aktivitas terbaru tenant-wide tidak ditampilkan untuk user restricted (belum scope-aware)
+        db.audit_logs.find({"company_id": cid, **({} if scope.is_all else {"$sql": lambda t: t.c.id.is_(None)})}, NO_ID)
         .sort("created_at", DESCENDING)
         .limit(8)
         .to_list(8),
-        db.employees.find({"company_id": cid, "status": "active"}, NO_ID).to_list(10000),
+        db.employees.find(_emp({"company_id": cid, "status": "active"}), NO_ID).to_list(10000),
         db.departments.find({"company_id": cid, "status": "active"}, NO_ID)
         .sort("name", ASCENDING)
         .to_list(500),

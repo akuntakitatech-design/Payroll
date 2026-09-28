@@ -17,6 +17,7 @@ from ..core.deps import AuthContext, get_auth, require_permission
 from ..core.employee_numbering import next_employee_number
 from ..core import employee_status as emp_status
 from ..core import assignment as asg
+from ..core import data_scope as dscope  # Upgrade 01I - cakupan data
 from ..core.sensitive import EMPLOYEE_SENSITIVE_FIELDS, apply_employee_masking, can_view_sensitive
 from ..core.expiry import expiry_state
 from ..core.policy import resolve_config
@@ -194,10 +195,13 @@ async def catalog(ctx: AuthContext = Depends(require_permission("employee", "vie
         "religions": RELIGIONS,
         "educations": EDUCATIONS,
     }
+    allowed_projects = await dscope.allowed_project_ids(ctx)  # Upgrade 01I
     for field, (collection, _label) in REF_FIELDS.items():
         rows = await db[collection].find(
             {"company_id": ctx.company_id, "status": "active"}, NO_ID
         ).sort("name", ASCENDING).to_list(1000)
+        if collection == "projects" and allowed_projects is not None:
+            rows = [r for r in rows if r["id"] in allowed_projects]
         out[collection] = [
             {"id": r["id"], "name": r.get("name"), "code": r.get("code")} for r in rows
         ]
@@ -225,18 +229,19 @@ async def stats(ctx: AuthContext = Depends(require_permission("employee", "view"
     reminder = await resolve_config(cid, "contract.expiry_reminder_days")
     horizon = int(reminder.get("value") or 30)
 
-    total = await db.employees.count_documents({"company_id": cid, "status": {"$ne": "deleted"}})
-    active = await db.employees.count_documents({"company_id": cid, "status": "active"})
+    scope = await dscope.get_scope(ctx)  # Upgrade 01I - statistik mengikuti cakupan (di SQL)
+    total = await db.employees.count_documents(dscope.with_scope({"company_id": cid, "status": {"$ne": "deleted"}}, scope))
+    active = await db.employees.count_documents(dscope.with_scope({"company_id": cid, "status": "active"}, scope))
     contracts = serialize_list(
         await db.employee_contracts.find(
-            {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}, NO_ID
+            dscope.with_scope({"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}, scope, "employee_id"), NO_ID
         ).to_list(5000)
     )
     expiring = sum(1 for c in contracts if expiry_state(c.get("end_date"), horizon)["state"] == "due_soon")
     expired = sum(1 for c in contracts if expiry_state(c.get("end_date"), horizon)["state"] == "expired")
     certifications = serialize_list(
         await db.employee_certifications.find(
-            {"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}, NO_ID
+            dscope.with_scope({"company_id": cid, "status": {"$nin": ["deleted", "archived"]}}, scope, "employee_id"), NO_ID
         ).to_list(5000)
     )
     cert_expiring = sum(
@@ -246,7 +251,7 @@ async def stats(ctx: AuthContext = Depends(require_permission("employee", "view"
     with_contract = {c["employee_id"] for c in contracts}
     active_ids = [
         e["id"]
-        for e in await db.employees.find({"company_id": cid, "status": "active"}, NO_ID).to_list(5000)
+        for e in await db.employees.find(dscope.with_scope({"company_id": cid, "status": "active"}, scope), {"id": 1}).to_list(5000)
     ]
     without_contract = len([i for i in active_ids if i not in with_contract])
     return {
@@ -306,6 +311,7 @@ async def list_employees(
             filters["current_employee_status_id"] = {"$in": cat_ids}
         else:
             filters["current_employee_status_id"] = {"$in": cat_ids}
+    filters = dscope.with_scope(filters, await dscope.get_scope(ctx))  # Upgrade 01I - cakupan di SQL
     repo = TenantRepository("employees", ctx.company_id)
     result = await repo.list(
         q=q,
@@ -330,6 +336,8 @@ async def create_employee(
     ctx: AuthContext = Depends(require_permission("employee", "create")),
 ):
     data = payload.model_dump(exclude_none=True)
+    # Upgrade 01I: user restricted hanya boleh membuat karyawan pada project dalam cakupannya.
+    await dscope.ensure_target_project_allowed(ctx, data.get("project_id"))
     await _validate_refs(ctx.company_id, data)
     repo = TenantRepository("employees", ctx.company_id)
 
@@ -364,6 +372,7 @@ async def get_employee(
     cid = ctx.company_id
     repo = TenantRepository("employees", cid)
     employee = await repo.get(employee_id)
+    await dscope.ensure_employee_in_scope(ctx, employee_id)  # Upgrade 01I - di luar cakupan -> 404
     reminder = await resolve_config(cid, "contract.expiry_reminder_days")
     horizon = int(reminder.get("value") or 30)
     enriched = (await _enrich(cid, [employee], horizon))[0]
@@ -428,10 +437,16 @@ async def get_employee(
             enriched["supervisor_position_name"] = (sup_pos or {}).get("name")
             holders = await db.employees.find(
                 {"company_id": cid, "position_id": sup_pos_id, "status": "active", "id": {"$ne": employee_id}},
-                {"_id": 0, "full_name": 1},
+                {"_id": 0, "id": 1, "full_name": 1},
             ).to_list(2)
             if len(holders) == 1:
-                enriched["supervisor_name"] = holders[0].get("full_name")
+                # Upgrade 01I: atasan di luar Cakupan Data caller -> identitas TIDAK diekspos (marker aman),
+                # profil karyawan yang sedang dilihat tetap 200.
+                if await dscope.employee_in_scope(await dscope.get_scope(ctx), holders[0]["id"]):
+                    enriched["supervisor_name"] = holders[0].get("full_name")
+                else:
+                    enriched["supervisor_out_of_scope"] = True
+                    enriched["supervisor_name_label"] = dscope.OUT_OF_SCOPE_LABEL
 
     # Upgrade 01D: ringkasan assignment ACTIVE (detail + riwayat lewat GET /employees/{id}/assignments)
     active = await asg.active_assignment(cid, employee_id)
@@ -465,6 +480,7 @@ async def update_employee(
     for f in EMPLOYEE_SENSITIVE_FIELDS:
         if isinstance(data.get(f), str) and "*" in data[f]:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Nilai data sensitif tidak valid (mengandung karakter masking).")
+    await dscope.ensure_employee_in_scope(ctx, employee_id)  # Upgrade 01I - di luar cakupan -> 404
     await _validate_refs(ctx.company_id, data)
     repo = TenantRepository("employees", ctx.company_id)
     current = await repo.get(employee_id)
@@ -522,6 +538,7 @@ async def change_status(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Status karyawan hanya boleh: active, inactive, atau archived.",
         )
+    await dscope.ensure_employee_in_scope(ctx, employee_id)  # Upgrade 01I
     repo = TenantRepository("employees", ctx.company_id)
     employee = await repo.get(employee_id)
     current = employee.get("status")
@@ -558,6 +575,7 @@ async def delete_employee(
     employee_id: str, ctx: AuthContext = Depends(require_permission("employee", "delete"))
 ):
     db = ctx.tdb  # tenant-scoped
+    await dscope.ensure_employee_in_scope(ctx, employee_id)  # Upgrade 01I
     repo = TenantRepository("employees", ctx.company_id)
     employee = await repo.get(employee_id)
     contracts = await db.employee_contracts.count_documents(
@@ -601,7 +619,7 @@ async def _import_masters(company_id: str) -> Dict[str, List[Dict[str, Any]]]:
 
 @router.get("/import/template")
 async def import_template(
-    ctx: AuthContext = Depends(require_permission("employee", "create")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(require_permission("employee", "create")))  # 01I: restricted -> 403,
 ):
     """Unduh template Excel berisi kolom + sheet referensi master data perusahaan."""
     from fastapi import Response
@@ -622,7 +640,7 @@ async def import_template(
 
 @router.get("/import/columns")
 async def import_columns(
-    ctx: AuthContext = Depends(require_permission("employee", "create")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(require_permission("employee", "create")))  # 01I: restricted -> 403,
 ):
     """Metadata kolom template untuk ditampilkan di UI sebelum unggah."""
     from ..core.excel import template_columns
@@ -639,7 +657,7 @@ async def import_columns(
 @router.post("/import/validate")
 async def import_validate(
     file: UploadFile = File(...),
-    ctx: AuthContext = Depends(require_permission("employee", "create")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(require_permission("employee", "create")))  # 01I: restricted -> 403,
 ):
     """Dry-run: baca file, validasi tiap baris, kembalikan laporan tanpa menyimpan."""
     from ..core.excel import parse_employee_rows, validate_employee_rows
@@ -694,7 +712,7 @@ async def import_validate(
 @router.post("/import/commit", status_code=status.HTTP_201_CREATED)
 async def import_commit(
     payload: EmployeeImportCommit,
-    ctx: AuthContext = Depends(require_permission("employee", "create")),
+    ctx: AuthContext = Depends(dscope.full_scope_dependency(require_permission("employee", "create")))  # 01I: restricted -> 403,
 ):
     """Simpan baris yang sudah lolos validasi. Baris invalid diabaikan."""
     db = ctx.tdb  # tenant-scoped

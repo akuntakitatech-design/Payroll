@@ -319,8 +319,18 @@ async def get_auth(
     return ctx
 
 
-def require_permission(resource: str, action: str, module_key: Optional[str] = None):
-    """Dependency factory: enforces module activation + permission."""
+# Upgrade 01I - modul non-Core-HR yang belum scope-aware (list/detail/write) -> hanya untuk cakupan penuh.
+UNSCOPED_MODULES = frozenset({"attendance", "leave_overtime", "payroll", "recruitment", "performance",
+                              "mobilization", "finance_request", "accounting"})
+UNSCOPED_RESOURCES = frozenset({"audit_log"})  # log aktivitas tenant-wide (memuat data karyawan lintas project)
+
+
+def require_permission(resource: str, action: str, module_key: Optional[str] = None, self_service: bool = False):
+    """Dependency factory: enforces module activation + permission.
+
+    `self_service=True` (Upgrade 01I): endpoint mandiri (absen/cuti/lembur milik sendiri) dikecualikan dari
+    guard modul-belum-scope-aware. Handler-nya WAJIB memanggil `data_scope.require_full_scope` pada cabang
+    yang menyentuh data karyawan lain (mis. HR mengajukan untuk orang lain / list tanpa `mine`)."""
     needed_module = module_key or resource_module(resource)
 
     async def _dep(ctx: AuthContext = Depends(get_auth)) -> AuthContext:
@@ -335,6 +345,13 @@ def require_permission(resource: str, action: str, module_key: Optional[str] = N
                 status.HTTP_403_FORBIDDEN,
                 "Anda tidak memiliki hak akses untuk tindakan ini.",
             )
+        # Upgrade 01I - fail-closed: modul/resource yang BELUM punya penegakan Cakupan Data per project
+        # (attendance, cuti/lembur, payroll, rekrutmen, dll. + audit log tenant-wide) ditolak untuk user
+        # restricted (SELECTED_PROJECTS). User ALL_TENANT / Tenant Admin tidak berubah.
+        if not self_service and (needed_module in UNSCOPED_MODULES or resource in UNSCOPED_RESOURCES):
+            from .data_scope import require_unscoped_module_access
+
+            await require_unscoped_module_access(ctx)
         return ctx
 
     return _dep
