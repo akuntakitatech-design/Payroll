@@ -460,6 +460,9 @@ async def delete_asset(asset_id: str, ctx: AuthContext = Depends(require_permiss
     before = await _get_visible_asset(ctx, asset_id)
     if before.get("lifecycle_state") in svc.TRANSACTION_LOCKED:
         raise HTTPException(status.HTTP_409_CONFLICT, "Aset yang sedang dipakai/menunggu pemeriksaan tidak dapat dihapus.")
+    if await get_db().asset_holdings.count_documents({"company_id": ctx.company_id, "asset_id": asset_id}):
+        # CP2: aset yang pernah bertransaksi (punya histori pemegang/BAST) tidak dapat dihapus.
+        raise HTTPException(status.HTTP_409_CONFLICT, "Aset yang sudah memiliki histori penyerahan tidak dapat dihapus.")
     async with transaction() as tx:
         await tx.delete("assets", {"company_id": cid, "id": asset_id})
     await log_action(ctx, "delete", "asset", asset_id, before.get("asset_code"), before=svc.audit_view(before), module="asset")

@@ -12,6 +12,8 @@ ACTIONS = ["view", "create", "edit", "delete", "approve", "export", "config", "v
            "configure", "verify"]
 
 ACTION_LABELS = {
+    "publish": "Terbitkan",
+    "complete": "Selesaikan",
     "view": "Lihat",
     "create": "Tambah",
     "edit": "Ubah",
@@ -83,6 +85,11 @@ RESOURCES: Dict[str, tuple] = {
     "asset": ("Aset", "asset", ["view", "create", "edit", "delete"]),
     "asset_value": ("Nilai Perolehan Aset", "asset", ["view", "edit"]),
     "asset_master": ("Master Aset (Kategori/Satuan/Kondisi/Status)", "asset", ["view", "create", "edit", "delete"]),
+    # Phase 2A CP2 - siklus penyerahan / pengembalian / pemeriksaan + dokumen BAST.
+    "asset_handover": ("Penyerahan Aset", "asset", ["view", "create", "edit", "publish"]),
+    "asset_return": ("Pengembalian Aset", "asset", ["view", "create", "edit", "publish"]),
+    "asset_inspection": ("Pemeriksaan Aset", "asset", ["view", "create", "edit", "complete"]),
+    "asset_bast": ("Dokumen BAST Aset", "asset", ["view"]),
 }
 
 MODULES: List[dict] = [
@@ -245,6 +252,11 @@ def default_role_permissions() -> Dict[str, List[str]]:
                    + _crud(["asset", "asset_master"], ["view", "create", "edit", "delete"]))
     asset_staff = ["dashboard:view", "company:view", "project:view", "work_location:view",
                    "asset:view", "asset:create", "asset:edit", "asset_master:view"]
+    # Phase 2A CP2 (preset terkunci): GA Admin semua; GA Staff tanpa publish / complete.
+    asset_admin += (_crud(["asset_handover", "asset_return"], ["view", "create", "edit", "publish"])
+                    + _crud(["asset_inspection"], ["view", "create", "edit", "complete"]) + ["asset_bast:view"])
+    asset_staff += (_crud(["asset_handover", "asset_return", "asset_inspection"], ["view", "create", "edit"])
+                    + ["asset_bast:view"])
     hr_admin = hr_admin + ["asset:view"]
     hr_manager = hr_manager + ["asset:view"]
     finance = finance + ["asset:view", "asset_value:view"]

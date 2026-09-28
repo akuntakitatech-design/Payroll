@@ -53,6 +53,7 @@ AUTO_RE = re.compile(r"^AST-\d{6}$")
 GA_ADMIN_EXPECTED = {"asset:view", "asset:create", "asset:edit", "asset:delete", "asset_value:view", "asset_value:edit",
                      "asset_master:view", "asset_master:create", "asset_master:edit", "asset_master:delete"}
 GA_STAFF_EXPECTED = {"asset:view", "asset:create", "asset:edit", "asset_master:view"}
+CP1_RESOURCES = {"asset", "asset_value", "asset_master"}
 
 
 def check(name: str, cond: bool, info: str = "") -> None:
@@ -222,7 +223,10 @@ async def t_rbac_presets(env):
     db = get_db()
     for rk, exp in (("ga_admin", GA_ADMIN_EXPECTED), ("ga_staff", GA_STAFF_EXPECTED)):
         have = {p["permission_key"] for p in await db.role_permissions.find({"role_key": rk}, {"_id": 0}).to_list(500)}
-        check(f"preset {rk}: izin aset sesuai matriks", {k for k in have if k.startswith("asset")} == exp, str(sorted(have)))
+        # CP2 menambah resource siklus (asset_handover/return/inspection/bast; diuji exact di test_asset_cp2.py);
+        # matriks resource CP1 tetap harus identik.
+        cp1 = {k for k in have if k.split(":")[0] in CP1_RESOURCES}
+        check(f"preset {rk}: izin aset sesuai matriks", cp1 == exp, str(sorted(cp1)))
     role = await db.roles.find_one({"key": "ga_staff"}, {"_id": 0})
     check("preset GA Staff/GA Admin adalah role sistem (is_system)", role and role.get("is_system") is True)
     c = env.c
@@ -620,10 +624,11 @@ async def t_lifecycle_events_audit(env):
     r2 = await c.get(f"/api/assets/{env.an['id']}", headers=env.ga)
     del_log = await db.audit_logs.count_documents({"company_id": env.cid, "resource": "asset", "record_id": env.an["id"], "action": "delete"})
     check("hapus aset (asset:delete) -> 200, lalu 404, audit tercatat", r.status_code == 200 and r2.status_code == 404 and del_log == 1)
-    # tidak ada endpoint CP2+
+    # tidak ada endpoint di luar lingkup (CP2 lifecycle sah sejak Phase 2A CP2; import/export/opening/dashboard tetap terlarang)
     paths = {getattr(rt, "path", "") for rt in server.app.routes}
-    cp2 = [p for p in paths if any(x in p for x in ("handover", "/returns", "/bast", "asset-import", "/assets/import", "/assets/export", "holding"))]
-    check("tidak ada endpoint CP2+ (handover/return/BAST/import/export/holding)", cp2 == [], str(cp2))
+    out_scope = [p for p in paths if any(x in p for x in ("asset-import", "/assets/import", "/assets/export", "asset-export",
+                                                         "opening", "asset-dashboard", "/assets/dashboard"))]
+    check("tidak ada endpoint di luar lingkup (import/export/opening holding/dashboard aset)", out_scope == [], str(out_scope))
 
 
 async def main():

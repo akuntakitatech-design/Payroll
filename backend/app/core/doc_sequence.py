@@ -11,7 +11,7 @@
 
 Token format: {YYYY} {YY} {MM} {ROMAN_MM} {COMPANY} {CAT} {SEQ:n} (n = 3..9).
 CP1 hanya memakai ASSET_CODE dengan default sederhana `AST-{SEQ:6}` (tidak bergantung kategori).
-Seri BAST ditambahkan pada CP BAST (bukan CP1).
+CP2 menambah seri BAST_HANDOVER / BAST_RETURN (reset tahunan).
 """
 from __future__ import annotations
 
@@ -32,6 +32,9 @@ MAX_SKIPS = 50
 
 DEFAULTS: Dict[str, Dict[str, str]] = {
     "ASSET_CODE": {"label": "Kode Aset Otomatis", "format": "AST-{SEQ:6}", "reset_policy": NEVER},
+    # Phase 2A CP2 - nomor sistem BAST (per company + tipe + tahun; reset tahunan; tidak pernah dipakai ulang).
+    "BAST_HANDOVER": {"label": "Nomor BAST Penyerahan", "format": "BAST-AST/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
+    "BAST_RETURN": {"label": "Nomor BAST Pengembalian", "format": "BAST-RTN/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
 }
 
 

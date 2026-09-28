@@ -792,7 +792,7 @@ Fixtures (synthetic, via authorized admin/HR APIs; scripts in /root/t01h, not in
 
 
 
-## Phase 18 — Phase 2A: Manajemen Aset (STATUS: **CP0 DONE · CP1 DONE — agent-tested, STOP waiting for user review** · CP2+ NOT STARTED) — 2026-09-28
+## Phase 18 — Phase 2A: Manajemen Aset (STATUS: **CP0 DONE · CP1 DONE (PR #19 merged, staging rollout done) · CP2 IMPLEMENTED / TESTED, PENDING VISUAL UAT — NOT LOCKED**) — 2026-09-28
 Acuan wajib: `ASSET_BAST_FINAL_BLUEPRINT.md` (SHA256 `2d750349…8f67`). Canonical worktree `/app/.repo_work/Payroll`,
 branch `feature/hrga-phase2a-asset-management` (basis `c93012c` = origin/main saat branch dibuat). Belum commit/push/PR.
 Dev/test HANYA di `hris_dev` lokal via `backend/tests/dev_env_run.sh`. `/app/backend` & `/app/frontend` TIDAK dimirror.
@@ -814,6 +814,36 @@ Dev/test HANYA di `hris_dev` lokal via `backend/tests/dev_env_run.sh`. `/app/bac
 - Cleanup residue fixture 01H di hris_dev (marker T01H-/`PT Lain {RUN}`/`t01h.*@`); 30 audit public_form anonim tanpa marker dibiarkan.
 - Known staging residue: 8 tabel aset kosong (0 row) di hris_staging — tidak disentuh; keputusan cleanup/retensi setelah review.
 - Next (menunggu user): review CP1 → keputusan commit/push/PR, mirror/staging, cleanup residue staging; CP2 BELUM dimulai.
+- Update: CP1 kemudian disetujui user → commit `cff57e7`, PR #19 merged (main `9bcafb7`), rollout staging atas izin user.
+
+### 18.2 CP2 — Siklus Penyerahan, Pengembalian & Pemeriksaan Aset (IMPLEMENTED / TESTED, PENDING VISUAL UAT)
+**CP2: NOT LOCKED** — Reason: Pending Visual UAT / Staging Verification.
+Branch `feature/hrga-phase2a-asset-lifecycle` (basis main `9bcafb7`). Belum commit/push/PR/merge/deploy.
+Semua verifikasi di bawah = agent-tested di `hris_dev` lokal (via `dev_env_run.sh`), BELUM dikonfirmasi user.
+- Backend lifecycle: router `asset_lifecycle.py` (handover/return/inspection/holdings/BAST), `asset_bast_pdf.py` (ReportLab,
+  PDF on-the-fly dari `asset_basts.snapshot`, tanpa R2). Publish handover & return atomik (1 transaksi, recheck READY/holding
+  aktif/scope saat publish); snapshot immutable setelah publish; partial return → hanya holding terpilih ditutup, aset →
+  `PENDING_INSPECTION`; inspeksi hanya READY/MAINTENANCE/DAMAGED/LOST eksplisit; tanpa transfer langsung A→B; scope 01I di SQL
+  (UUID di luar scope → 404 generik); RBAC berbasis permission.
+- Active holding invariant: `ux_asset_holding_active (company_id, active_lock)`, `active_lock = asset_id` saat aktif / NULL saat
+  ditutup → per-aset (probe rollback: holding aktif ke-2 untuk aset sama ditolak 1062; residue 0). m0014 TIDAK diperlukan.
+- Migration `m0013_asset_lifecycle`: applied di hris_dev; ledger = 1 row; dry-run & rerun = SKIP (idempoten); snapshot DB
+  sebelum/sesudah tanpa diff; duplikat permission/module/role/role_permission/doc-sequence = 0. m0012 tidak berubah.
+- RBAC: 13 permission CP2. GA Admin = semua; GA Staff = view/create/edit handover/return/inspection + `asset_bast:view`, TANPA
+  `asset_handover:publish`, `asset_return:publish`, `asset_inspection:complete`. Custom role ekuivalen berperilaku sama.
+- Numbering: `BAST-AST/{YYYY}/{SEQ:6}` & `BAST-RTN/{YYYY}/{SEQ:6}` via generic doc_sequence (per company/type/tahun, reset
+  tahunan, tanpa COUNT+1, immutable).
+- Test: CP2 targeted **145/145 PASS** ×2 berturut-turut (run awal 144/145 → temuan kebocoran pencarian nama karyawan di luar
+  scope, diperbaiki); fixture cleanup residue 0 / orphan 0; global diff NONE.
+- Regression: CP1 **146/146** (test CP1 disesuaikan agar tidak melarang perluasan CP2 yang disetujui) · 01I **176/176** · 01H **70/70**.
+- Frontend (canonical): Penyerahan Aset, Pengembalian & Pemeriksaan, Dokumen BAST + nav berbasis permission.
+  esbuild PASS · `yarn build` PASS (1 warning pre-existing `EmployeeMigrationPage.jsx`, di luar CP2).
+- Lint terbatas (syntax/import file CP2) PASS; `git diff --check` bersih; boundary scan (baris tambahan + file baru CP2) PASS.
+- Staging & production TIDAK disentuh selama development CP2.
+- **Pending — Visual UAT (belum diuji langsung):** form Penyerahan Aset; Draft → Publish; BAST Penyerahan; partial return;
+  BAST Pengembalian; queue Menunggu Pemeriksaan; Complete Inspection; hasil READY / MAINTENANCE / DAMAGED / LOST; Dokumen BAST;
+  View / Download PDF; visibilitas aksi GA Staff vs GA Admin. (Percobaan screenshot lokal gagal: server tidak bind.)
+- Next (menunggu user): review laporan CP2 → rollout staging untuk visual UAT (hanya setelah izin user).
 
 ## Phase 17 — Upgrade 01I: Role & Data Scope (STATUS: **LOCKED ✅** — gap closing + targeted + staging m0011 + staging E2E + final regression DONE) — 2026-09-28
 
@@ -926,7 +956,7 @@ Dev/test HANYA di `hris_dev` lokal via `backend/tests/dev_env_run.sh`. `/app/bac
 ## 3) Next Actions (immediate)
 **Current status (2026-09-27): 01F LOCKED ✅ · 01G PUBLIC EMPLOYEE FORM LOCKED ✅ · 01G FORM BUILDER LOCKED ✅ (PR #16 merged) · 01H — HR Verification: LOCKED ✅ (see §16.7) — final local commit, push/PR pending user approval · 01I — Role & Data Scope: **LOCKED ✅** (01I 176/176, 01H 70/70, staging m0011 + E2E done; local clean commit on branch `feature/upgrade-01i-role-data-scope`, push/PR pending user approval; see §17.3) · Production Changed: NO.**
 
-**Update 2026-09-28: Phase 2A — Manajemen Aset: CP0 DONE · CP1 DONE (agent-tested, STOP waiting for user review; see §18.1) · CP2+ NOT STARTED · Production Changed: NO · Staging Changed: NO additional changes.**
+**Update 2026-09-28: Phase 2A — Manajemen Aset: CP0 DONE · CP1 DONE (PR #19 merged; see §18.1) · CP2 IMPLEMENTED / TESTED, PENDING VISUAL UAT — CP2: NOT LOCKED (see §18.2) · Production Changed: NO · Staging Changed: NO (selama CP2).**
 
 Status 01E (history): **01E-A DONE (checkpoint)** + **01E-B IN PROGRESS**.
 

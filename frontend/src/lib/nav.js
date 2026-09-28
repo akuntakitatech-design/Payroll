@@ -38,6 +38,9 @@ import {
   UserCheck,
   Package,
   PackageSearch,
+  HandCoins,
+  Undo2,
+  FileCheck2,
   Settings2,
 } from "lucide-react";
 
@@ -128,6 +131,10 @@ export const NAV_GROUPS = [
     label: "Manajemen Aset",
     items: [
       { key: "asset-list", label: "Daftar Aset", to: "/modules/asset/assets", icon: PackageSearch, resource: "asset", action: "view", module: "asset" },
+      { key: "asset-handovers", label: "Penyerahan Aset", to: "/modules/asset/handovers", icon: HandCoins, resource: "asset_handover", action: "view", module: "asset" },
+      { key: "asset-returns", label: "Pengembalian & Pemeriksaan", to: "/modules/asset/returns", icon: Undo2, module: "asset",
+        anyOf: [["asset_return", "view"], ["asset_inspection", "view"]] },
+      { key: "asset-basts", label: "Dokumen BAST", to: "/modules/asset/basts", icon: FileCheck2, resource: "asset_bast", action: "view", module: "asset" },
       { key: "asset-settings", label: "Pengaturan", to: "/modules/asset/settings", icon: Settings2, resource: "asset_master", action: "view", module: "asset" },
     ],
   },
@@ -302,6 +309,7 @@ export const filterNav = ({ can, hasModule, isPlatformAdmin = false }) =>
         !item.hidden &&
         (!item.platformOnly || isPlatformAdmin) &&
         (!item.resource || can(item.resource, item.action || "view")) &&
+        (!item.anyOf || item.anyOf.some(([res, act]) => can(res, act))) &&
         hasModule(item.module)
     ),
   })).filter((group) => group.items.length > 0);

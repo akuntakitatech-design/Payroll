@@ -196,7 +196,15 @@ TENANT_COLLECTIONS = [
     "asset_statuses",
     "assets",
     "asset_events",
-    # Engine penomoran generik (CP1: ASSET_CODE; seri BAST ditambahkan di CP BAST).
+    # Phase 2A CP2 - Siklus Penyerahan, Pengembalian & Pemeriksaan + dokumen BAST (snapshot immutable).
+    "asset_handovers",
+    "asset_handover_items",
+    "asset_holdings",
+    "asset_returns",
+    "asset_return_items",
+    "asset_inspections",
+    "asset_basts",
+    # Engine penomoran generik (CP1: ASSET_CODE; CP2: BAST_HANDOVER / BAST_RETURN).
     "document_sequence_configs",
     "document_sequence_counters",
 ]
@@ -501,6 +509,44 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "asset_id": "fk", "event_type": "s32", "event_at": "dt", "actor_user_id": "fk", "from_state": "s32",
         "to_state": "s32", "project_id": "fk", "work_location_id": "fk", "condition_id": "fk", "status_id": "fk",
         "changes": "j", "notes": "t",
+        # Phase 2A CP2 (m0013): referensi transaksi siklus aset
+        "employee_id": "fk", "holding_id": "fk", "bast_id": "fk",
+    },
+    # Phase 2A CP2 - Siklus Penyerahan, Pengembalian & Pemeriksaan (m0013_asset_lifecycle)
+    "asset_handovers": {
+        "doc_state": "s32", "employee_id": "fk", "handover_date": "s32", "project_id": "fk", "work_location_id": "fk",
+        "ga_pic_user_id": "fk", "ga_pic_name": "s", "manual_number": "s", "manual_number_norm": "s", "notes": "t",
+        "bast_id": "fk", "published_at": "dt", "published_by": "fk", "cancelled_at": "dt", "cancelled_by": "fk",
+        "row_version": "i",
+    },
+    "asset_handover_items": {"handover_id": "fk", "asset_id": "fk", "line_no": "i", "condition_id": "fk",
+                             "accessories": "t", "item_notes": "t"},
+    # Histori pemegang (append/close, tidak pernah ditimpa). active_lock = asset_id selama ACTIVE -> unik per company.
+    "asset_holdings": {
+        "asset_id": "fk", "employee_id": "fk", "handover_id": "fk", "handover_bast_id": "fk", "start_date": "s32",
+        "project_id": "fk", "work_location_id": "fk", "initial_condition_id": "fk", "accessories_out": "t",
+        "holding_status": "s32", "end_date": "s32", "return_id": "fk", "return_bast_id": "fk",
+        "return_condition_id": "fk", "accessories_in": "t", "active_lock": "s64",
+    },
+    "asset_returns": {
+        "doc_state": "s32", "employee_id": "fk", "return_date": "s32", "project_id": "fk",
+        "ga_pic_user_id": "fk", "ga_pic_name": "s", "manual_number": "s", "manual_number_norm": "s", "notes": "t",
+        "bast_id": "fk", "published_at": "dt", "published_by": "fk", "cancelled_at": "dt", "cancelled_by": "fk",
+        "row_version": "i",
+    },
+    "asset_return_items": {"return_id": "fk", "holding_id": "fk", "asset_id": "fk", "line_no": "i",
+                           "condition_id": "fk", "accessories": "t", "item_notes": "t"},
+    "asset_inspections": {
+        "return_id": "fk", "return_item_id": "fk", "asset_id": "fk", "holding_id": "fk", "employee_id": "fk",
+        "project_id": "fk", "inspection_state": "s32", "final_condition_id": "fk", "completeness": "t", "notes": "t",
+        "result_state": "s32", "inspected_by": "fk", "inspected_at": "dt", "completed_by": "fk", "completed_at": "dt",
+    },
+    # Dokumen BAST terbit (Penyerahan/Pengembalian). `snapshot` = sumber kebenaran PDF (immutable setelah terbit).
+    "asset_basts": {
+        "bast_type": "s32", "system_number": "s64", "sequence_key": "s64", "sequence_period": "s32",
+        "source_type": "s32", "source_id": "fk", "employee_id": "fk", "project_id": "fk", "bast_date": "s32",
+        "manual_number": "s", "manual_number_norm": "s", "doc_state": "s32", "snapshot": "j",
+        "issued_at": "dt", "issued_by": "fk",
     },
     "document_sequence_configs": {"sequence_key": "s64", "label": "s", "format": "s", "reset_policy": "s32", "is_system": "b"},
     "document_sequence_counters": {"sequence_key": "s64", "period_key": "s64", "next_value": "bi"},
@@ -836,6 +882,29 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     ],
     "asset_events": [("ix_asset_event_asset", ["company_id", "asset_id", "event_at"], False),
                      ("ix_asset_event_type", ["company_id", "event_type", "event_at"], False)],
+    "asset_handovers": [("ix_asset_ho_state", ["company_id", "doc_state", "handover_date"], False),
+                        ("ix_asset_ho_employee", ["company_id", "employee_id"], False),
+                        ("ix_asset_ho_project", ["company_id", "project_id"], False),
+                        ("ix_asset_ho_manual", ["company_id", "manual_number_norm"], False)],
+    "asset_handover_items": [("ux_asset_ho_item", ["company_id", "handover_id", "asset_id"], True),
+                             ("ix_asset_ho_item_asset", ["company_id", "asset_id"], False)],
+    "asset_holdings": [("ux_asset_holding_active", ["company_id", "active_lock"], True),   # maks. 1 holding ACTIVE/aset
+                       ("ix_asset_holding_asset", ["company_id", "asset_id", "holding_status"], False),
+                       ("ix_asset_holding_employee", ["company_id", "employee_id", "holding_status"], False)],
+    "asset_returns": [("ix_asset_rt_state", ["company_id", "doc_state", "return_date"], False),
+                      ("ix_asset_rt_employee", ["company_id", "employee_id"], False),
+                      ("ix_asset_rt_project", ["company_id", "project_id"], False),
+                      ("ix_asset_rt_manual", ["company_id", "manual_number_norm"], False)],
+    "asset_return_items": [("ux_asset_rt_item", ["company_id", "return_id", "asset_id"], True),
+                           ("ix_asset_rt_item_holding", ["company_id", "holding_id"], False)],
+    "asset_inspections": [("ux_asset_insp_item", ["company_id", "return_item_id"], True),
+                          ("ix_asset_insp_state", ["company_id", "inspection_state", "created_at"], False),
+                          ("ix_asset_insp_asset", ["company_id", "asset_id"], False)],
+    "asset_basts": [("ux_asset_bast_number", ["company_id", "system_number"], True),
+                    ("ux_asset_bast_source", ["company_id", "source_type", "source_id"], True),
+                    ("ix_asset_bast_type_date", ["company_id", "bast_type", "bast_date"], False),
+                    ("ix_asset_bast_manual", ["company_id", "manual_number_norm"], False),
+                    ("ix_asset_bast_project", ["company_id", "project_id"], False)],
     "document_sequence_configs": [("ux_doc_seq_config", ["company_id", "sequence_key"], True)],
     "document_sequence_counters": [("ux_doc_seq_counter", ["company_id", "sequence_key", "period_key"], True)],
     "user_data_scope_items": [
