@@ -81,11 +81,12 @@ const AssetBastPage = () => {
   return (
     <PageBody className="space-y-4">
       <div className="space-y-4" data-testid="asset-bast-page">
-        <SectionHeader title="Dokumen BAST" description="Seluruh BAST Penyerahan dan Pengembalian yang sudah terbit. PDF dibuat langsung dari isi dokumen saat terbit." />
+        <SectionHeader title="Dokumen BAST" description="Seluruh BAST Penyerahan, Pengembalian, dan Saldo Awal (Existing) yang sudah terbit. PDF dibuat langsung dari isi dokumen saat terbit." />
         <FilterBar search={search} onSearchChange={(v) => { setSearch(v); setPage(1); }} searchPlaceholder="Cari nomor sistem, nomor referensi, atau karyawan…"
           showReset={hasFilters} onReset={() => { setSearch(""); setFilters({ bast_type: "", date_from: "", date_to: "" }); setPage(1); }}>
           <FilterSelect label="Tipe" value={filters.bast_type} onChange={setFilter("bast_type")} allLabel="Semua tipe" testId="bast-filter-type"
-            options={[{ value: "HANDOVER", label: "Penyerahan" }, { value: "RETURN", label: "Pengembalian" }]} />
+            options={[{ value: "HANDOVER", label: "BAST Penyerahan" }, { value: "RETURN", label: "BAST Pengembalian" },
+              { value: "EXISTING", label: "BAST Existing / Saldo Awal" }]} />
           <div className="space-y-1">
             <Label className="text-[12px] font-medium text-muted-foreground">Dari tanggal</Label>
             <Input type="date" className="h-9 w-[10rem]" value={filters.date_from} onChange={(e) => setFilter("date_from")(e.target.value)} data-testid="bast-filter-date-from" />

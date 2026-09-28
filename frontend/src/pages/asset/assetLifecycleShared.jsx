@@ -47,7 +47,7 @@ export const INSPECTION_RESULTS = [
   { value: "LOST", label: "Hilang", help: "Hanya bila aset benar-benar tidak kembali / hilang." },
 ];
 
-export const BAST_TYPE_LABEL = { HANDOVER: "Penyerahan", RETURN: "Pengembalian" };
+export const BAST_TYPE_LABEL = { HANDOVER: "Penyerahan", RETURN: "Pengembalian", EXISTING: "Existing / Saldo Awal" };
 
 export const StateBadge = ({ state, testId, className }) => {
   const meta = STATE_META[state] || { label: state || "-", tone: "muted" };
@@ -279,7 +279,7 @@ export const InfoGrid = ({ rows, testId }) => (
 export const SnapshotView = ({ snapshot, testId = "bast-snapshot" }) => {
   if (!snapshot) return null;
   const emp = snapshot.employee || {};
-  const handover = snapshot.bast_type === "HANDOVER";
+  const condLabel = { HANDOVER: "Kondisi diserahkan", EXISTING: "Kondisi saat saldo awal" }[snapshot.bast_type] || "Kondisi diterima GA";
   return (
     <div className="space-y-4" data-testid={testId}>
       <InfoGrid
@@ -304,7 +304,7 @@ export const SnapshotView = ({ snapshot, testId = "bast-snapshot" }) => {
               <th className="px-3 py-2 font-medium">No</th>
               <th className="px-3 py-2 font-medium">Aset</th>
               <th className="px-3 py-2 font-medium">Serial</th>
-              <th className="px-3 py-2 font-medium">{handover ? "Kondisi diserahkan" : "Kondisi diterima GA"}</th>
+              <th className="px-3 py-2 font-medium">{condLabel}</th>
               <th className="px-3 py-2 font-medium">Kelengkapan</th>
             </tr>
           </thead>
@@ -314,7 +314,7 @@ export const SnapshotView = ({ snapshot, testId = "bast-snapshot" }) => {
                 <td className="px-3 py-2 tabular-nums">{it.line_no}</td>
                 <td className="px-3 py-2">
                   <div className="font-medium">{it.asset_code}</div>
-                  <div className="text-[12px] text-muted-foreground">{[it.name, it.brand, it.model].filter(Boolean).join(" · ")}</div>
+                  <div className="text-[12px] text-muted-foreground">{[it.name, it.brand, it.model, it.legacy_code && `Kode lama ${it.legacy_code}`].filter(Boolean).join(" · ")}</div>
                 </td>
                 <td className="px-3 py-2">{it.serial_number || "-"}</td>
                 <td className="px-3 py-2">{it.condition || "-"}</td>

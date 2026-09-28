@@ -253,7 +253,9 @@ async def residue_report(env) -> dict:
             "SELECT COUNT(*) FROM asset_holdings x LEFT JOIN assets a ON a.id = x.asset_id WHERE a.id IS NULL",
             "SELECT COUNT(*) FROM asset_inspections x LEFT JOIN asset_returns r ON r.id = x.return_id WHERE r.id IS NULL",
             "SELECT COUNT(*) FROM asset_basts b LEFT JOIN asset_handovers h ON h.id = b.source_id "
-            "LEFT JOIN asset_returns r ON r.id = b.source_id WHERE h.id IS NULL AND r.id IS NULL",
+            "LEFT JOIN asset_returns r ON r.id = b.source_id WHERE h.id IS NULL AND r.id IS NULL"
+            # CP3 (m0014): BAST-EXS bersumber dari asset_openings - tetap orphan bila opening-nya tidak ada.
+            + (" AND NOT EXISTS (SELECT 1 FROM asset_openings o WHERE o.id = b.source_id)" if "asset_openings" in existing else ""),
         ] + [f"SELECT COUNT(*) FROM {t} x LEFT JOIN companies c ON c.id = x.company_id WHERE c.id IS NULL" for t in CP2_TABLES]
         for sql in orphan_sql:
             k = await n(sql)

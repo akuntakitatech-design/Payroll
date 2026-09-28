@@ -179,7 +179,8 @@ async def list_assets(
         sn = svc.norm_serial(term) or ""
         sn_like = "%" + sn.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         sql.append(lambda t: sa.or_(t.c.asset_code_norm.like(up), t.c.name.like(like), t.c.serial_number_norm.like(sn_like),
-                                    t.c.brand.like(like), t.c.model.like(like)))
+                                    t.c.brand.like(like), t.c.model.like(like),
+                                    t.c.legacy_code_norm.like(up)))   # CP3: Kode Aset Lama / Nomor Inventaris
     if sql:
         flt["$sql"] = sql
     flt = dscope.with_project_scope(flt, scope)  # 01I - di SQL (list + count memakai filter yang sama)

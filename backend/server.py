@@ -10,7 +10,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import settings
 from app.core.db import close_db, ensure_indexes, get_db, warm_pool
 from app.routers import (
+    asset_import,
     asset_lifecycle,
+    asset_opening,
     assets,
     approvals,
     attendance,
@@ -150,6 +152,8 @@ api.include_router(leave.router)
 api.include_router(overtime.router)
 api.include_router(assets.router)  # Phase 2A CP1 - Manajemen Aset
 api.include_router(asset_lifecycle.router)  # Phase 2A CP2 - Penyerahan/Pengembalian/Pemeriksaan + BAST
+api.include_router(asset_opening.router)  # Phase 2A CP3 - Saldo Awal / Opening Existing Holding (BAST-EXS)
+api.include_router(asset_import.router)  # Phase 2A CP3 - Impor Master Aset & Impor Saldo Awal
 
 app.include_router(api)
 

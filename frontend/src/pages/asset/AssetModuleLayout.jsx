@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
-import { FileCheck2, HandCoins, PackageSearch, Settings2, Undo2 } from "lucide-react";
+import { FileCheck2, FileSpreadsheet, HandCoins, PackageSearch, Settings2, Undo2 } from "lucide-react";
 
 import PageHeader from "@/components/common/PageHeader";
 import EmptyState from "@/components/common/EmptyState";
@@ -16,6 +16,9 @@ export const assetTabs = (can) =>
     (can("asset_return", "view") || can("asset_inspection", "view")) &&
       { to: "/modules/asset/returns", label: "Pengembalian & Pemeriksaan", shortLabel: "Pengembalian", icon: Undo2 },
     can("asset_bast", "view") && { to: "/modules/asset/basts", label: "Dokumen BAST", icon: FileCheck2 },
+    // Phase 2A CP3 - Impor Master Aset + Saldo Awal (Opening Existing Holding)
+    (can("asset_import", "view") || can("asset_opening", "view")) &&
+      { to: "/modules/asset/imports", label: "Impor & Saldo Awal", shortLabel: "Impor", icon: FileSpreadsheet },
     can("asset_master", "view") && { to: "/modules/asset/settings", label: "Pengaturan", icon: Settings2 },
   ].filter(Boolean);
 

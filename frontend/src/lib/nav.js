@@ -40,7 +40,7 @@ import {
   PackageSearch,
   HandCoins,
   Undo2,
-  FileCheck2,
+  FileCheck2, FileSpreadsheet,
   Settings2,
 } from "lucide-react";
 
@@ -135,6 +135,8 @@ export const NAV_GROUPS = [
       { key: "asset-returns", label: "Pengembalian & Pemeriksaan", to: "/modules/asset/returns", icon: Undo2, module: "asset",
         anyOf: [["asset_return", "view"], ["asset_inspection", "view"]] },
       { key: "asset-basts", label: "Dokumen BAST", to: "/modules/asset/basts", icon: FileCheck2, resource: "asset_bast", action: "view", module: "asset" },
+      { key: "asset-imports", label: "Impor & Saldo Awal", to: "/modules/asset/imports", icon: FileSpreadsheet, module: "asset",
+        anyOf: [["asset_import", "view"], ["asset_opening", "view"]] },
       { key: "asset-settings", label: "Pengaturan", to: "/modules/asset/settings", icon: Settings2, resource: "asset_master", action: "view", module: "asset" },
     ],
   },
