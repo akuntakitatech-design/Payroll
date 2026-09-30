@@ -11,6 +11,7 @@ import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PageBody, SectionHeader } from "@/components/common/PageHeader";
 import { AssetDocumentsPanel } from "@/pages/asset/AssetDocumentsPanel";
+import TransactionAttachments from "@/pages/asset/TransactionAttachments";
 import DataTable, { Pagination, TableCard } from "@/components/common/DataTable";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import EmptyState from "@/components/common/EmptyState";
@@ -319,6 +320,7 @@ const OpeningForm = ({ open, onOpenChange, options, editing, onSaved, can }) => 
   const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const attachRef = useRef(null);
   useEffect(() => {
     if (!open) return;
     setQ("");
@@ -356,6 +358,10 @@ const OpeningForm = ({ open, onOpenChange, options, editing, onSaved, can }) => 
       if (publish) res = await api.post(editing ? `/asset-openings/${editing.id}/save-and-publish` : "/asset-openings/save-and-publish", payload());
       else res = editing ? await api.put(`/asset-openings/${editing.id}`, payload()) : await api.post("/asset-openings", payload());
       toast.success(publish ? `Saldo awal diterbitkan: ${res.data.bast_number}` : "Draft saldo awal tersimpan.");
+      const flush = attachRef.current ? await attachRef.current.flushPending(res.data.id, res.data.doc_state) : { uploaded: 0, failed: 0 };
+      if (flush.failed > 0) {
+        toast.warning(`Transaksi berhasil disimpan. ${flush.failed} lampiran gagal diunggah. Silakan coba unggah kembali dari panel Dokumen.`, { duration: 9000 });
+      }
       onSaved(res.data);
     } catch (e) {
       toast.error(errorMessage(e));   // input tetap di form agar dapat diperbaiki
@@ -428,6 +434,9 @@ const OpeningForm = ({ open, onOpenChange, options, editing, onSaved, can }) => 
               </AssetItemCard>
             ))}
           </div>
+          <TransactionAttachments ref={attachRef} sourceType="OPENING_EXISTING"
+            sourceId={editing ? editing.id : null} docState="DRAFT"
+            disabled={busy} testId="opening-attachments" />
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
             {canSave && <Button variant="outline" onClick={() => save(false)} disabled={busy || !valid} data-testid="opening-form-save-button">Simpan Draft</Button>}
             {can("asset_opening", "publish") && canSave && (

@@ -123,6 +123,25 @@ async def t_upload(env):
     check("upload dokumen tidak mengubah immutable BAST snapshot", snap_before == snap_after)
 
 
+async def t_no_dup(env):
+    """Revisi UX CP4: lampiran diunggah terpisah dari transaksi. Upload gagal TIDAK boleh menggandakan/mengubah
+    transaksi, dan aturan DRAFT (non-BAST boleh, SIGNED_BAST ditolak) ditegakkan di backend (bukan hanya frontend)."""
+    db = get_db()
+    sid = env.ho_draft["id"]
+    ho_before = await db.asset_handovers.count_documents({"company_id": env.cid})
+    doc_before = await db.asset_documents.count_documents({"company_id": env.cid, "source_type": "HANDOVER", "source_id": sid})
+    r = await up(env, env.u, "HANDOVER", sid, name="gagal.txt", data=b"bukan pdf")
+    check("revisi: lampiran gagal (format ditolak) -> 422", r.status_code == 422, str(r.status_code))
+    ho_after = await db.asset_handovers.count_documents({"company_id": env.cid})
+    doc_after = await db.asset_documents.count_documents({"company_id": env.cid, "source_type": "HANDOVER", "source_id": sid})
+    check("revisi: lampiran gagal TIDAK menggandakan/mengubah transaksi (jumlah transaksi & dokumen tetap)",
+          ho_after == ho_before and doc_after == doc_before, f"ho {ho_before}->{ho_after} doc {doc_before}->{doc_after}")
+    r_ok = await up(env, env.u, "HANDOVER", sid, "CONDITION_PHOTO", "kondisi-draft.png", PNG)
+    check("revisi: DRAFT menerima lampiran non-BAST (Foto Kondisi) langsung -> 201", r_ok.status_code == 201, r_ok.text[:160])
+    r_bast = await up(env, env.u, "HANDOVER", sid, "SIGNED_BAST", "ttd-draft.pdf")
+    check("revisi: DRAFT menolak SIGNED_BAST -> 409 (ditegakkan backend, bukan hanya frontend)", r_bast.status_code == 409, str(r_bast.status_code))
+
+
 async def t_list_download(env):
     r = await lst(env, env.v, "HANDOVER", env.ho["id"])
     b = r.json()
@@ -272,7 +291,7 @@ async def main():
         env.c = c
         try:
             await setup4(env)
-            for t in (t_rbac, t_upload, t_list_download, t_quota, t_delete, t_signed, t_scope, t_360):
+            for t in (t_rbac, t_upload, t_no_dup, t_list_download, t_quota, t_delete, t_signed, t_scope, t_360):
                 try:
                     await t(env)
                 except Exception as exc:  # noqa: BLE001
