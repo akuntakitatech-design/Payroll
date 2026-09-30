@@ -12,6 +12,8 @@ const STYLES = {
   rejected: "border-danger-border bg-danger-soft text-danger",
   archived: "border-warning-border bg-warning-soft text-warning",
   deleted: "border-danger-border bg-danger-soft text-danger",
+  maintenance: "border-[hsl(var(--maintenance-border))] bg-[hsl(var(--maintenance-soft))] text-[hsl(var(--maintenance))]",
+  in_use: "border-[hsl(var(--teal-border))] bg-[hsl(var(--teal-soft))] text-[hsl(var(--teal))]",
 };
 
 export const StatusBadge = ({ status = "active", className, label }) => (

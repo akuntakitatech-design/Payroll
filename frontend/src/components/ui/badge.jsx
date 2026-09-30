@@ -15,6 +15,8 @@ const badgeVariants = cva(
         success: "border-success-border bg-success-soft text-success",
         warning: "border-warning-border bg-warning-soft text-warning",
         info: "border-info-border bg-info-soft text-info",
+        maintenance: "border-[hsl(var(--maintenance-border))] bg-[hsl(var(--maintenance-soft))] text-[hsl(var(--maintenance))]",
+        teal: "border-[hsl(var(--teal-border))] bg-[hsl(var(--teal-soft))] text-[hsl(var(--teal))]",
         outline: "border-border bg-card text-muted-foreground",
       },
     },

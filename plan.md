@@ -1105,3 +1105,69 @@ Next actions yang aktif sekarang (sesuai instruksi user):
 - Endpoint import lama wajib dipertahankan.
 - Jangan menghapus data baseline/PT REAL/01B–01D/legacy.
 - Setelah final report 01E selesai: **STOP** dan tunggu review user (jangan mulai 01F).
+
+---
+
+## Global UI / Design System Standard — KelolaKita HRGA (LOCKED)
+
+Status: **STANDARD RESMI (LOCKED)** — berlaku untuk seluruh modul existing & semua fitur baru
+(Manpower Request, Recruitment, Roster, Mobilisasi, Dashboard Aset, dsb). Ini adalah refactor
+visual/theme SAJA: **tidak mengubah** business logic, permission, route, API, struktur data,
+workflow, maupun nama fitur.
+
+### Sumber kebenaran token
+Semua nilai warna/spacing/shadow = design token. Jangan hardcode warna berulang di tiap page.
+- Token global: `frontend/src/index.css` (`:root` CSS variables)
+- Konsumsi via Tailwind theme (`frontend/tailwind.config.js`) atau arbitrary value `hsl(var(--token))`.
+
+### Color system (LOCKED)
+- Primary Dark Green `#0B5D4B` → `--primary` (active nav, primary button, heading accent, key icon, primary chart, focus)
+- Emerald `#0F766E` → `--ring` / focus + secondary interactive accent + akhir gradient hero + chart-2
+- Green `#16A36A` → `--success` family (SUCCESS/ACTIVE/READY, positive KPI)
+- Light Green `#EAF7F2` → `--primary-soft` / `--success-soft` (selected secondary menu, success bg, highlight)
+- Sage `#D7EEE5` → background section ringan
+- App BG `#F5F7F8` → `--background`
+- Card `#FFFFFF` → `--card`
+- Primary Text `#172033` → `--foreground` / `--ink-1`
+- Secondary Text `#667085` → `--muted-foreground` / `--ink-3`
+- Border `#E3E8EC` → `--border`
+
+### Status color standard (LOCKED)
+SUCCESS/ACTIVE/READY = Green · INFORMATION = Blue · WARNING = Amber · URGENT/EXPIRED/LOST/ERROR = Red ·
+DRAFT/NEUTRAL = Gray · MAINTENANCE = Purple (`--maintenance`) · IN USE = Teal (`--teal`).
+Jangan membuat warna status baru tanpa alasan UX yang jelas.
+
+### Sidebar
+- Background off-white `--sidebar` `#FBFCFC` (bukan putih polos).
+- Active main menu: `bg-primary` + teks/icon putih + rounded + subtle shadow.
+- Secondary selected: `bg-primary-soft` (#EAF7F2) + teks dark green.
+- Non-active teks gelap (`--ink-2` ~#25324A), hover `--sidebar-hover` (#EEF8F4).
+- Section heading: uppercase, 600, letter-spacing, warna `--sidebar-section` (#48636A).
+- Collapse: border halus + hover green tint; collapsed = icon + tooltip + active indicator jelas.
+
+### Komponen
+- Button primary `#0B5D4B` hover `#084C3E`; secondary very-light-green + border + teks dark green; danger hanya destructive.
+- Card: white + border halus + shadow sangat halus `0 1px 3px rgba(15,23,42,.06)`.
+- Input/Select: white, border `#D9E1E5`, focus ring emerald + glow tipis.
+- Badge pill: tinted bg + darker text + border halus.
+- Table: header very light gray/green, row hover hijau sangat tipis.
+- Dashboard hero: gradient dark green `#0B5D4B → #0F766E`, teks putih, chip translucent white.
+- Chart family: dark green, emerald, teal, sage, blue-gray (amber/red hanya exception).
+
+### Aturan fitur ke depan (LOCKED)
+Setiap menu/dashboard/form/modal/card/table/status/report/module baru WAJIB mengikuti theme ini
+melalui shared component + token global. Jangan bikin style khusus yang bertabrakan dengan theme
+kecuali ada alasan UX yang jelas.
+
+### File yang diubah (theme refresh, visual only)
+`frontend/src/index.css`, `frontend/src/App.css`,
+`frontend/src/components/layout/Sidebar.jsx`,
+`frontend/src/components/ui/{button,card,input,badge}.jsx`,
+`frontend/src/components/common/StatusBadge.jsx`,
+`frontend/src/components/dashboard/DashboardHeader.jsx`,
+`frontend/src/pages/asset/assetLifecycleShared.jsx`.
+(Table & komponen lain otomatis mengikuti karena token-driven.)
+
+### UAT & guardrails
+- Diterapkan ke Live Preview/staging dulu; **production TIDAK diubah**.
+- STOP dan tunggu UAT visual user sebelum PR/merge final.

@@ -23,12 +23,12 @@ const NavItem = ({ item, collapsed, onNavigate }) => {
       data-testid={`sidebar-nav-item-${item.key}`}
       className={({ isActive }) =>
         cn(
-          "group relative flex items-center gap-2.5 rounded-lg py-2 pl-3 pr-2 text-[13px] font-normal text-ink-2",
-          "transition-[background-color,color] duration-150",
-          "hover:bg-accent hover:text-ink-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+          "group relative flex items-center gap-2.5 rounded-lg py-2 pl-3 pr-2 text-[13px] font-medium text-ink-2",
+          "transition-[background-color,color,box-shadow] duration-150",
+          "hover:bg-[hsl(var(--sidebar-hover))] hover:text-ink-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-[hsl(var(--sidebar))]",
           collapsed && "justify-center px-0",
           isActive &&
-            "bg-primary-soft font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-primary"
+            "bg-primary font-semibold text-primary-foreground shadow-sm hover:bg-primary-hover hover:text-primary-foreground"
         )
       }
     >
@@ -37,9 +37,10 @@ const NavItem = ({ item, collapsed, onNavigate }) => {
           <Icon
             className={cn(
               "h-4 w-4 shrink-0 transition-transform duration-150",
-              !isActive && "group-hover:translate-x-px"
+              !isActive && "text-primary/85 group-hover:translate-x-px group-hover:text-primary",
+              isActive && "text-primary-foreground"
             )}
-            strokeWidth={isActive ? 2.1 : 1.75}
+            strokeWidth={isActive ? 2.1 : 1.85}
           />
           {!collapsed && <span className="truncate">{item.label}</span>}
         </>
@@ -69,11 +70,11 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col bg-card" data-testid={platformMode ? "sidebar-platform-mode" : "sidebar-tenant-mode"}>
+      <div className="flex h-full flex-col bg-[hsl(var(--sidebar))]" data-testid={platformMode ? "sidebar-platform-mode" : "sidebar-tenant-mode"}>
         {/* Identitas: mode platform = logo PLATFORM; mode tenant = logo & nama TENANT */}
         <div
           className={cn(
-            "flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4",
+            "flex h-16 shrink-0 items-center gap-3 border-b border-border px-4",
             collapsed && "justify-center px-2"
           )}
           data-testid="sidebar-identity"
@@ -108,7 +109,7 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
             {groups.map((group) => (
               <div key={group.key} className="space-y-0.5">
                 {!collapsed ? (
-                  <p className="px-3 pb-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] text-ink-3/85">
+                  <p className="px-3 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[hsl(var(--sidebar-section))]">
                     {group.label}
                   </p>
                 ) : (
@@ -152,7 +153,7 @@ const Sidebar = ({ collapsed, setCollapsed }) => (
   <aside
     data-testid="app-sidebar"
     className={cn(
-      "relative hidden shrink-0 border-r border-border bg-card lg:block",
+      "relative hidden shrink-0 border-r border-border bg-[hsl(var(--sidebar))] lg:block",
       collapsed ? "w-16" : "w-64"
     )}
   >
@@ -163,9 +164,9 @@ const Sidebar = ({ collapsed, setCollapsed }) => (
         data-testid="sidebar-collapse-button"
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? "Perlebar menu" : "Perkecil menu"}
-        className="absolute -right-3 top-[68px] z-20 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card text-ink-3 shadow-card transition-colors duration-150 hover:bg-accent hover:text-ink-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="absolute -right-3 top-[68px] z-20 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card text-ink-2 shadow-card transition-colors duration-150 hover:bg-[hsl(var(--sidebar-hover))] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+        {collapsed ? <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.25} /> : <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2.25} />}
       </button>
     </div>
   </aside>
