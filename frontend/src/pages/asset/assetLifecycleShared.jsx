@@ -18,7 +18,9 @@ export const BADGE_TONE = {
   success: "border-success-border bg-success-soft text-success",
   warning: "border-warning-border bg-warning-soft text-warning",
   danger: "border-danger-border bg-danger-soft text-danger",
-  info: "border-border bg-secondary text-secondary-foreground",
+  info: "border-info-border bg-info-soft text-info",
+  teal: "border-[hsl(var(--teal-border))] bg-[hsl(var(--teal-soft))] text-[hsl(var(--teal))]",
+  purple: "border-[hsl(var(--maintenance-border))] bg-[hsl(var(--maintenance-soft))] text-[hsl(var(--maintenance))]",
   muted: "border-border bg-muted text-muted-foreground",
 };
 
@@ -31,10 +33,10 @@ export const STATE_META = {
   COMPLETED: { label: "Selesai", tone: "success" },
   ACTIVE: { label: "Aktif", tone: "info" },
   CLOSED: { label: "Ditutup", tone: "muted" },
-  IN_USE: { label: "Dipakai", tone: "info" },
+  IN_USE: { label: "Dipakai", tone: "teal" },
   PENDING_INSPECTION: { label: "Menunggu Pemeriksaan", tone: "warning" },
   READY: { label: "Siap Pakai", tone: "success" },
-  MAINTENANCE: { label: "Perbaikan", tone: "warning" },
+  MAINTENANCE: { label: "Perbaikan", tone: "purple" },
   DAMAGED: { label: "Rusak", tone: "danger" },
   LOST: { label: "Hilang", tone: "danger" },
   DISPOSED: { label: "Dihapuskan", tone: "muted" },

@@ -6,50 +6,62 @@
 
 @layer base {
     :root {
-        /* Surfaces — putih / off-white netral, tanpa warna dekoratif */
-        --background: 210 20% 98%;
-        --foreground: 215 25% 17%;
-        --card: 0 0% 100%;
-        --card-foreground: 215 25% 17%;
+        /* ============================================================
+         * KelolaKita HRGA — Global UI Theme (LOCKED)
+         * Palette korporat hijau. Semua nilai warna = design token.
+         * ============================================================ */
+
+        /* Surfaces */
+        --background: 200 18% 97%;          /* App BG  #F5F7F8 */
+        --foreground: 221 38% 15%;          /* Text    #172033 */
+        --card: 0 0% 100%;                  /* Card    #FFFFFF */
+        --card-foreground: 221 38% 15%;
         --popover: 0 0% 100%;
-        --popover-foreground: 215 25% 17%;
+        --popover-foreground: 221 38% 15%;
 
-        /* Identitas utama tetap teal, dipakai terbatas */
-        --primary: 173 80% 26%;
+        /* Primary — Dark Green #0B5D4B */
+        --primary: 167 79% 20%;
         --primary-foreground: 0 0% 100%;
-        --primary-soft: 173 42% 95%;
-        --primary-border: 173 30% 80%;
+        --primary-soft: 156 45% 94%;        /* Light Green #EAF7F2 */
+        --primary-border: 157 34% 80%;
 
-        --secondary: 210 16% 96%;
-        --secondary-foreground: 215 22% 24%;
-        --muted: 210 16% 96%;
-        --muted-foreground: 215 12% 45%;
-        --accent: 210 16% 95%;
-        --accent-foreground: 215 22% 22%;
+        /* Secondary — very light green + dark green text (#0B5D4B) */
+        --secondary: 156 40% 96%;
+        --secondary-foreground: 167 79% 20%;
+        --muted: 195 22% 96%;
+        --muted-foreground: 221 13% 46%;    /* Secondary text #667085 */
+        --accent: 156 43% 95%;              /* Hover tint #EEF8F4 */
+        --accent-foreground: 167 55% 18%;
 
         --destructive: 0 65% 46%;
         --destructive-foreground: 0 0% 100%;
 
-        --border: 214 16% 89%;
-        --border-strong: 214 14% 82%;
-        --input: 214 16% 87%;
-        --ring: 173 80% 30%;
+        --border: 206 19% 91%;              /* Border #E3E8EC */
+        --border-strong: 206 16% 84%;
+        --input: 200 19% 87%;               /* Input border #D9E1E5 */
+        --ring: 175 77% 30%;                /* Emerald focus #0F766E */
 
         --radius: 0.5rem;
 
-        /* Warna status terkendali */
-        --success: 158 58% 30%;
-        --success-soft: 158 45% 95%;
-        --success-border: 158 30% 78%;
-        --warning: 33 82% 36%;
-        --warning-soft: 40 85% 95%;
-        --warning-border: 38 55% 78%;
-        --danger: 0 65% 44%;
-        --danger-soft: 0 70% 97%;
-        --danger-border: 0 45% 85%;
-        --info: 208 68% 36%;
-        --info-soft: 208 70% 96%;
-        --info-border: 208 40% 80%;
+        /* ---- Status color standard (LOCKED) ---- */
+        --success: 156 70% 30%;             /* Green   #16A36A family */
+        --success-soft: 156 45% 94%;
+        --success-border: 157 40% 80%;
+        --warning: 33 84% 38%;              /* Amber */
+        --warning-soft: 40 90% 94%;
+        --warning-border: 38 60% 78%;
+        --danger: 0 65% 46%;                /* Red */
+        --danger-soft: 0 72% 97%;
+        --danger-border: 0 50% 86%;
+        --info: 208 70% 40%;                /* Blue */
+        --info-soft: 208 72% 96%;
+        --info-border: 208 45% 80%;
+        --maintenance: 271 46% 46%;         /* Purple */
+        --maintenance-soft: 271 55% 96%;
+        --maintenance-border: 271 40% 85%;
+        --teal: 185 64% 32%;                /* Teal — IN USE */
+        --teal-soft: 185 52% 94%;
+        --teal-border: 185 42% 78%;
 
         /* Alias lama agar komponen eksisting tidak rusak */
         --severity-critical: var(--danger);
@@ -57,32 +69,29 @@
         --severity-info: var(--info);
         --severity-success: var(--success);
 
-        --chart-1: 173 80% 26%;
-        --chart-2: 208 68% 36%;
-        --chart-3: 33 82% 44%;
-        --chart-4: 158 45% 34%;
-        --chart-5: 0 60% 48%;
+        /* Chart family: dark green, emerald, teal, sage, blue-gray */
+        --chart-1: 167 79% 20%;
+        --chart-2: 175 77% 30%;
+        --chart-3: 185 64% 34%;
+        --chart-4: 157 42% 62%;
+        --chart-5: 215 18% 55%;
 
         --font-sans: 'Plus Jakarta Sans', ui-sans-serif, sans-serif;
         --font-display: 'Plus Jakarta Sans', ui-sans-serif, sans-serif;
 
-        /* Shadow sangat halus — struktur dibawa oleh border */
-        --shadow-sm: 0 1px 1px rgba(16, 24, 40, 0.03);
-        --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.06);
-        --shadow-overlay: 0 12px 32px rgba(16, 24, 40, 0.1);
+        /* Shadow halus — subtle, struktur tetap dibawa border */
+        --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+        --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+        --shadow-overlay: 0 12px 32px rgba(15, 23, 42, 0.12);
 
         --z-dropdown: 100;
         --z-modal: 200;
         --z-toast: 300;
 
-        /* ================================================================
-         * Token redesign dashboard (tambahan, TIDAK mengubah token lama)
-         * ================================================================ */
-
-        /* Aksen mint & soft blue — hanya untuk chip/hover/highlight, bukan teks utama */
-        --accent-mint: 168 55% 92%;
-        --accent-mint-foreground: 173 80% 18%;
-        --accent-mint-border: 170 28% 78%;
+        /* Aksen mint & soft blue — chip/hover/highlight */
+        --accent-mint: 156 48% 92%;
+        --accent-mint-foreground: 167 79% 18%;
+        --accent-mint-border: 157 30% 78%;
 
         --accent-sky: 205 70% 92%;
         --accent-sky-foreground: 208 68% 26%;
@@ -90,25 +99,30 @@
 
         /* Tangga permukaan */
         --surface-0: 0 0% 100%;
-        --surface-1: 210 20% 98%;
-        --surface-2: 210 18% 96%;
+        --surface-1: 200 18% 98%;
+        --surface-2: 200 16% 96%;
 
         /* Tangga warna teks */
-        --ink-1: 215 25% 17%;
-        --ink-2: 215 16% 32%;
-        --ink-3: 215 12% 45%;
+        --ink-1: 221 38% 15%;               /* #172033 */
+        --ink-2: 219 26% 27%;               /* non-active sidebar ~#25324A */
+        --ink-3: 221 13% 46%;               /* #667085 */
 
         /* Varian interaksi warna utama */
-        --primary-strong: 173 85% 20%;
-        --primary-hover: 173 80% 24%;
-        --primary-active: 173 85% 18%;
+        --primary-strong: 168 82% 15%;
+        --primary-hover: 168 81% 16%;       /* #084C3E */
+        --primary-active: 168 84% 13%;
 
-        --focus-ring: 173 80% 30%;
+        --focus-ring: 175 77% 30%;
         --focus-ring-offset: 0 0% 100%;
 
-        /* Tangga shadow premium (shadow-sm/md/overlay lama tetap dipakai) */
-        --shadow-xs: 0 1px 0 rgba(16, 24, 40, 0.04);
-        --shadow-float-lg: 0 14px 40px rgba(16, 24, 40, 0.12);
+        /* Sidebar tokens */
+        --sidebar: 180 14% 99%;             /* off-white #FBFCFC */
+        --sidebar-section: 193 19% 35%;     /* section heading #48636A */
+        --sidebar-hover: 156 43% 95%;       /* hover #EEF8F4 */
+
+        /* Tangga shadow premium */
+        --shadow-xs: 0 1px 0 rgba(15, 23, 42, 0.04);
+        --shadow-float-lg: 0 14px 40px rgba(15, 23, 42, 0.12);
 
         /* Radius lembut untuk kartu dashboard */
         --radius-card: 0.75rem;
@@ -116,8 +130,8 @@
 
         /* KPI keadaan terkunci / data belum tersedia */
         --kpi-locked: 215 10% 55%;
-        --kpi-locked-soft: 210 16% 96%;
-        --kpi-locked-border: 214 16% 86%;
+        --kpi-locked-soft: 200 16% 96%;
+        --kpi-locked-border: 206 16% 86%;
 
         --noise-opacity: 0.035;
     }
@@ -227,14 +241,15 @@
         box-shadow: var(--shadow-float-lg);
     }
 
-    /* Gradient halus, dipakai HANYA pada header dashboard (< 20% viewport) */
+    /* Gradient dark green, dipakai HANYA pada header dashboard (< 20% viewport) */
     .dashboard-hero {
         background-image: linear-gradient(
             135deg,
-            hsl(var(--primary-soft)) 0%,
-            hsl(var(--accent-mint)) 45%,
-            hsl(var(--accent-sky)) 100%
+            hsl(167 79% 20%) 0%,
+            hsl(172 76% 23%) 52%,
+            hsl(175 77% 26%) 100%
         );
+        color: #ffffff;
     }
 
     /* Tekstur titik sangat halus — pembeda "premium" tanpa berisik */
