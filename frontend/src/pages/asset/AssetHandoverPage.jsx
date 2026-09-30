@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardCheck, Eye, HandCoins, Pencil, RefreshCw, Send, XCircle } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { PageBody, SectionHeader } from "@/components/common/PageHeader";
 import { AssetDocumentsPanel } from "@/pages/asset/AssetDocumentsPanel";
+import TransactionAttachments from "@/pages/asset/TransactionAttachments";
 import DataTable, { FilterBar, FilterSelect, Pagination, RowActions, TableCard } from "@/components/common/DataTable";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import EmptyState from "@/components/common/EmptyState";
@@ -87,6 +88,7 @@ const AssetHandoverPage = () => {
   const [detail, setDetail] = useState(null);
   const [confirm, setConfirm] = useState(null); // {type, doc}
   const [acting, setActing] = useState(false);
+  const attachRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -197,6 +199,7 @@ const AssetHandoverPage = () => {
   };
 
   // Simpan & Publish: satu operasi atomik di backend. Gagal -> tidak ada perubahan tersimpan; input form dipertahankan.
+  // Lampiran non-BAST diunggah SETELAH transaksi berhasil (upload terpisah; gagal upload tidak me-rollback publish).
   const saveAndPublish = async () => {
     const v = form.values;
     setSaving(true);
@@ -206,6 +209,10 @@ const AssetHandoverPage = () => {
         ? await api.post("/asset-handovers/save-and-publish", body)
         : await api.post(`/asset-handovers/${form.id}/save-and-publish`, body);
       toast.success(bastIssuedMessage(data.bast_number));
+      const res = attachRef.current ? await attachRef.current.flushPending(data.id, data.doc_state) : { uploaded: 0, failed: 0 };
+      if (res.failed > 0) {
+        toast.warning(`Transaksi berhasil disimpan. ${res.failed} lampiran gagal diunggah. Silakan coba unggah kembali dari panel Dokumen.`, { duration: 9000 });
+      }
       setConfirm(null);
       setForm(null);
       setDetail(data);
@@ -227,8 +234,14 @@ const AssetHandoverPage = () => {
       const { data } = form.mode === "create" ? await api.post("/asset-handovers", body) : await api.put(`/asset-handovers/${form.id}`, body);
       toast.success(form.mode === "create" ? "Draft penyerahan disimpan." : "Draft penyerahan diperbarui.");
       if (data.manual_number_warning) toast.warning(data.manual_number_warning, { duration: 9000 });
-      setForm(null);
-      setDetail(data);
+      const res = attachRef.current ? await attachRef.current.flushPending(data.id, data.doc_state) : { uploaded: 0, failed: 0 };
+      if (res.failed > 0) {
+        toast.warning(`Transaksi berhasil disimpan. ${res.failed} lampiran gagal diunggah. Silakan coba unggah kembali.`, { duration: 9000 });
+        setForm((f) => (f ? { ...f, mode: "edit", id: data.id } : f)); // hindari duplikasi transaksi; retry lampiran di tempat
+      } else {
+        setForm(null);
+        setDetail(data);
+      }
       load();
     } catch (e) {
       toast.error(errorMessage(e, "Draft penyerahan gagal disimpan."), { duration: 9000 });
@@ -438,6 +451,10 @@ const AssetHandoverPage = () => {
                   ))}
                 </div>
               )}
+
+              <TransactionAttachments ref={attachRef} sourceType="HANDOVER"
+                sourceId={form.mode === "edit" ? form.id : null} docState="DRAFT"
+                disabled={saving} testId="handover-attachments" />
             </div>
           )}
           <DialogFooter>

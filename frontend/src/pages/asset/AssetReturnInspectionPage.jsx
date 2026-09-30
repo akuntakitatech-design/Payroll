@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardCheck, Eye, Pencil, RefreshCw, Send, Undo2, XCircle } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PageBody, SectionHeader } from "@/components/common/PageHeader";
 import { AssetDocumentsPanel } from "@/pages/asset/AssetDocumentsPanel";
+import TransactionAttachments from "@/pages/asset/TransactionAttachments";
 import DataTable, { FilterBar, FilterSelect, Pagination, RowActions, TableCard } from "@/components/common/DataTable";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import EmptyState from "@/components/common/EmptyState";
@@ -80,6 +81,7 @@ const ReturnsTab = ({ perms, onPublished }) => {
   const [detail, setDetail] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [acting, setActing] = useState(false);
+  const attachRef = useRef(null);
 
   const loadHoldings = async (employeeId) => {
     setHoldings([]);
@@ -147,6 +149,10 @@ const ReturnsTab = ({ perms, onPublished }) => {
         ? await api.post("/asset-returns/save-and-publish", body)
         : await api.post(`/asset-returns/${form.id}/save-and-publish`, body);
       toast.success(`${bastIssuedMessage(d.bast_number)}. Aset menunggu pemeriksaan.`);
+      const res = attachRef.current ? await attachRef.current.flushPending(d.id, d.doc_state) : { uploaded: 0, failed: 0 };
+      if (res.failed > 0) {
+        toast.warning(`Transaksi berhasil disimpan. ${res.failed} lampiran gagal diunggah. Silakan coba unggah kembali dari panel Dokumen.`, { duration: 9000 });
+      }
       setConfirm(null);
       setForm(null);
       setDetail(d);
@@ -169,8 +175,14 @@ const ReturnsTab = ({ perms, onPublished }) => {
       const { data: d } = form.mode === "create" ? await api.post("/asset-returns", body) : await api.put(`/asset-returns/${form.id}`, body);
       toast.success(form.mode === "create" ? "Draft pengembalian disimpan." : "Draft pengembalian diperbarui.");
       if (d.manual_number_warning) toast.warning(d.manual_number_warning, { duration: 9000 });
-      setForm(null);
-      setDetail(d);
+      const res = attachRef.current ? await attachRef.current.flushPending(d.id, d.doc_state) : { uploaded: 0, failed: 0 };
+      if (res.failed > 0) {
+        toast.warning(`Transaksi berhasil disimpan. ${res.failed} lampiran gagal diunggah. Silakan coba unggah kembali.`, { duration: 9000 });
+        setForm((f) => (f ? { ...f, mode: "edit", id: d.id } : f));
+      } else {
+        setForm(null);
+        setDetail(d);
+      }
       data.load();
     } catch (e) {
       toast.error(errorMessage(e, "Draft pengembalian gagal disimpan."), { duration: 9000 });
@@ -339,6 +351,10 @@ const ReturnsTab = ({ perms, onPublished }) => {
                   })
                 )}
               </div>
+
+              <TransactionAttachments ref={attachRef} sourceType="RETURN"
+                sourceId={form.mode === "edit" ? form.id : null} docState="DRAFT"
+                disabled={saving} testId="return-attachments" />
             </div>
           )}
           <DialogFooter>
