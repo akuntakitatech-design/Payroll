@@ -318,6 +318,7 @@ NEW_RESOURCES_TOPUP = [
     "certification", "contract",
     "payroll", "payroll_component", "employee_salary", "payslip",
     "asset", "asset_value", "asset_master",  # Phase 2A CP1
+    "report",  # Modul 7 - pusat laporan & export
 ]
 
 # Top-up untuk AKSI baru pada resource yang SUDAH ADA (database lama).

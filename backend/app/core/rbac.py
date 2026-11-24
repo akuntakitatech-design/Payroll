@@ -52,6 +52,8 @@ RESOURCES: Dict[str, tuple] = {
     "document_type": ("Tipe Dokumen", "hr_core", ["view", "create", "edit", "delete"]),
     # Modul 3 Blueprint HRGA: verify = Verifikasi dokumen (setujui/tolak) pada antrean verifikasi.
     "document": ("Dokumen", "hr_core", ["view", "create", "edit", "delete", "export", "verify"]),
+    # Modul 7 Blueprint HRGA - Pusat Laporan & Export lintas modul.
+    "report": ("Laporan & Export", "hr_core", ["view", "export"]),
     "user": ("Pengguna", "hr_core", ["view", "create", "edit", "delete", "export"]),
     "role": ("Peran & Hak Akses", "hr_core", ["view", "create", "edit", "delete", "config"]),
     "module": ("Aktivasi Modul", "hr_core", ["view", "config"]),
@@ -178,6 +180,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
         + _crud(["document", "employee", "contract", "certification", "recruitment"], full_crud)
         # Modul 3 Blueprint HRGA - verifikasi dokumen (HR mengesahkan dokumen karyawan).
         + ["document:verify"]
+        # Modul 7 Blueprint HRGA - pusat laporan & export.
+        + ["report:view", "report:export"]
         + ["user:view", "user:create", "user:edit", "audit_log:view", "settings:view",
            "approval_workflow:view", "policy:view", "module:view",
            "attendance:view", "leave:view", "mobilization:view", "performance:view",
@@ -233,6 +237,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "employee_salary:export", "payslip:view_own",
         # Core HR - Finance menutup item keuangan pada Exit Clearance & melihat kasusnya.
         "exit_clearance:view", "exit_clearance:edit",
+        # Modul 7 - Finance mengekspor laporan.
+        "report:view", "report:export",
     ]
 
     manager = [
@@ -247,6 +253,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "mobilization:approve", "finance_request:view", "finance_request:approve",
         "attendance:export", "leave:export",
         "payslip:view_own",
+        # Modul 7 - manajer melihat laporan sesuai cakupan datanya.
+        "report:view",
     ]
 
     supervisor = [
@@ -258,6 +266,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "roster:view",
         "exit_clearance:view",
         "payslip:view_own",
+        "report:view",
     ]
 
     employee = [
@@ -293,6 +302,9 @@ def default_role_permissions() -> Dict[str, List[str]]:
     # Core HR - GA menutup item aset pada Exit Clearance; GA Staff hanya melihat.
     asset_admin += ["exit_clearance:view", "exit_clearance:edit"]
     asset_staff += ["exit_clearance:view"]
+    # Modul 7 - GA melihat & mengekspor laporan aset/roster.
+    asset_admin += ["report:view", "report:export"]
+    asset_staff += ["report:view"]
     hr_admin = hr_admin + ["asset:view", "asset_document:view"]
     hr_manager = hr_manager + ["asset:view"]
     finance = finance + ["asset:view", "asset_value:view"]
