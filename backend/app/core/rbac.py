@@ -50,7 +50,8 @@ RESOURCES: Dict[str, tuple] = {
     "contract_type": ("Tipe Kontrak", "hr_core", ["view", "create", "edit", "delete"]),
     "certification_type": ("Tipe Sertifikasi", "hr_core", ["view", "create", "edit", "delete"]),
     "document_type": ("Tipe Dokumen", "hr_core", ["view", "create", "edit", "delete"]),
-    "document": ("Dokumen", "hr_core", ["view", "create", "edit", "delete", "export"]),
+    # Modul 3 Blueprint HRGA: verify = Verifikasi dokumen (setujui/tolak) pada antrean verifikasi.
+    "document": ("Dokumen", "hr_core", ["view", "create", "edit", "delete", "export", "verify"]),
     "user": ("Pengguna", "hr_core", ["view", "create", "edit", "delete", "export"]),
     "role": ("Peran & Hak Akses", "hr_core", ["view", "create", "edit", "delete", "config"]),
     "module": ("Aktivasi Modul", "hr_core", ["view", "config"]),
@@ -175,6 +176,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
         ["dashboard:view", "company:view"]
         + _crud(MASTER_RESOURCES, full_crud)
         + _crud(["document", "employee", "contract", "certification", "recruitment"], full_crud)
+        # Modul 3 Blueprint HRGA - verifikasi dokumen (HR mengesahkan dokumen karyawan).
+        + ["document:verify"]
         + ["user:view", "user:create", "user:edit", "audit_log:view", "settings:view",
            "approval_workflow:view", "policy:view", "module:view",
            "attendance:view", "leave:view", "mobilization:view", "performance:view",

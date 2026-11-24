@@ -320,6 +320,16 @@ NEW_RESOURCES_TOPUP = [
     "asset", "asset_value", "asset_master",  # Phase 2A CP1
 ]
 
+# Top-up untuk AKSI baru pada resource yang SUDAH ADA (database lama).
+# Format: (permission_key, [permission jangkar]).
+# Hanya diberikan bila preset role memuat aksi tersebut DAN role sudah memegang hak
+# jangkar (mis. `document:delete`) — jadi role yang memang tidak mengelola dokumen
+# tidak ikut mendapat akses. Idempoten: baris yang sudah ada tidak diduplikasi.
+NEW_ACTIONS_TOPUP = [
+    # Modul 3 Blueprint HRGA - verifikasi dokumen.
+    ("document:verify", ["document:delete"]),
+]
+
 # Data karyawan demo (modul employee_core). Offset hari dibuat relatif terhadap hari ini
 # agar demo pengingat masa berlaku selalu relevan.
 EMPLOYEE_SEED: Dict[str, List[Dict[str, Any]]] = {
@@ -783,6 +793,31 @@ async def seed_rbac() -> None:
                         **audit_fields(None, creating=True),
                     }
                 )
+
+    # Top-up untuk aksi baru pada resource yang sudah ada (database lama).
+    for permission_key, anchors in NEW_ACTIONS_TOPUP:
+        for role_key, keys in matrix.items():
+            if permission_key not in keys:
+                continue
+            if await db.role_permissions.count_documents(
+                {"role_key": role_key, "permission_key": permission_key}
+            ):
+                continue
+            has_anchor = await db.role_permissions.count_documents(
+                {"role_key": role_key, "permission_key": {"$in": anchors}}
+            )
+            if not has_anchor:
+                continue
+            await db.role_permissions.insert_one(
+                {
+                    "id": new_id(),
+                    "company_id": None,
+                    "role_key": role_key,
+                    "permission_key": permission_key,
+                    "status": "active",
+                    **audit_fields(None, creating=True),
+                }
+            )
 
     for module in MODULES:
         await _upsert("modules", {"key": module["key"]}, {"company_id": None, **module})

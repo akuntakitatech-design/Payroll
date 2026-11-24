@@ -4,12 +4,12 @@ from sqlalchemy import false as sa_false  # Upgrade 01I
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 
 from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.config import settings
-from ..core.db import NO_ID, get_db, new_id, serialize, serialize_list
+from ..core.db import NO_ID, get_db, new_id, now, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.repo import TenantRepository
@@ -33,6 +33,18 @@ OWNER_TYPES = [
     {"key": "other", "label": "Lainnya"},
 ]
 
+# Modul 3 Blueprint HRGA - verifikasi dokumen oleh HR.
+PENDING = "PENDING"
+VERIFIED = "VERIFIED"
+REJECTED = "REJECTED"
+VERIFICATION_STATES = (PENDING, VERIFIED, REJECTED)
+VERIFICATION_LABELS = {PENDING: "Menunggu Verifikasi", VERIFIED: "Terverifikasi", REJECTED: "Ditolak"}
+
+
+def _verification_state(row: Dict[str, Any]) -> str:
+    """Dokumen lama (sebelum fitur verifikasi) dianggap sudah terverifikasi."""
+    return row.get("verification_state") or VERIFIED
+
 
 @router.get("/catalog")
 async def catalog(ctx: AuthContext = Depends(get_auth)):
@@ -52,6 +64,7 @@ async def list_documents(
     owner_type: Optional[str] = None,
     owner_id: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
+    verification_state: Optional[str] = Query(None, description="PENDING | VERIFIED | REJECTED"),
     page: int = 1,
     limit: int = 20,
     ctx: AuthContext = Depends(require_permission("document", "view")),
@@ -65,6 +78,12 @@ async def list_documents(
     ):
         if value:
             filters[key] = value
+    if verification_state:
+        state = verification_state.strip().upper()
+        if state not in VERIFICATION_STATES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                "Status verifikasi tidak dikenal. Pilihan: Menunggu Verifikasi, Terverifikasi, Ditolak.")
+        filters["verification_state"] = state
     filters = await _scoped_doc_filters(ctx, filters)  # Upgrade 01I
     repo = TenantRepository("documents", ctx.company_id)
     result = await repo.list(
@@ -86,7 +105,26 @@ async def list_documents(
         t = types.get(item.get("document_type_id")) or {}
         item["document_type_name"] = t.get("name")
         item["document_type_category"] = t.get("category")
+        item["verification_state"] = _verification_state(item)
+        item["verification_state_label"] = VERIFICATION_LABELS.get(item["verification_state"], item["verification_state"])
     return result
+
+
+@router.get("/verification-summary")
+async def verification_summary(ctx: AuthContext = Depends(require_permission("document", "view"))):
+    """Jumlah dokumen per status verifikasi (dasar kartu antrean verifikasi)."""
+    scope_filters = await _scoped_doc_filters(ctx, {"is_deleted": False})
+    rows = serialize_list(await get_db().documents.find(
+        scope_filters, {"verification_state": 1, "is_deleted": 1}).to_list(200000))
+    counts = {state: 0 for state in VERIFICATION_STATES}
+    total = 0
+    for row in rows:
+        if row.get("is_deleted"):
+            continue
+        total += 1
+        state = _verification_state(row)
+        counts[state] = counts.get(state, 0) + 1
+    return {"counts": counts, "total": total}
 
 
 async def _scoped_doc_filters(ctx: AuthContext, filters: Dict[str, Any]) -> Dict[str, Any]:
@@ -194,6 +232,17 @@ async def upload_document(
         ) from exc
 
     repo = TenantRepository("documents", ctx.company_id)
+    # Modul 3: pengunggah yang memegang `document:verify` (HR) langsung dianggap mengesahkan
+    # dokumennya sendiri; pengunggah lain masuk antrean verifikasi.
+    can_verify = ctx.has_permission("document", "verify")
+    verification_state = VERIFIED if can_verify else PENDING
+    verified_fields: Dict[str, Any] = {}
+    if verification_state == VERIFIED:
+        verified_fields = {
+            "verified_by": ctx.user_id,
+            "verified_by_name": (ctx.user or {}).get("full_name"),
+            "verified_at": now(),
+        }
     created = await repo.create(
         {
             "document_type_id": document_type_id,
@@ -212,10 +261,14 @@ async def upload_document(
             "mime_type": content_type,
             "is_deleted": False,
             "version": 1,
+            "verification_state": verification_state,
+            "verification_note": None,
+            **verified_fields,
         },
         ctx.user_id,
     )
     created["document_type_name"] = doc_type.get("name")
+    created["verification_state_label"] = VERIFICATION_LABELS.get(verification_state, verification_state)
     await log_action(ctx, "upload", "document", created["id"], created["name"], after=created)
     await completeness.safe_refresh(ctx.company_id, [created.get("owner_id") if created.get("owner_type") == "employee" else None], "document", ctx.user_id)  # Upgrade 01F
     return created
@@ -227,6 +280,68 @@ async def get_document(document_id: str, ctx: AuthContext = Depends(require_perm
     doc = await repo.get(document_id)
     await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
     return doc
+
+
+async def _verifiable_doc(ctx: AuthContext, document_id: str) -> Dict[str, Any]:
+    """Ambil dokumen + pastikan masih dapat diputuskan verifikasinya."""
+    repo = TenantRepository("documents", ctx.company_id)
+    doc = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
+    if doc.get("is_deleted") or doc.get("status") == "archived":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Dokumen yang sudah diarsipkan tidak dapat diverifikasi.")
+    return doc
+
+
+@router.post("/{document_id}/verify")
+async def verify_document(document_id: str, payload: Dict[str, Any] = Body(default={}),
+                         ctx: AuthContext = Depends(require_permission("document", "verify"))):
+    """Sahkan dokumen (status Terverifikasi)."""
+    doc = await _verifiable_doc(ctx, document_id)
+    if _verification_state(doc) == VERIFIED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Dokumen ini sudah terverifikasi.")
+    note = str(payload.get("note") or "").strip() or None
+    if note and len(note) > 500:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Catatan verifikasi maksimal 500 karakter.")
+    fields = {
+        "verification_state": VERIFIED,
+        "verification_note": note,
+        "verified_by": ctx.user_id,
+        "verified_by_name": (ctx.user or {}).get("full_name"),
+        "verified_at": now(),
+    }
+    repo = TenantRepository("documents", ctx.company_id)
+    before, after = await repo.update(document_id, fields, ctx.user_id)
+    await log_action(ctx, "verify", "document", document_id, doc.get("name"), before=before, after=after)
+    return {"message": "Dokumen berhasil diverifikasi.", "verification_state": VERIFIED,
+            "verification_state_label": VERIFICATION_LABELS[VERIFIED]}
+
+
+@router.post("/{document_id}/reject")
+async def reject_document(document_id: str, payload: Dict[str, Any] = Body(default={}),
+                         ctx: AuthContext = Depends(require_permission("document", "verify"))):
+    """Tolak dokumen disertai alasan yang akan dibaca pemilik dokumen."""
+    reason = str(payload.get("reason") or "").strip()
+    if len(reason) < 3:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Alasan penolakan wajib diisi (minimal 3 karakter).")
+    if len(reason) > 500:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Alasan penolakan maksimal 500 karakter.")
+    doc = await _verifiable_doc(ctx, document_id)
+    if _verification_state(doc) == REJECTED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Dokumen ini sudah ditolak.")
+    fields = {
+        "verification_state": REJECTED,
+        "verification_note": reason,
+        "verified_by": ctx.user_id,
+        "verified_by_name": (ctx.user or {}).get("full_name"),
+        "verified_at": now(),
+    }
+    repo = TenantRepository("documents", ctx.company_id)
+    before, after = await repo.update(document_id, fields, ctx.user_id)
+    await log_action(ctx, "reject", "document", document_id, doc.get("name"), before=before, after=after)
+    return {"message": "Dokumen ditolak. Pemilik dokumen dapat mengunggah ulang berkas yang benar.",
+            "verification_state": REJECTED, "verification_state_label": VERIFICATION_LABELS[REJECTED]}
 
 
 PREVIEWABLE = {

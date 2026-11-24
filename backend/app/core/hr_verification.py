@@ -540,6 +540,10 @@ async def approve(ctx, sub: Dict[str, Any], version: int, resolutions: Dict[str,
                                  "owner_label": emp.get("full_name"), "file_name": f.get("file_name"), "storage_path": dst,
                                  "file_size": f.get("file_size"), "file_extension": f.get("file_extension"),
                                  "mime_type": f.get("mime_type"), "is_deleted": False, "version": 1,
+                                 # Modul 3: berkas ini sudah diperiksa HR saat pengajuan disetujui.
+                                 "verification_state": "VERIFIED", "verification_note": None,
+                                 "verified_by": ctx.user_id, "verified_by_name": (ctx.user or {}).get("full_name"),
+                                 "verified_at": now(),
                                  "notes": "Dari Formulir Pembaruan Data karyawan (diverifikasi HR)",
                                  "created_at": now(), "updated_at": now(), "created_by": ctx.user_id, "updated_by": ctx.user_id}))
         if photo_file:
