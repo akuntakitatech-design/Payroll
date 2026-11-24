@@ -164,6 +164,10 @@ TENANT_COLLECTIONS = [
     "employee_family_members",
     # Upgrade 01D - penempatan karyawan (current + riwayat)
     "employee_assignments",
+    # Module 4 - Roster & Cuti Project (pola roster, konfigurasi project, rencana cuti H-30/H-10)
+    "roster_patterns",
+    "project_roster_configs",
+    "roster_leave_plans",
     # Upgrade 01E - migrasi/impor Excel karyawan (metadata batch + hasil analisis per karyawan).
     # Tidak menyimpan file Excel mentah; nilai sensitif di hasil analisis selalu dimasking.
     "employee_import_batches",
@@ -463,6 +467,17 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "start_date": "s32", "end_date": "s32", "assignment_status": "s32", "source": "s32",
         "reason": "s512", "notes": "t", "end_reason": "s512", "end_notes": "t", "ended_by": "fk",
         "previous_assignment_id": "fk",
+    },
+    # Module 4 - Roster: pola kerja/off berulang + konfigurasi per project + rencana cuti project.
+    "roster_patterns": {**MASTER, "work_days": "i", "off_days": "i"},
+    "project_roster_configs": {
+        "project_id": "fk", "roster_enabled": "b", "pattern_id": "fk", "start_date": "s32",
+        "mobilization_enabled": "b", "notes": "t",
+    },
+    "roster_leave_plans": {
+        "employee_id": "fk", "project_id": "fk", "pattern_id": "fk", "cycle_no": "i",
+        "off_start": "s32", "off_end": "s32", "plan_status": "s32", "replacement_needed": "b",
+        "decided_at": "dt", "decided_by": "fk", "decision_note": "t",
     },
     # Upgrade 01E - batch impor. batch_status: ANALYZED | COMMITTING | COMMITTED | PARTIAL | FAILED | CANCELLED
     "employee_import_batches": {
@@ -892,6 +907,12 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("ix_employee_assignment_employee", ["company_id", "employee_id", "assignment_status"], False),
         # Upgrade 01I - subquery cakupan: assignment ACTIVE per project (sumber otoritatif 01D).
         ("ix_employee_assignment_project", ["company_id", "assignment_status", "project_id", "employee_id"], False),
+    ],
+    "roster_patterns": [("uq_roster_pattern_code", ["company_id", "code"], True)],
+    "project_roster_configs": [("uq_project_roster", ["company_id", "project_id"], True)],
+    "roster_leave_plans": [
+        ("uq_roster_plan_employee_start", ["company_id", "employee_id", "off_start"], True),
+        ("ix_roster_plan_project", ["company_id", "project_id", "off_start"], False),
     ],
     "employee_import_batches": [
         ("ix_employee_import_batch_recent", ["company_id", "created_at"], False),

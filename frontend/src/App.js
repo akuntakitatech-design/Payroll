@@ -58,6 +58,11 @@ import TimeImportPage from "@/pages/attendance/TimeImportPage";
 import TimeSettingsPage from "@/pages/attendance/TimeSettingsPage";
 // Time Management V1 — Cuti & Lembur
 import LeaveOvertimeModuleLayout from "@/pages/leave/LeaveOvertimeModuleLayout";
+// Module 4 - Roster & Mobilisasi (CP1)
+import RosterModuleLayout from "@/pages/roster/RosterModuleLayout";
+import RosterOverviewPage from "@/pages/roster/RosterOverviewPage";
+import RosterCalendarPage from "@/pages/roster/RosterCalendarPage";
+import RosterPlansPage from "@/pages/roster/RosterPlansPage";
 import AssetModuleLayout from "@/pages/asset/AssetModuleLayout";
 import AssetListPage from "@/pages/asset/AssetListPage";
 import AssetSettingsPage from "@/pages/asset/AssetSettingsPage";
@@ -123,6 +128,7 @@ const MASTER_ROUTES = [
   "contract-types",
   "certification-types",
   "document-types",
+  "roster-patterns",
 ];
 
 const AppRoutes = () => (
@@ -204,6 +210,13 @@ const AppRoutes = () => (
         <Route path="imports" element={<AssetImportOpeningPage />} />
         <Route path="settings" element={<AssetSettingsPage />} />
         <Route path="*" element={<Navigate to="/modules/asset" replace />} />
+      </Route>
+      {/* Module 4 CP1 - Roster Proyek, Cuti Project (H-30/H-10) */}
+      <Route path="/modules/mobilization" element={<RosterModuleLayout />}>
+        <Route index element={<RosterOverviewPage />} />
+        <Route path="kalender" element={<RosterCalendarPage />} />
+        <Route path="rencana" element={<RosterPlansPage />} />
+        <Route path="*" element={<Navigate to="/modules/mobilization" replace />} />
       </Route>
       <Route path="/modules/:moduleKey" element={<ModulePlaceholderPage />} />
       <Route path="*" element={<NotFoundPage />} />

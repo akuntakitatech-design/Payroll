@@ -13,6 +13,7 @@ import {
   FileSignature,
   Award,
   FileText,
+  CalendarRange,
   Boxes,
   SlidersHorizontal,
   Settings,
@@ -41,6 +42,7 @@ const SECTIONS = [
       { to: "/setup/contract-types", label: "Tipe Kontrak", icon: FileSignature, resource: "contract_type", desc: "Durasi dan perpanjangan kontrak" },
       { to: "/setup/certification-types", label: "Tipe Sertifikasi", icon: Award, resource: "certification_type", desc: "Sertifikat wajib dan masa berlaku" },
       { to: "/setup/document-types", label: "Tipe Dokumen", icon: FileText, resource: "document_type", desc: "CV, KTP, ijazah, kontrak, kwitansi" },
+      { to: "/setup/roster-patterns", label: "Pola Roster", icon: CalendarRange, resource: "roster_pattern", desc: "Pola kerja/off untuk roster project" },
     ],
   },
   {
