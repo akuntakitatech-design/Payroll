@@ -46,13 +46,13 @@ const ModuleActivationPage = () => {
     return () => { request.current += 1; };
   }, [load, company?.id]);
 
-  const activeCount = items.filter((m) => m.is_active).length;
+  const activeItems = items.filter((m) => m.is_active);
 
   return <>
     <PageHeader
       title="Modul Perusahaan"
-      subtitle="Daftar modul yang diaktifkan Platform Admin. Menu dan fitur di tenant hanya menampilkan modul yang aktif."
-      actions={<span className="text-[13px] text-muted-foreground tabular-nums" data-testid="module-active-count">{loading ? "Memuat status…" : `${activeCount} dari ${items.length} modul aktif`}</span>}
+      subtitle="Daftar modul yang aktif untuk perusahaan Anda. Menu dan fitur di tenant hanya menampilkan modul yang aktif."
+      actions={<span className="text-[13px] text-muted-foreground tabular-nums" data-testid="module-active-count">{loading ? "Memuat status…" : `${activeItems.length} modul aktif`}</span>}
     />
     <PageBody>
       <div className="rounded-lg border border-border bg-secondary px-4 py-3 text-[12px] leading-relaxed text-secondary-foreground" data-testid="module-platform-notice">
@@ -65,8 +65,8 @@ const ModuleActivationPage = () => {
       {mode.read_only && <div className="rounded-lg border border-warning-border bg-warning-soft px-4 py-3 text-[13px] text-warning" data-testid="module-readonly-notice">Mode hanya-baca: data modul tidak dapat diubah dari lingkungan ini.</div>}
       {loading ? <div className="grid gap-3 md:grid-cols-2" data-testid="modules-loading">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-32 w-full" />)}</div>
         : error ? <Card className="space-y-3 p-4" role="alert" data-testid="modules-error"><p className="text-sm">{error}</p><Button variant="outline" onClick={load} data-testid="modules-retry"><RefreshCw className="mr-2 h-4 w-4" />Coba lagi</Button></Card>
-        : !items.length ? <Card className="p-5" data-testid="modules-empty"><p className="text-sm">Katalog modul belum tersedia. Hubungi administrator untuk memeriksa konfigurasi lingkungan.</p></Card>
-        : <div className="grid gap-3 md:grid-cols-2">{items.map((mod) => {
+        : !activeItems.length ? <Card className="p-5" data-testid="modules-empty"><p className="text-sm">Belum ada modul aktif untuk perusahaan ini. Hubungi Platform Admin untuk mengaktifkan modul yang dibutuhkan.</p></Card>
+        : <div className="grid gap-3 md:grid-cols-2">{activeItems.map((mod) => {
           const info = MODULE_INFO[mod.key];
           const Icon = info?.icon || ShieldCheck;
           const readiness = moduleReadiness(mod);
