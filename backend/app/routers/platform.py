@@ -23,7 +23,7 @@ from ..core.config import settings
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
 from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, require_platform_admin
-from ..core.rbac import TENANT_ADMIN_ROLE
+from ..core.rbac import MODULES, TENANT_ADMIN_ROLE
 from ..core.tenant_subscription import SUBSCRIPTION_FIELDS, parse_date, subscription_info
 from ..core.security import hash_password
 from ..core.storage import StorageError, get_object
@@ -71,6 +71,15 @@ class TenantCreate(SubscriptionFields):
     admin_use_primary_email: bool = True
     admin_full_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
     admin_email: Optional[EmailStr] = None
+    # Modul yang diambil tenant. Ditentukan Platform Admin; HR Core selalu aktif.
+    modules: List[str] = Field(default_factory=list)
+
+
+class TenantModuleToggle(BaseModel):
+    """Aktivasi modul tenant oleh Platform Admin."""
+
+    is_active: bool
+    notes: Optional[str] = Field(default=None, max_length=500)
 
 
 class TenantUpdate(SubscriptionFields):
@@ -184,6 +193,125 @@ async def get_tenant(tenant_id: str, ctx: AuthContext = Depends(require_platform
     return serialize(await _tenant_summary(await _tenant_or_404(tenant_id)))
 
 
+# ------------------------------------------------------------------- modules
+# Aktivasi modul HANYA di Konsol Platform. Sumber kebenaran tetap `company_modules`,
+# sehingga otorisasi backend dan menu tenant otomatis mengikuti modul yang diaktifkan di sini.
+def _catalog_fallback() -> List[Dict[str, Any]]:
+    keys = ("key", "name", "description", "is_core", "icon", "sort_order", "status")
+    return [{k: m.get(k) for k in keys} for m in MODULES]
+
+
+async def _module_catalog() -> List[Dict[str, Any]]:
+    db = get_db()
+    rows = await db.modules.find({}, NO_ID).sort("sort_order", 1).to_list(200)
+    return serialize_list(rows) if rows else _catalog_fallback()
+
+
+@router.get("/modules")
+async def list_module_catalog(ctx: AuthContext = Depends(require_platform_admin())):
+    """Katalog modul yang dapat diambil tenant (untuk wizard provisioning & tab modul)."""
+    items = await _module_catalog()
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/tenants/{tenant_id}/modules")
+async def list_tenant_modules(tenant_id: str, ctx: AuthContext = Depends(require_platform_admin())):
+    tenant = await _tenant_or_404(tenant_id)
+    db = get_db()
+    rows = await db.company_modules.find({"company_id": tenant_id}, NO_ID).to_list(200)
+    by_key = {r["module_key"]: r for r in rows}
+    items: List[Dict[str, Any]] = []
+    for mod in await _module_catalog():
+        row = by_key.get(mod["key"], {})
+        is_core = bool(mod.get("is_core"))
+        items.append(
+            {
+                **mod,
+                "is_active": is_core or bool(row.get("is_active")),
+                "can_toggle": not is_core,
+                "activated_at": row.get("activated_at"),
+                "deactivated_at": row.get("deactivated_at"),
+                "notes": row.get("notes"),
+            }
+        )
+    return {
+        "tenant": {"id": tenant["id"], "code": tenant.get("code"), "name": tenant.get("name")},
+        "items": items,
+        "total": len(items),
+        "active_count": sum(1 for i in items if i["is_active"]),
+    }
+
+
+@router.put("/tenants/{tenant_id}/modules/{module_key}")
+async def set_tenant_module(
+    tenant_id: str,
+    module_key: str,
+    payload: TenantModuleToggle,
+    ctx: AuthContext = Depends(require_platform_admin()),
+):
+    """Aktifkan/nonaktifkan satu modul untuk tenant tertentu (Platform Admin saja)."""
+    tenant = await _tenant_or_404(tenant_id)
+    db = get_db()
+    mod = next((m for m in await _module_catalog() if m["key"] == module_key), None)
+    if not mod:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Modul tidak ditemukan.")
+    if mod.get("is_core") and not payload.is_active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Modul HR Core adalah modul dasar dan tidak dapat dinonaktifkan.",
+        )
+    before = await db.company_modules.find_one({"company_id": tenant_id, "module_key": module_key}, NO_ID)
+    ts = now()
+    if before:
+        patch: Dict[str, Any] = {
+            "is_active": payload.is_active,
+            "notes": payload.notes,
+            "updated_at": ts,
+            "updated_by": ctx.user_id,
+        }
+        if payload.is_active:
+            patch["activated_at"] = ts
+            patch["deactivated_at"] = None
+        else:
+            patch["deactivated_at"] = ts
+        await db.company_modules.update_one({"id": before["id"], "company_id": tenant_id}, {"$set": patch})
+    else:
+        doc = {
+            "id": new_id(),
+            "company_id": tenant_id,
+            "module_key": module_key,
+            "is_active": payload.is_active,
+            "status": "active",
+            "activated_at": ts if payload.is_active else None,
+            "deactivated_at": None if payload.is_active else ts,
+            "notes": payload.notes,
+        }
+        doc.update(audit_fields(ctx.user_id, creating=True))
+        await db.company_modules.insert_one(dict(doc))
+    after = await db.company_modules.find_one({"company_id": tenant_id, "module_key": module_key}, NO_ID)
+    if payload.is_active and module_key == "asset":
+        # Phase 2A: master default Manajemen Aset (idempoten; tidak menimpa konfigurasi tenant).
+        from ..core.asset_service import seed_defaults
+
+        await seed_defaults(tenant_id, ctx.user_id)
+    await log_action(
+        ctx,
+        "activate" if payload.is_active else "deactivate",
+        "module",
+        after["id"],
+        mod["name"],
+        before=before,
+        after=after,
+        company_id=tenant_id,
+        module="platform",
+        notes=f"Aktivasi modul tenant {tenant.get('name') or tenant_id}",
+    )
+    return {
+        "message": f"Modul {mod['name']} berhasil " + ("diaktifkan." if payload.is_active else "dinonaktifkan."),
+        "item": serialize(after),
+    }
+
+
 # ------------------------------------------------------------------- create/edit
 @router.post("/tenants", status_code=status.HTTP_201_CREATED)
 async def create_tenant(payload: TenantCreate, ctx: AuthContext = Depends(require_platform_admin())):
@@ -218,6 +346,14 @@ async def create_tenant(payload: TenantCreate, ctx: AuthContext = Depends(requir
             "pertama; pengguna yang sudah ada dapat ditambahkan dari tab Users setelah tenant dibuat.",
         )
     sub = _normalize_subscription(payload.model_dump(include=set(SUBSCRIPTION_FIELDS)))
+    requested_modules = sorted({(m or "").strip() for m in payload.modules if (m or "").strip()})
+    catalog_keys = {m["key"] for m in await _module_catalog()}
+    unknown = [k for k in requested_modules if k not in catalog_keys]
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Modul tidak dikenal: {', '.join(sorted(unknown))}.",
+        )
 
     tenant_id = new_id()
     admin_id = new_id()
@@ -267,8 +403,8 @@ async def create_tenant(payload: TenantCreate, ctx: AuthContext = Depends(requir
         written.append("user")
         await db.user_company_roles.insert_one(dict(membership))
         written.append("membership")
-        # Reuse helper existing: modul inti aktif + pengaturan default tenant.
-        await seed_company_modules(tenant_id, [], ctx.user_id)
+        # Reuse helper existing: modul inti aktif + modul yang dipilih Platform Admin.
+        await seed_company_modules(tenant_id, requested_modules, ctx.user_id)
         await ensure_company_settings(tenant_id, ctx.user_id)
         # Upgrade 01B: 3 status karyawan default (Aktif/Standby/Tidak Aktif) dibuat
         # eksplisit saat provisioning (bukan lewat AUTO_SEED saat startup).
@@ -293,6 +429,9 @@ async def create_tenant(payload: TenantCreate, ctx: AuthContext = Depends(requir
     clean = {k: v for k, v in doc.items() if k != "_id"}
     await log_action(ctx, "create", "tenant", tenant_id, doc["name"], after=clean, company_id=tenant_id,
                      module="platform", notes="Tenant dibuat oleh Platform Admin beserta Tenant Admin pertama")
+    await log_action(ctx, "activate", "module", tenant_id, f"Akses modul {doc['name']}",
+                     after={"modules": sorted({"hr_core", *requested_modules})}, company_id=tenant_id,
+                     module="platform", notes="Modul awal ditetapkan Platform Admin saat provisioning tenant")
     await log_action(ctx, "create", "user", admin_id, admin_email,
                      after={k: v for k, v in admin.items() if k != "password_hash"}, company_id=tenant_id,
                      notes="Akun Tenant Admin pertama dibuat saat provisioning tenant")

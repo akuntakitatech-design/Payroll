@@ -338,7 +338,7 @@ def require_permission(resource: str, action: str, module_key: Optional[str] = N
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 f"Modul terkait belum diaktifkan untuk perusahaan {ctx.company.get('name')}. "
-                "Aktifkan modul di menu Aktivasi Modul.",
+                "Hubungi Platform Admin untuk mengaktifkan modul tersebut.",
             )
         if not ctx.has_permission(resource, action):
             raise HTTPException(

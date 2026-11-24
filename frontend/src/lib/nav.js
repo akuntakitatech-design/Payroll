@@ -95,7 +95,7 @@ export const NAV_GROUPS = [
     key: "configuration",
     label: "Konfigurasi",
     items: [
-      { key: "modules", label: "Aktivasi Modul", to: "/setup/modules", icon: Boxes, resource: "module", action: "view" },
+      { key: "modules", label: "Modul Perusahaan", to: "/setup/modules", icon: Boxes, resource: "module", action: "view" },
       { key: "policies", label: "Kebijakan Perusahaan", to: "/setup/policies", icon: SlidersHorizontal, resource: "policy", action: "view" },
       { key: "approval-workflows", label: "Alur Persetujuan", to: "/setup/approval-workflows", icon: GitBranch, resource: "approval_workflow", action: "view" },
       { key: "settings", label: "Pengaturan Sistem", to: "/settings", icon: Settings, resource: "settings", action: "view" },
@@ -110,7 +110,7 @@ export const NAV_GROUPS = [
       { key: "employee-completeness", label: "Kelengkapan Data", to: "/employees/completeness", icon: ClipboardCheck, resource: "employee", action: "view", module: "employee_core" },
       { key: "employee-update-form", label: "Form Pembaruan Data", to: "/employees/update-form", icon: ClipboardList, resource: "employee", action: "view", module: "employee_core" },
       { key: "employee-update-verifications", label: "Verifikasi Pembaruan Data", to: "/employees/update-verifications", icon: UserCheck, resource: "employee_form", action: "verify", module: "employee_core" },
-      { key: "reminders", label: "Kalender Masa Berlaku", to: "/reminders", icon: CalendarClock, resource: "document", action: "view" },
+      { key: "reminders", label: "Kalender Masa Berlaku", to: "/reminders", icon: CalendarClock, resource: "document", action: "view", module: "employee_core" },
     ],
   },
   {
@@ -144,7 +144,7 @@ export const NAV_GROUPS = [
     key: "documents",
     label: "Dokumen",
     items: [
-      { key: "documents", label: "Arsip Dokumen", to: "/documents", icon: FileText, resource: "document", action: "view" },
+      { key: "documents", label: "Arsip Dokumen", to: "/documents", icon: FileText, resource: "document", action: "view", module: "employee_core" },
     ],
   },
   {

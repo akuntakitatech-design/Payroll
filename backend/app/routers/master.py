@@ -17,12 +17,12 @@ def _cfg(resource_path: str, ctx: Optional[AuthContext] = None) -> Dict[str, Any
     cfg = MASTERS.get(resource_path)
     if not cfg:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Jenis master data tidak dikenal.")
-    # Phase 2A: master milik modul non-core (mis. `asset`) mengikuti Aktivasi Modul, sama seperti require_permission.
+    # Phase 2A: master milik modul non-core (mis. `asset`) mengikuti aktivasi modul oleh Platform Admin.
     if ctx is not None and cfg.get("module") and not ctx.has_module(cfg["module"]):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             f"Modul terkait belum diaktifkan untuk perusahaan {(ctx.company or {}).get('name')}. "
-            "Aktifkan modul di menu Aktivasi Modul.",
+            "Hubungi Platform Admin untuk mengaktifkan modul tersebut.",
         )
     return cfg
 

@@ -78,7 +78,7 @@ const AssetModuleLayout = () => {
           description={
             moduleOn
               ? "Minta administrator menambahkan hak akses aset pada peran Anda."
-              : "Aktifkan modul Manajemen Aset di menu Aktivasi Modul untuk mulai mengelola aset."
+              : "Modul Manajemen Aset belum diaktifkan untuk perusahaan ini. Hubungi Platform Admin untuk mengaktifkannya."
           }
         />
       </>

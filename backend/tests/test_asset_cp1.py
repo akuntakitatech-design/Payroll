@@ -90,6 +90,24 @@ async def _mk_user(env, role_key, company_id, label):
     return uid, {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
+async def _mk_platform_admin(env):
+    """Platform Admin (super_admin global) untuk menguji aktivasi modul via Konsol Platform."""
+    db = get_db()
+    email = f"tast.platform.{RUN.lower()}@kelolakita.dev"
+    pw = "Tast-" + secrets.token_urlsafe(12)
+    uid = new_id()
+    await db.users.insert_one({"id": uid, "company_id": None, "status": "active", "email": email,
+                               "full_name": "TAST Platform", "password_hash": hash_password(pw),
+                               "default_company_id": None, "must_change_password": False,
+                               "is_demo_account": False, "created_at": now(), "updated_at": now()})
+    await db.user_company_roles.insert_one({"id": new_id(), "company_id": None, "status": "active", "user_id": uid,
+                                            "role_key": "super_admin", "created_at": now(), "updated_at": now()})
+    env.user_ids.append(uid)
+    r = await env.c.post("/api/auth/login", json={"email": email, "password": pw})
+    assert r.status_code == 200, r.text
+    return uid, {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
 async def _mk_ref(env, coll, cid, code):
     doc = {"id": new_id(), "company_id": cid, "status": "active", "code": f"{code}{RUN}"[:20], "name": f"{code} {MARK}",
            "created_at": now(), "updated_at": now()}
@@ -120,6 +138,7 @@ async def setup(env):
     env.wb = await _mk_ref(env, "work_locations", env.cid_b, "WB")
     env.admin_id, env.admin = await _mk_user(env, "tenant_admin", env.cid, "admin")
     env.adminb_id, env.adminb = await _mk_user(env, "tenant_admin", env.cid_b, "adminb")
+    env.pa_id, env.pa = await _mk_platform_admin(env)
     env.ga_id, env.ga = await _mk_user(env, "ga_admin", env.cid, "gaadmin")        # tanpa baris scope -> ALL_TENANT
     env.gs_id, env.gs = await _mk_user(env, "ga_staff", env.cid, "gastaff")
     env.hr_id, env.hr = await _mk_user(env, "hr_admin", env.cid, "hradmin")
@@ -187,17 +206,19 @@ async def t_module_activation(env):
     check("modul nonaktif: master aset -> 403", r.status_code == 403, str(r.status_code))
     me = (await c.get("/api/auth/me", headers=env.ga)).json()
     check("modul nonaktif: /auth/me tanpa modul asset", "asset" not in me.get("modules", []))
-    for cid, h in ((env.cid, env.admin), (env.cid_b, env.adminb)):
-        r = await c.put("/api/modules/toggle", json={"module_key": "asset", "is_active": True}, headers=h)
-        check(f"aktivasi modul asset ({'A' if cid == env.cid else 'B'}) -> 200", r.status_code == 200, r.text[:200])
+    for cid in (env.cid, env.cid_b):
+        r = await c.put(f"/api/platform/tenants/{cid}/modules/asset", json={"is_active": True}, headers=env.pa)
+        check(f"aktivasi modul asset via platform ({'A' if cid == env.cid else 'B'}) -> 200", r.status_code == 200, r.text[:200])
+    r = await c.put("/api/modules/toggle", json={"module_key": "asset", "is_active": True}, headers=env.admin)
+    check("tenant admin tidak dapat mengaktifkan modul sendiri -> 403", r.status_code == 403, str(r.status_code))
     db = get_db()
     counts = {t: await db[t].count_documents({"company_id": env.cid}) for t in ("asset_categories", "asset_units", "asset_conditions", "asset_statuses")}
     check("seed default: 7 kategori, 6 satuan, 5 kondisi, 7 status", counts == {"asset_categories": 7, "asset_units": 6,
                                                                                 "asset_conditions": 5, "asset_statuses": 7}, str(counts))
-    await c.put("/api/modules/toggle", json={"module_key": "asset", "is_active": False}, headers=env.admin)
+    await c.put(f"/api/platform/tenants/{env.cid}/modules/asset", json={"is_active": False}, headers=env.pa)
     r = await c.get("/api/assets", headers=env.ga)
     check("modul dinonaktifkan lagi -> GA Admin 403", r.status_code == 403, str(r.status_code))
-    await c.put("/api/modules/toggle", json={"module_key": "asset", "is_active": True}, headers=env.admin)
+    await c.put(f"/api/platform/tenants/{env.cid}/modules/asset", json={"is_active": True}, headers=env.pa)
     counts2 = {t: await db[t].count_documents({"company_id": env.cid}) for t in counts}
     check("aktivasi ulang: seed idempoten (tanpa duplikat)", counts2 == counts, str(counts2))
     me = (await c.get("/api/auth/me", headers=env.ga)).json()

@@ -58,7 +58,7 @@ const SECTIONS = [
     title: "3. Konfigurasi Sistem",
     description: "Pengaturan teknis dan langganan modul untuk perusahaan aktif.",
     items: [
-      { to: "/setup/modules", label: "Aktivasi Modul", icon: Boxes, resource: "module", desc: "Nyalakan hanya modul yang dipakai" },
+      { to: "/setup/modules", label: "Modul Perusahaan", icon: Boxes, resource: "module", desc: "Lihat modul yang diaktifkan Platform Admin" },
       { to: "/settings", label: "Pengaturan Sistem", icon: Settings, resource: "settings", desc: "Format tanggal, NIK otomatis, keamanan" },
     ],
   },

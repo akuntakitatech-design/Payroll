@@ -104,6 +104,24 @@ async def _mk_user(env, role_key, company_id, label):
     return uid, {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
+async def _mk_platform_admin(env):
+    """Platform Admin (super_admin global) untuk aktivasi modul via Konsol Platform."""
+    db = get_db()
+    email = f"t02.platform.{RUN.lower()}@kelolakita.dev"
+    pw = "T02-" + secrets.token_urlsafe(12)
+    uid = new_id()
+    await db.users.insert_one({"id": uid, "company_id": None, "status": "active", "email": email,
+                               "full_name": f"{MARK} Platform", "password_hash": hash_password(pw),
+                               "default_company_id": None, "must_change_password": False,
+                               "is_demo_account": False, "created_at": now(), "updated_at": now()})
+    await db.user_company_roles.insert_one({"id": new_id(), "company_id": None, "status": "active", "user_id": uid,
+                                            "role_key": "super_admin", "created_at": now(), "updated_at": now()})
+    env.user_ids.append(uid)
+    r = await env.c.post("/api/auth/login", json={"email": email, "password": pw})
+    assert r.status_code == 200, r.text
+    return uid, {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
 async def _mk_ref(env, coll, cid, code):
     doc = {"id": new_id(), "company_id": cid, "status": "active", "code": f"{code}{RUN}"[:20], "name": f"{code} {MARK}",
            "created_at": now(), "updated_at": now()}
@@ -156,6 +174,7 @@ async def setup(env):
     env.pos = await _mk_ref(env, "positions", env.cid, "JAB")
     env.admin_id, env.admin = await _mk_user(env, "tenant_admin", env.cid, "admin")
     env.adminb_id, env.adminb = await _mk_user(env, "tenant_admin", env.cid_b, "adminb")
+    env.pa_id, env.pa = await _mk_platform_admin(env)
     env.ga_id, env.ga = await _mk_user(env, "ga_admin", env.cid, "gaadmin")          # tanpa baris scope -> ALL_TENANT
     env.gs_id, env.gs = await _mk_user(env, "ga_staff", env.cid, "gastaff")
     env.emp_id, env.emp = await _mk_user(env, "employee", env.cid, "employee")
@@ -167,8 +186,8 @@ async def setup(env):
     await _raw_scope(env.cid, env.r12_id, DS.SELECTED_PROJECTS, [env.p1, env.p2])
     await _raw_scope(env.cid, env.re_id, DS.SELECTED_PROJECTS, [])
     await _raw_scope(env.cid, env.rc_id, DS.SELECTED_PROJECTS, [env.p1, env.p2])
-    for h in (env.admin, env.adminb):
-        r = await env.c.put("/api/modules/toggle", json={"module_key": "asset", "is_active": True}, headers=h)
+    for cid in (env.cid, env.cid_b):
+        r = await env.c.put(f"/api/platform/tenants/{cid}/modules/asset", json={"is_active": True}, headers=env.pa)
         assert r.status_code == 200, r.text
     env.hrga = (await _mk_user(env, await _custom_role(env, "hrga", "ga_admin"), env.cid, "hrga"))[1]
     env.hrgs = (await _mk_user(env, await _custom_role(env, "hrgs", "ga_staff"), env.cid, "hrgs"))[1]

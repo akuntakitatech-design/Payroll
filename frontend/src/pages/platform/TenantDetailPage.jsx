@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { brandTitle, useBranding } from "@/lib/branding";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { MODULE_INFO } from "@/lib/nav";
 import PageHeader, { PageBody } from "@/components/common/PageHeader";
 import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
@@ -30,6 +31,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -89,6 +91,9 @@ const TenantDetailPage = () => {
   const [users, setUsers] = useState(null);
   const [activities, setActivities] = useState(null);
   const [roles, setRoles] = useState([]);
+  const [modules, setModules] = useState(null);
+  const [modulesError, setModulesError] = useState("");
+  const [pendingModule, setPendingModule] = useState(null);
   const [tab, setTab] = useState("summary");
 
   const [editOpen, setEditOpen] = useState(false);
@@ -136,12 +141,43 @@ const TenantDetailPage = () => {
     }
   }, [tenantId]);
 
+  const loadModules = useCallback(async () => {
+    setModulesError("");
+    try {
+      const { data } = await api.get(`/platform/tenants/${tenantId}/modules`);
+      setModules(data.items || []);
+    } catch (err) {
+      setModulesError(errorMessage(err, "Modul tenant tidak dapat dimuat."));
+      setModules([]);
+    }
+  }, [tenantId]);
+
+  const toggleModule = async (mod, nextActive) => {
+    setPendingModule(mod.key);
+    try {
+      const { data } = await api.put(`/platform/tenants/${tenantId}/modules/${mod.key}`, {
+        is_active: nextActive,
+      });
+      toast.success(data.message, {
+        description: nextActive
+          ? "Menu modul akan tampil di tenant setelah pengguna memuat ulang sesi."
+          : "Menu modul disembunyikan dari tenant. Data yang sudah ada tidak dihapus.",
+      });
+      await loadModules();
+    } catch (err) {
+      toast.error(errorMessage(err, "Status modul tidak dapat diubah."));
+    } finally {
+      setPendingModule(null);
+    }
+  };
+
   useEffect(() => {
     load();
     loadUsers();
     loadActivities();
+    loadModules();
     api.get("/platform/tenant-roles").then(({ data }) => setRoles(data.items || [])).catch(() => setRoles([]));
-  }, [load, loadUsers, loadActivities]);
+  }, [load, loadUsers, loadActivities, loadModules]);
 
   useEffect(() => {
     document.title = brandTitle(branding, tenant ? `Tenant ${tenant.code}` : "Detail Tenant");
@@ -151,6 +187,7 @@ const TenantDetailPage = () => {
     load();
     loadUsers();
     loadActivities();
+    loadModules();
   };
 
   const openEdit = () => {
@@ -314,6 +351,7 @@ const TenantDetailPage = () => {
   const sub = tenant.subscription || {};
   const blocked = tenant.status !== "active" || sub.status === "expired";
   const roleOptions = roles.map((r) => ({ value: r.key, label: r.name }));
+  const activeModuleCount = (modules || []).filter((m) => m.is_active).length;
 
   return (
     <>
@@ -372,6 +410,9 @@ const TenantDetailPage = () => {
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList data-testid="tenant-detail-tabs">
             <TabsTrigger value="summary" data-testid="tenant-tab-summary">Ringkasan</TabsTrigger>
+            <TabsTrigger value="modules" data-testid="tenant-tab-modules">
+              Modul &amp; Fitur{modules ? ` (${activeModuleCount})` : ""}
+            </TabsTrigger>
             <TabsTrigger value="users" data-testid="tenant-tab-users">Users ({users?.length ?? tenant.user_count})</TabsTrigger>
             <TabsTrigger value="activity" data-testid="tenant-tab-activity">Aktivitas</TabsTrigger>
           </TabsList>
@@ -419,6 +460,76 @@ const TenantDetailPage = () => {
                 </p>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="modules" className="mt-4">
+            <Card className="border-border bg-card" data-testid="tenant-modules-card">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+                <div>
+                  <h2 className="text-section-title">Modul &amp; Fitur Tenant</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Menu di tenant mengikuti modul yang aktif di sini. Menonaktifkan modul menyembunyikan menu, tetapi data lama tidak dihapus.
+                  </p>
+                </div>
+                <span className="text-[13px] tabular-nums text-muted-foreground" data-testid="tenant-modules-count">
+                  {modules === null ? "Memuat…" : `${activeModuleCount} dari ${modules.length} modul aktif`}
+                </span>
+              </div>
+              {modulesError ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm text-destructive" role="alert" data-testid="tenant-modules-error">
+                  <span>{modulesError}</span>
+                  <Button variant="outline" size="sm" onClick={loadModules}>Coba lagi</Button>
+                </div>
+              ) : modules === null ? (
+                <div className="grid gap-3 p-4 md:grid-cols-2" data-testid="tenant-modules-loading">
+                  {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
+                </div>
+              ) : (
+                <div className="grid gap-3 p-4 md:grid-cols-2">
+                  {modules.map((mod) => {
+                    const info = MODULE_INFO[mod.key];
+                    const Icon = info?.icon || Lock;
+                    return (
+                      <div key={mod.key} className="flex items-start justify-between gap-3 rounded-lg border border-border p-3" data-testid={`tenant-module-${mod.key}`}>
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold">{mod.name}</p>
+                              {mod.is_core && (
+                                <Badge variant="outline" className="gap-1 text-[10px] font-normal">
+                                  <Lock className="h-3 w-3" />Modul dasar
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{mod.description}</p>
+                            {mod.is_active && mod.activated_at && (
+                              <p className="mt-1 text-[10px] text-muted-foreground">Aktif sejak {formatDateTime(mod.activated_at)}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          {pendingModule === mod.key ? (
+                            <Skeleton className="h-6 w-10 rounded-full" />
+                          ) : (
+                            <Switch
+                              checked={mod.is_active}
+                              disabled={!mod.can_toggle}
+                              onCheckedChange={(v) => toggleModule(mod, v)}
+                              aria-label={`Aktifkan modul ${mod.name}`}
+                              data-testid={`tenant-module-toggle-${mod.key}`}
+                            />
+                          )}
+                          <span className="text-[10px] text-muted-foreground">{mod.is_active ? "Aktif" : "Nonaktif"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
           </TabsContent>
 
           <TabsContent value="users" className="mt-4">
