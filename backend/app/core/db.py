@@ -168,6 +168,9 @@ TENANT_COLLECTIONS = [
     "roster_patterns",
     "project_roster_configs",
     "roster_leave_plans",
+    # Module 4 CP2 - Mobilisasi GA (transport per siklus cuti) + histori perubahan jadwal (append-only).
+    "roster_mobilizations",
+    "roster_schedule_changes",
     # Core HR - Exit Clearance (offboarding): kasus keluar + checklist serah terima per bagian.
     "exit_clearances",
     "exit_clearance_items",
@@ -481,6 +484,24 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "employee_id": "fk", "project_id": "fk", "pattern_id": "fk", "cycle_no": "i",
         "off_start": "s32", "off_end": "s32", "plan_status": "s32", "replacement_needed": "b",
         "decided_at": "dt", "decided_by": "fk", "decision_note": "t",
+    },
+    # Module 4 CP2 - Mobilisasi GA: satu catatan per rencana cuti (keberangkatan + kepulangan).
+    # mobilization_state: PLANNED | CANCELLED. Status DEPARTED/RETURNED diturunkan dari tanggal.
+    "roster_mobilizations": {
+        "plan_id": "fk", "project_id": "fk", "employee_id": "fk",
+        "depart_date": "s32", "depart_time": "s32", "depart_mode": "s32",
+        "depart_carrier": "s", "depart_ticket": "s64", "depart_from": "s", "depart_to": "s",
+        "return_date": "s32", "return_time": "s32", "return_mode": "s32",
+        "return_carrier": "s", "return_ticket": "s64", "return_from": "s", "return_to": "s",
+        "accommodation": "t", "notes": "t", "mobilization_state": "s32",
+        "cancelled_at": "dt", "cancelled_by": "fk", "cancel_reason": "t",
+    },
+    # Module 4 CP2 - Histori perubahan jadwal (append-only): siapa, kapan, alasan, sebelum/sesudah.
+    "roster_schedule_changes": {
+        "plan_id": "fk", "mobilization_id": "fk", "project_id": "fk", "employee_id": "fk",
+        "employee_name": "s", "project_name": "s", "change_type": "s32",
+        "before_data": "j", "after_data": "j", "reason": "t",
+        "changed_by": "fk", "changed_by_name": "s", "changed_at": "dt",
     },
     # Core HR - Exit Clearance. case_state: DRAFT | PENDING_APPROVAL | COMPLETED | CANCELLED.
     # item_state: PENDING | DONE | NA. Nomor kasus memakai doc_sequence EXIT_CLEARANCE.
@@ -932,6 +953,15 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "roster_leave_plans": [
         ("uq_roster_plan_employee_start", ["company_id", "employee_id", "off_start"], True),
         ("ix_roster_plan_project", ["company_id", "project_id", "off_start"], False),
+    ],
+    "roster_mobilizations": [
+        ("uq_roster_mobilization_plan", ["company_id", "plan_id"], True),
+        ("ix_roster_mobilization_project", ["company_id", "project_id", "depart_date"], False),
+        ("ix_roster_mobilization_return", ["company_id", "return_date"], False),
+    ],
+    "roster_schedule_changes": [
+        ("ix_roster_change_plan", ["company_id", "plan_id", "changed_at"], False),
+        ("ix_roster_change_project", ["company_id", "project_id", "changed_at"], False),
     ],
     "exit_clearances": [
         ("ux_exit_case_number", ["company_id", "case_number"], True),

@@ -168,6 +168,9 @@ const RosterOverviewPage = () => {
                 <Button variant="outline" asChild data-testid="roster-open-plans">
                   <Link to="/modules/mobilization/rencana"><ClipboardList className="mr-1.5 h-4 w-4" />Rencana Cuti</Link>
                 </Button>
+                <Button variant="outline" asChild data-testid="roster-open-mobilization">
+                  <Link to={`/modules/mobilization/mobilisasi?project=${projectId}`}><Plane className="mr-1.5 h-4 w-4" />Mobilisasi</Link>
+                </Button>
               </div>
             </div>
           </Card>
