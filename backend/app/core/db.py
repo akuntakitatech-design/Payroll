@@ -334,6 +334,10 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         # PENDING = menunggu verifikasi, VERIFIED = terverifikasi, REJECTED = ditolak (alasan wajib).
         "verification_state": "s64", "verification_note": "t",
         "verified_by": "fk", "verified_by_name": "s", "verified_at": "dt",
+        # Modul 3 Blueprint HRGA - histori versi dokumen. Dokumen lama (tanpa nilai) dianggap
+        # versi terbaru; `version` menyimpan nomor versi, grup menautkan versi satu dokumen.
+        "document_group_id": "fk", "superseded_by_document_id": "fk",
+        "superseded_at": "dt", "superseded_by": "fk", "superseded_by_name": "s",
     },
     "employees": {
         "full_name": "s", "employee_number": "s64", "nik": "s64", "npwp": "s64", "gender": "s64",
@@ -904,7 +908,8 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "config_overrides": [("ix_config_lookup", ["company_id", "config_key", "scope_type"], False)],
     "approval_steps": [("ix_steps_workflow", ["company_id", "workflow_id", "step_order"], False)],
     "documents": [("ix_documents_owner", ["company_id", "owner_type", "owner_id"], False),
-                  ("ix_documents_verification", ["company_id", "verification_state"], False)],
+                  ("ix_documents_verification", ["company_id", "verification_state"], False),
+                  ("ix_documents_group", ["company_id", "document_group_id", "version"], False)],
     "employees": [
         ("ix_employee_current_status", ["company_id", "current_employee_status_id"], False),
         ("ix_employee_number", ["company_id", "employee_number"], False),
