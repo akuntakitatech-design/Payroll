@@ -75,8 +75,8 @@ MASTER_SEED: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
     "NEP": {
         "branches": [
             {"code": "HO", "name": "Head Office Jakarta", "city": "Jakarta Selatan", "province": "DKI Jakarta", "is_head_office": True, "address": "Menara Prima Lt. 18"},
-            {"code": "BLK", "name": "Cabang Balikpapan", "city": "Balikpapan", "province": "Kalimantan Timur", "is_head_office": False, "address": "Jl. MT Haryono No. 88"},
-            {"code": "SBY", "name": "Cabang Surabaya", "city": "Surabaya", "province": "Jawa Timur", "is_head_office": False, "address": "Jl. Basuki Rahmat No. 12"},
+            {"code": "BLK", "name": "Unit Operasional Balikpapan", "city": "Balikpapan", "province": "Kalimantan Timur", "is_head_office": False, "address": "Jl. MT Haryono No. 88"},
+            {"code": "SBY", "name": "Unit Operasional Surabaya", "city": "Surabaya", "province": "Jawa Timur", "is_head_office": False, "address": "Jl. Basuki Rahmat No. 12"},
         ],
         "job_grades": [
             {"code": "G1", "name": "Staff", "level": 1, "min_salary": 5000000, "max_salary": 8000000},
@@ -149,7 +149,7 @@ MASTER_SEED: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
     "KBS": {
         "branches": [
             {"code": "HO", "name": "Kantor Pusat Surabaya", "city": "Surabaya", "province": "Jawa Timur", "is_head_office": True, "address": "Darmo Permai III No. 21"},
-            {"code": "MLG", "name": "Cabang Malang", "city": "Malang", "province": "Jawa Timur", "is_head_office": False, "address": "Jl. Soekarno Hatta No. 9"},
+            {"code": "MLG", "name": "Unit Operasional Malang", "city": "Malang", "province": "Jawa Timur", "is_head_office": False, "address": "Jl. Soekarno Hatta No. 9"},
         ],
         "job_grades": [
             {"code": "L1", "name": "Pelaksana", "level": 1, "min_salary": 4500000, "max_salary": 7000000},
@@ -1045,10 +1045,10 @@ async def seed_master(company_ids: Dict[str, str]) -> None:
         if code == "NEP":
             overrides = [
                 {"config_key": "leave.annual_quota_days", "scope_type": "company", "scope_id": None, "scope_label": "Default Perusahaan", "value": 12},
-                {"config_key": "leave.annual_quota_days", "scope_type": "branch", "scope_id": branches.get("BLK"), "scope_label": "Cabang Balikpapan", "value": 14},
+                {"config_key": "leave.annual_quota_days", "scope_type": "branch", "scope_id": branches.get("BLK"), "scope_label": "Unit Operasional Balikpapan", "value": 14},
                 {"config_key": "leave.annual_quota_days", "scope_type": "project", "scope_id": lookup["projects"].get("PRJ-001"), "scope_label": "EPC Gas Plant Sangatta", "value": 18},
                 {"config_key": "attendance.late_tolerance_minutes", "scope_type": "company", "scope_id": None, "scope_label": "Default Perusahaan", "value": 10},
-                {"config_key": "attendance.late_tolerance_minutes", "scope_type": "branch", "scope_id": branches.get("BLK"), "scope_label": "Cabang Balikpapan", "value": 20},
+                {"config_key": "attendance.late_tolerance_minutes", "scope_type": "branch", "scope_id": branches.get("BLK"), "scope_label": "Unit Operasional Balikpapan", "value": 20},
                 {"config_key": "payroll.cut_off_day", "scope_type": "company", "scope_id": None, "scope_label": "Default Perusahaan", "value": 25},
                 {"config_key": "contract.expiry_reminder_days", "scope_type": "company", "scope_id": None, "scope_label": "Default Perusahaan", "value": 45},
             ]

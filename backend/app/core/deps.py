@@ -329,7 +329,7 @@ def require_permission(resource: str, action: str, module_key: Optional[str] = N
     """Dependency factory: enforces module activation + permission.
 
     `self_service=True` (Upgrade 01I): endpoint mandiri (absen/cuti/lembur milik sendiri) dikecualikan dari
-    guard modul-belum-scope-aware. Handler-nya WAJIB memanggil `data_scope.require_full_scope` pada cabang
+    guard modul-belum-scope-aware. Handler-nya WAJIB memanggil `data_scope.require_full_scope` pada unit operasional
     yang menyentuh data karyawan lain (mis. HR mengajukan untuk orang lain / list tanpa `mine`)."""
     needed_module = module_key or resource_module(resource)
 

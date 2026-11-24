@@ -36,7 +36,7 @@ const placementFields = (catalog, { includeStart = true } = {}) => {
   return [
     { name: "project_id", label: "Project", type: "select", options: opt("projects") },
     { name: "work_location_id", label: "Site / Lokasi Kerja", type: "select", options: opt("work_locations") },
-    { name: "branch_id", label: "Cabang", type: "select", options: opt("branches") },
+    { name: "branch_id", label: "Unit Operasional", type: "select", options: opt("branches") },
     { name: "department_id", label: "Departemen", type: "select", options: opt("departments") },
     { name: "division_id", label: "Divisi", type: "select", options: opt("divisions") },
     { name: "position_id", label: "Jabatan", type: "select", options: opt("positions") },
@@ -213,7 +213,7 @@ export const AssignmentTab = ({ employee, company, catalog, canEdit, canChangeSt
             <InfoRow label="Project" value={current.project_name} testId="placement-project" />
             <InfoRow label="Site / Lokasi Kerja" value={current.work_location_name} testId="placement-location" />
             <InfoRow label="Perusahaan" value={company?.name || current.company_name} testId="placement-company" />
-            <InfoRow label="Cabang" value={current.branch_name} testId="placement-branch" />
+            <InfoRow label="Unit Operasional" value={current.branch_name} testId="placement-branch" />
             <InfoRow label="Departemen" value={current.department_name} testId="placement-department" />
             <InfoRow label="Divisi" value={current.division_name} testId="placement-division" />
             <InfoRow label="Jabatan" value={current.position_name || employee.job_title} testId="placement-position" />

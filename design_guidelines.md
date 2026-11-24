@@ -252,7 +252,7 @@
     },
     "dashboard_header": {
       "structure": [
-        "Kiri: sapaan + nama perusahaan + meta (periode, cabang aktif)",
+        "Kiri: sapaan + nama perusahaan + meta (periode, unit operasional aktif)",
         "Tengah: inline stats kecil (Pengguna, Dokumen, Modul aktif) sebagai chips", 
         "Kanan: tombol aksi (mis. 'Tambah Karyawan', 'Unggah Dokumen') + ilustrasi kecil"
       ],

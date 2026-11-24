@@ -44,7 +44,7 @@ router = APIRouter(prefix="/employees", tags=["Karyawan"])
 # FK field -> (collection, label)
 REF_FIELDS: Dict[str, tuple] = {
     "employment_status_id": ("employment_statuses", "Status kepegawaian"),
-    "branch_id": ("branches", "Cabang"),
+    "branch_id": ("branches", "Unit Operasional"),
     "work_location_id": ("work_locations", "Lokasi kerja"),
     "department_id": ("departments", "Departemen"),
     "division_id": ("divisions", "Divisi"),

@@ -23,7 +23,7 @@ SCOPE_PRECEDENCE = {
 
 SCOPE_LABELS = {
     "company": "Perusahaan (Default)",
-    "branch": "Cabang",
+    "branch": "Unit Operasional",
     "division": "Divisi",
     "project": "Proyek",
     "employee": "Karyawan",

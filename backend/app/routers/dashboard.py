@@ -189,7 +189,7 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
     attention: List[Dict[str, Any]] = []
 
     setup_missing = [
-        ("branches", "Cabang", "/setup/branches"),
+        ("branches", "Unit Operasional", "/setup/branches"),
         ("departments", "Departemen", "/setup/departments"),
         ("positions", "Jabatan", "/setup/positions"),
         ("job_grades", "Grade / Level", "/setup/job-grades"),
@@ -528,7 +528,7 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
         "employees_active": {
             "available": True,
             "value": counts["employees"],
-            "meta": f"{len(dept_rows)} departemen · {counts['branches']} cabang",
+            "meta": f"{len(dept_rows)} departemen · {counts['branches']} unit operasional",
             "link": "/employees",
             "extra": {"joined_last_30d": joined_last_30d},
         },
@@ -649,7 +649,7 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
 
     setup_steps = [
         {"key": "company", "label": "Profil perusahaan", "done": bool(ctx.company.get("address")), "link": "/company"},
-        {"key": "branches", "label": "Cabang & lokasi kerja", "done": counts["branches"] > 0, "link": "/setup/branches"},
+        {"key": "branches", "label": "Unit Operasional & lokasi kerja", "done": counts["branches"] > 0, "link": "/setup/branches"},
         {"key": "org", "label": "Struktur organisasi", "done": counts["departments"] > 0 and counts["positions"] > 0, "link": "/setup/departments"},
         {"key": "grades", "label": "Grade & cost center", "done": counts["job_grades"] > 0 and counts["cost_centers"] > 0, "link": "/setup/job-grades"},
         {"key": "documents", "label": "Tipe dokumen", "done": counts["document_types"] > 0, "link": "/setup/document-types"},

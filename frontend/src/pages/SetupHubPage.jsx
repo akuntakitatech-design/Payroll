@@ -30,7 +30,7 @@ const SECTIONS = [
     description:
       "Data induk yang dipakai berulang di semua modul. Isi sekali di sini, lalu dipakai di mana-mana.",
     items: [
-      { to: "/setup/branches", label: "Cabang", icon: Network, resource: "branch", desc: "Kantor pusat dan cabang perusahaan" },
+      { to: "/setup/branches", label: "Unit Operasional", icon: Network, resource: "branch", desc: "Kantor pusat dan unit operasional perusahaan" },
       { to: "/setup/work-locations", label: "Lokasi Kerja", icon: MapPin, resource: "work_location", desc: "Kantor, site proyek, gudang" },
       { to: "/setup/departments", label: "Departemen", icon: Layers, resource: "department", desc: "Struktur departemen" },
       { to: "/setup/divisions", label: "Divisi", icon: GitBranch, resource: "division", desc: "Unit di bawah departemen" },
@@ -49,7 +49,7 @@ const SECTIONS = [
     key: "policy",
     title: "2. Kebijakan Perusahaan",
     description:
-      "Aturan yang dapat diwariskan: Perusahaan → Cabang → Divisi → Proyek → Karyawan. Aturan paling spesifik yang berlaku.",
+      "Aturan yang dapat diwariskan: Perusahaan → Unit Operasional → Divisi → Proyek → Karyawan. Aturan paling spesifik yang berlaku.",
     items: [
       { to: "/setup/policies", label: "Kebijakan & Override", icon: SlidersHorizontal, resource: "policy", desc: "Absensi, cuti, lembur, payroll, kontrak, persetujuan" },
       { to: "/setup/approval-workflows", label: "Alur Persetujuan", icon: GitBranch, resource: "approval_workflow", desc: "Tentukan siapa menyetujui apa, berjenjang" },

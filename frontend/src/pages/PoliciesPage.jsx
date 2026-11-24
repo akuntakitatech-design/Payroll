@@ -14,7 +14,7 @@ import { FilterSelect } from "@/components/common/DataTable";
 
 const SCOPE_LABEL = {
   company: "Perusahaan (Default)",
-  branch: "Cabang",
+  branch: "Unit Operasional",
   division: "Divisi",
   project: "Proyek",
   employee: "Karyawan",
@@ -163,7 +163,7 @@ const PoliciesPage = () => {
     <>
       <PageHeader
         title="Kebijakan Perusahaan"
-        subtitle="Aturan perusahaan dapat diturunkan ke cabang, divisi, proyek, hingga karyawan."
+        subtitle="Aturan perusahaan dapat diturunkan ke unit operasional, divisi, proyek, hingga karyawan."
         actions={
           canConfig && (
             <Button onClick={() => openCreate()} data-testid="page-header-primary-action">
@@ -190,17 +190,17 @@ const PoliciesPage = () => {
                 <div>
                   <p className="text-sm font-semibold">Simulasi cakupan</p>
                   <p className="text-xs text-muted-foreground">
-                    Pilih cabang/divisi/proyek untuk melihat aturan mana yang akan dipakai sistem.
+                    Pilih unit operasional/divisi/proyek untuk melihat aturan mana yang akan dipakai sistem.
                   </p>
                 </div>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <FilterSelect
-                  label="Cabang"
+                  label="Unit Operasional"
                   value={context.branch_id}
                   onChange={(v) => setContext((p) => ({ ...p, branch_id: v }))}
                   options={options.branches.map((o) => ({ value: o.id, label: o.name }))}
-                  allLabel="Tanpa cabang"
+                  allLabel="Tanpa unit operasional"
                   testId="simulator-branch"
                 />
                 <FilterSelect
@@ -288,7 +288,7 @@ const PoliciesPage = () => {
                   <div>
                     <p className="text-sm font-medium">Belum ada nilai kebijakan khusus.</p>
                     <p className="text-sm text-muted-foreground">
-                      Sistem memakai nilai bawaan. Tambahkan nilai untuk perusahaan, cabang, divisi,
+                      Sistem memakai nilai bawaan. Tambahkan nilai untuk perusahaan, unit operasional, divisi,
                       atau proyek tertentu bila aturannya berbeda.
                     </p>
                   </div>
@@ -356,7 +356,7 @@ const PoliciesPage = () => {
             required: true,
             options: [
               { value: "company", label: "Perusahaan (Default)" },
-              { value: "branch", label: "Cabang" },
+              { value: "branch", label: "Unit Operasional" },
               { value: "division", label: "Divisi" },
               { value: "project", label: "Proyek" },
             ],

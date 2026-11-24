@@ -19,7 +19,7 @@ ACTIVE, ENDED = "ACTIVE", "ENDED"
 PLACEMENT_FIELDS: Dict[str, tuple] = {
     "project_id": ("projects", "Proyek"),
     "work_location_id": ("work_locations", "Lokasi kerja / site"),
-    "branch_id": ("branches", "Cabang"),
+    "branch_id": ("branches", "Unit Operasional"),
     "department_id": ("departments", "Departemen"),
     "division_id": ("divisions", "Divisi"),
     "position_id": ("positions", "Jabatan"),

@@ -344,7 +344,7 @@ export const sectionFields = (section, catalog) => {
         { name: "employment_status_id", label: "Status Hubungan Kerja", type: "select", options: opt("employment_statuses") },
         { name: "job_title", label: "Jabatan (teks)" },
         { name: "position_id", label: "Posisi", type: "select", options: opt("positions") },
-        { name: "branch_id", label: "Cabang", type: "select", options: opt("branches") },
+        { name: "branch_id", label: "Unit Operasional", type: "select", options: opt("branches") },
         { name: "work_location_id", label: "Lokasi Kerja / Site", type: "select", options: opt("work_locations") },
         { name: "department_id", label: "Departemen", type: "select", options: opt("departments") },
         { name: "division_id", label: "Divisi", type: "select", options: opt("divisions") },
@@ -500,7 +500,7 @@ export const EmploymentTab = ({ employee, company, onEdit }) => (
       </div>
     </SectionCard>
     <SectionCard title="Organisasi" icon={Building2} testId="employment-org-card">
-      <InfoRow label="Cabang" value={employee.branch_name} />
+      <InfoRow label="Unit Operasional" value={employee.branch_name} />
       <InfoRow label="Lokasi Kerja" value={employee.work_location_name} />
       <InfoRow label="Departemen" value={employee.department_name} />
       <InfoRow label="Divisi" value={employee.division_name} />

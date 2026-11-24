@@ -54,7 +54,7 @@ APPLICABILITY = {
 # scope applicability yang didukung completeness_rule_scopes
 SCOPE_TYPES = {
     "company": "Seluruh perusahaan",
-    "branch": "Cabang",
+    "branch": "Unit Operasional",
     "position": "Jabatan",
     "project": "Proyek",
     "work_location": "Lokasi kerja / site",

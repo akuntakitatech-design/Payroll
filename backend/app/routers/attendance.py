@@ -31,7 +31,7 @@ def _perm(action: str):
 
 def _self_perm(action: str):
     """Upgrade 01I: endpoint absensi MANDIRI (data milik caller sendiri) tidak diblokir guard modul
-    belum-scope-aware; cabang yang menyentuh karyawan lain tetap wajib cakupan penuh."""
+    belum-scope-aware; unit operasional yang menyentuh karyawan lain tetap wajib cakupan penuh."""
     return require_permission("attendance", action, "attendance", self_service=True)
 
 

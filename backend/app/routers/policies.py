@@ -44,7 +44,7 @@ async def effective_policies(
     employee_id: Optional[str] = None,
     ctx: AuthContext = Depends(require_permission("policy", "view")),
 ):
-    """Resolved values following: Perusahaan -> Cabang -> Divisi -> Proyek -> Karyawan."""
+    """Resolved values following: Perusahaan -> Unit Operasional -> Divisi -> Proyek -> Karyawan."""
     context = {
         "branch_id": branch_id,
         "division_id": division_id,

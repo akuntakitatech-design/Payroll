@@ -38,7 +38,7 @@ ACTION_LABELS = {
 RESOURCES: Dict[str, tuple] = {
     "dashboard": ("Dashboard", "hr_core", ["view"]),
     "company": ("Perusahaan", "hr_core", ["view", "create", "edit", "delete", "config", "export"]),
-    "branch": ("Cabang", "hr_core", ["view", "create", "edit", "delete", "export"]),
+    "branch": ("Unit Operasional", "hr_core", ["view", "create", "edit", "delete", "export"]),
     "work_location": ("Lokasi Kerja", "hr_core", ["view", "create", "edit", "delete", "export"]),
     "department": ("Departemen", "hr_core", ["view", "create", "edit", "delete", "export"]),
     "division": ("Divisi", "hr_core", ["view", "create", "edit", "delete", "export"]),
