@@ -56,6 +56,7 @@ CHANGE_LABELS: Dict[str, str] = {
     "CANCELLED": "Mobilisasi dibatalkan",
     "APPROVED": "Mobilisasi disetujui HR",
     "REJECTED": "Mobilisasi ditolak HR",
+    "REPLACEMENT": "Karyawan pengganti ditetapkan",
 }
 
 # Approval GA -> HR Manager (Blueprint Modul 4). Data lama tanpa nilai dianggap APPROVED.

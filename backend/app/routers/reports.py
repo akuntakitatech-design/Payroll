@@ -269,6 +269,7 @@ ROSTER_COLUMNS = [
     {"key": "travel_label", "label": "Status Perjalanan"},
     {"key": "approval_label", "label": "Persetujuan HR"},
     {"key": "approved_by_name", "label": "Disetujui Oleh"},
+    {"key": "replacement_name", "label": "Karyawan Pengganti"},
 ]
 
 
@@ -307,6 +308,8 @@ async def _report_roster(ctx: AuthContext, f: Dict[str, Any]) -> Dict[str, Any]:
 
     employees = await _scoped_employees(ctx, None, f.get("q"))
     project_names = await _name_map(ctx, "projects", [p.get("project_id") for p in plans])
+    replacement_names = await _name_map(
+        ctx, "employees", [p.get("replacement_employee_id") for p in plans])
     today = _today()
     items = []
     for plan in plans:
@@ -327,6 +330,7 @@ async def _report_roster(ctx: AuthContext, f: Dict[str, Any]) -> Dict[str, Any]:
             "travel_label": STATE_LABELS.get(travel, travel),
             "approval_label": APPROVAL_LABELS.get(_approval_state(mob), "-") if mob else "-",
             "approved_by_name": (mob or {}).get("approved_by_name"),
+            "replacement_name": replacement_names.get(plan.get("replacement_employee_id")),
             "_approval": _approval_state(mob) if mob else "",
         })
     summary = {

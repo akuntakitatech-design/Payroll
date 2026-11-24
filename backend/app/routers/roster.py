@@ -21,6 +21,7 @@ from ..core.audit import log_action
 from ..core.db import NO_ID, audit_fields, new_id, now, serialize, serialize_list
 from ..core.deps import AuthContext, require_permission
 from ..core.employee_status import today_local
+from .roster_mobilization import _write_history
 
 router = APIRouter(prefix="/roster", tags=["Roster & Mobilisasi"])
 
@@ -298,7 +299,7 @@ async def roster_summary(project_id: Optional[str] = None, ctx: AuthContext = De
     soon = today + timedelta(days=7)
     items = []
     totals = {"active_employees": 0, "planned": 0, "confirmed": 0, "on_leave": 0,
-              "returning": 0, "replacement_needed": 0}
+              "returning": 0, "replacement_needed": 0, "replacement_assigned": 0}
     for config in configs:
         pid = config["project_id"]
         if pid not in projects:
@@ -318,7 +319,10 @@ async def roster_summary(project_id: Optional[str] = None, ctx: AuthContext = De
                              and str(p.get("off_start")) <= today.isoformat() <= str(p.get("off_end"))
                              and str(p.get("off_end")) <= soon.isoformat()),
             "replacement_needed": sum(1 for p in project_plans if p.get("replacement_needed")
+                                      and not p.get("replacement_employee_id")
                                       and str(p.get("off_start")) >= today.isoformat()),
+            "replacement_assigned": sum(1 for p in project_plans if p.get("replacement_employee_id")
+                                        and str(p.get("off_start")) >= today.isoformat()),
         }
         for key in totals:
             totals[key] += row[key]
@@ -348,7 +352,9 @@ async def list_plans(
     if upcoming:
         query["off_end"] = {"$gte": today.isoformat()}
     rows = serialize_list(await ctx.tdb.roster_leave_plans.find(query, NO_ID).sort("off_start", 1).to_list(2000))
-    employee_ids = {r["employee_id"] for r in rows}
+    employee_ids = {r["employee_id"] for r in rows} | {
+        r.get("replacement_employee_id") for r in rows if r.get("replacement_employee_id")
+    }
     project_ids = {r["project_id"] for r in rows}
     employees = {e["id"]: e for e in serialize_list(await ctx.tdb.employees.find(
         {"company_id": ctx.company_id, "id": {"$in": list(employee_ids)}}, NO_ID).to_list(2000))}
@@ -365,8 +371,32 @@ async def list_plans(
             "employee_number": emp.get("employee_number"),
             "project_name": project.get("name"),
             "project_code": project.get("code"),
+            "replacement_employee_id": row.get("replacement_employee_id"),
+            "replacement_employee_name": (employees.get(row.get("replacement_employee_id")) or {}).get(
+                "full_name"),
             "days_until": (date.fromisoformat(off_start) - today).days if off_start else None,
         })
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/employees")
+async def list_project_employees(project_id: str = Query(...), q: Optional[str] = None,
+                                ctx: AuthContext = Depends(_view)):
+    """Karyawan aktif pada satu project — dipakai memilih karyawan pengganti.
+
+    Memakai permission roster (bukan employee:view) agar GA yang mengelola roster tetap dapat
+    memilih pengganti tanpa harus diberi akses penuh Data Karyawan.
+    """
+    await _project_or_404(ctx, project_id)
+    rows = (await _active_employees_by_project(ctx, [project_id])).get(project_id, [])
+    items = [{"id": e["id"], "full_name": e.get("full_name"),
+              "employee_number": e.get("employee_number")} for e in rows]
+    needle = (q or "").strip().lower()
+    if needle:
+        items = [i for i in items
+                 if needle in (i["full_name"] or "").lower()
+                 or needle in (i["employee_number"] or "").lower()]
+    items.sort(key=lambda i: (i.get("full_name") or "").lower())
     return {"items": items, "total": len(items)}
 
 
@@ -462,3 +492,87 @@ async def decide_plan(plan_id: str, payload: Dict[str, Any] = Body(...), ctx: Au
                      notes="Keputusan H-10 rencana cuti project")
     return {"message": "Rencana cuti dikonfirmasi." if action == "CONFIRM" else "Rencana cuti ditunda.",
             "item": serialize(after)}
+
+
+@router.patch("/plans/{plan_id}/replacement")
+async def assign_replacement(plan_id: str, payload: Dict[str, Any] = Body(...),
+                             ctx: AuthContext = Depends(_edit)):
+    """Tetapkan / ganti / batalkan karyawan pengganti untuk rencana cuti project.
+
+    Pengganti wajib karyawan aktif pada project yang sama dan tidak memiliki rencana cuti
+    project yang bertabrakan. Setiap perubahan dicatat di histori jadwal (append-only).
+    """
+    plan = await ctx.tdb.roster_leave_plans.find_one(
+        {"company_id": ctx.company_id, "id": plan_id}, NO_ID)
+    if not plan:
+        raise _err(status.HTTP_404_NOT_FOUND, "Rencana cuti tidak ditemukan.")
+    await _project_or_404(ctx, plan.get("project_id"))
+    if plan.get("plan_status") == POSTPONED:
+        raise _err(status.HTTP_409_CONFLICT,
+                   "Rencana cuti sedang ditunda. Konfirmasi ulang jadwal sebelum menetapkan pengganti.")
+    raw = payload.get("employee_id")
+    replacement_id = str(raw).strip() if raw else None
+    reason = str(payload.get("reason") or "").strip() or None
+
+    current_id = plan.get("replacement_employee_id")
+    before: Dict[str, Any] = {"replacement_employee_id": current_id, "replacement_name": None}
+    if current_id:
+        prev = await ctx.tdb.employees.find_one(
+            {"company_id": ctx.company_id, "id": current_id}, NO_ID)
+        before["replacement_name"] = (prev or {}).get("full_name")
+
+    if replacement_id:
+        if replacement_id == plan.get("employee_id"):
+            raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                       "Karyawan pengganti tidak boleh sama dengan karyawan yang cuti.")
+        if replacement_id == current_id:
+            raise _err(status.HTTP_409_CONFLICT, "Karyawan ini sudah ditetapkan sebagai pengganti.")
+        emp = await ctx.tdb.employees.find_one(
+            {"company_id": ctx.company_id, "id": replacement_id}, NO_ID)
+        if not emp:
+            raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                       "Karyawan pengganti tidak ditemukan pada perusahaan aktif.")
+        if emp.get("status") != "active":
+            raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY, "Karyawan pengganti harus berstatus aktif.")
+        if emp.get("project_id") != plan.get("project_id"):
+            raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                       "Karyawan pengganti harus berada pada project yang sama dengan rencana cuti.")
+        overlap = await ctx.tdb.roster_leave_plans.find_one({
+            "company_id": ctx.company_id, "employee_id": replacement_id,
+            "plan_status": {"$in": [PLANNED, CONFIRMED]},
+            "off_start": {"$lte": plan.get("off_end")}, "off_end": {"$gte": plan.get("off_start")},
+        }, NO_ID)
+        if overlap:
+            raise _err(status.HTTP_409_CONFLICT,
+                       "Karyawan pengganti memiliki rencana cuti project yang bertabrakan pada periode ini.")
+    elif not current_id:
+        raise _err(status.HTTP_409_CONFLICT, "Belum ada karyawan pengganti yang ditetapkan.")
+
+    patch = {
+        "replacement_employee_id": replacement_id,
+        "replacement_assigned_at": now() if replacement_id else None,
+        "replacement_assigned_by": ctx.user_id if replacement_id else None,
+        "replacement_assigned_by_name": (ctx.user or {}).get("full_name") if replacement_id else None,
+        **audit_fields(ctx.user_id, creating=False),
+    }
+    await ctx.tdb.roster_leave_plans.update_one(
+        {"company_id": ctx.company_id, "id": plan_id}, {"$set": patch})
+    after = await ctx.tdb.roster_leave_plans.find_one(
+        {"company_id": ctx.company_id, "id": plan_id}, NO_ID)
+    replacement_name = None
+    if replacement_id:
+        emp = await ctx.tdb.employees.find_one(
+            {"company_id": ctx.company_id, "id": replacement_id}, NO_ID)
+        replacement_name = (emp or {}).get("full_name")
+    after_snapshot = {"replacement_employee_id": replacement_id, "replacement_name": replacement_name}
+    await _write_history(ctx, after, None, "REPLACEMENT", before, after_snapshot, reason)
+    await log_action(ctx, "update", "roster", plan_id,
+                     f"Pengganti cuti {plan.get('off_start')}",
+                     before=before, after=after_snapshot,
+                     notes=("Pengganti dibatalkan" if not replacement_id
+                            else f"Pengganti ditetapkan: {replacement_name}"))
+    return {
+        "message": (f"Pengganti {replacement_name} ditetapkan." if replacement_id
+                    else "Penugasan pengganti dibatalkan."),
+        "item": {**serialize(after), "replacement_employee_name": replacement_name},
+    }

@@ -492,6 +492,9 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "employee_id": "fk", "project_id": "fk", "pattern_id": "fk", "cycle_no": "i",
         "off_start": "s32", "off_end": "s32", "plan_status": "s32", "replacement_needed": "b",
         "decided_at": "dt", "decided_by": "fk", "decision_note": "t",
+        # Module 4 - penugasan karyawan pengganti selama periode cuti project.
+        "replacement_employee_id": "fk", "replacement_assigned_at": "dt",
+        "replacement_assigned_by": "fk", "replacement_assigned_by_name": "s",
     },
     # Module 4 CP2 - Mobilisasi GA: satu catatan per rencana cuti (keberangkatan + kepulangan).
     # mobilization_state: PLANNED | CANCELLED. Status DEPARTED/RETURNED diturunkan dari tanggal.

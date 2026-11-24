@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ClipboardList, RefreshCw, Sparkles } from "lucide-react";
+import { ClipboardList, RefreshCw, Sparkles, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -37,6 +37,10 @@ const RosterPlansPage = () => {
   const [deciding, setDeciding] = useState(null);
   const [postpone, setPostpone] = useState(null);
   const [postponing, setPostponing] = useState(false);
+  const [replacement, setReplacement] = useState(null);
+  const [replacementOptions, setReplacementOptions] = useState([]);
+  const [replacementLoading, setReplacementLoading] = useState(false);
+  const [replacementSaving, setReplacementSaving] = useState(false);
 
   useEffect(() => {
     api.get("/roster/projects")
@@ -91,6 +95,39 @@ const RosterPlansPage = () => {
       toast.error(errorMessage(err, "Keputusan rencana cuti gagal disimpan."));
     } finally {
       setDeciding(null);
+    }
+  };
+
+  const openReplacement = async (plan) => {
+    setReplacement({ plan, employeeId: plan.replacement_employee_id || "" });
+    setReplacementOptions([]);
+    setReplacementLoading(true);
+    try {
+      const { data } = await api.get("/roster/employees", {
+        params: { project_id: plan.project_id },
+      });
+      setReplacementOptions((data.items || []).filter((e) => e.id !== plan.employee_id));
+    } catch (err) {
+      toast.error(errorMessage(err, "Daftar karyawan project tidak dapat dimuat."));
+    } finally {
+      setReplacementLoading(false);
+    }
+  };
+
+  const saveReplacement = async () => {
+    if (!replacement) return;
+    setReplacementSaving(true);
+    try {
+      const { data } = await api.patch(`/roster/plans/${replacement.plan.id}/replacement`, {
+        employee_id: replacement.employeeId || null,
+      });
+      toast.success(data.message);
+      setReplacement(null);
+      await load();
+    } catch (err) {
+      toast.error(errorMessage(err, "Penugasan pengganti gagal disimpan."));
+    } finally {
+      setReplacementSaving(false);
     }
   };
 
@@ -178,26 +215,42 @@ const RosterPlansPage = () => {
                       <TableCell>{formatDate(plan.off_end)}</TableCell>
                       <TableCell className="text-right tabular-nums">{plan.days_until ?? "-"}</TableCell>
                       <TableCell><Badge variant={st.variant}>{st.label}</Badge></TableCell>
-                      <TableCell>{plan.replacement_needed ? <Badge variant="outline">Perlu</Badge> : "-"}</TableCell>
+                      <TableCell>
+                        {plan.replacement_employee_name ? (
+                          <span className="text-[12px] font-medium">{plan.replacement_employee_name}</span>
+                        ) : plan.replacement_needed ? (
+                          <Badge variant="outline">Perlu</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
-                        {plan.plan_status === "PLANNED" ? (
-                          canDecide && can("roster", "edit") ? (
-                            <div className="flex justify-end gap-1">
-                              <Button size="sm" variant="outline" disabled={deciding === plan.id}
-                                onClick={() => decide(plan, "CONFIRM")} data-testid={`plan-confirm-${plan.id}`}>
-                                Konfirmasi
-                              </Button>
-                              <Button size="sm" variant="ghost" disabled={deciding === plan.id}
-                                onClick={() => setPostpone({ plan, note: "" })} data-testid={`plan-postpone-${plan.id}`}>
-                                Tunda
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-muted-foreground">
-                              {plan.days_until < 0 ? "Jadwal lewat" : "H-10 belum tiba"}
-                            </span>
-                          )
-                        ) : "-"}
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {plan.plan_status === "PLANNED" && (
+                            canDecide && can("roster", "edit") ? (
+                              <>
+                                <Button size="sm" variant="outline" disabled={deciding === plan.id}
+                                  onClick={() => decide(plan, "CONFIRM")} data-testid={`plan-confirm-${plan.id}`}>
+                                  Konfirmasi
+                                </Button>
+                                <Button size="sm" variant="ghost" disabled={deciding === plan.id}
+                                  onClick={() => setPostpone({ plan, note: "" })} data-testid={`plan-postpone-${plan.id}`}>
+                                  Tunda
+                                </Button>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">
+                                {plan.days_until < 0 ? "Jadwal lewat" : "H-10 belum tiba"}
+                              </span>
+                            )
+                          )}
+                          {can("roster", "edit") && plan.plan_status !== "POSTPONED" && (
+                            <Button size="sm" variant="ghost" onClick={() => openReplacement(plan)}
+                              data-testid={`plan-replacement-${plan.id}`}>
+                              <UserPlus className="mr-1 h-3.5 w-3.5" />Pengganti
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -224,6 +277,41 @@ const RosterPlansPage = () => {
             <Button disabled={postponing || (postpone?.note || "").trim().length < 3}
               onClick={() => decide(postpone.plan, "POSTPONE", postpone.note.trim())} data-testid="roster-postpone-submit">
               {postponing ? "Menyimpan…" : "Tunda"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!replacement} onOpenChange={(open) => { if (!open && !replacementSaving) setReplacement(null); }}>
+        <DialogContent className="bg-card sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Karyawan pengganti</DialogTitle>
+            <DialogDescription>
+              {replacement?.plan?.employee_name} · cuti {formatDate(replacement?.plan?.off_start)} s.d.{" "}
+              {formatDate(replacement?.plan?.off_end)}. Pilih karyawan yang menggantikan selama periode tersebut.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="plan-replacement-select">Karyawan Pengganti</Label>
+            <select id="plan-replacement-select" className={`${selectClass} mt-1`}
+              value={replacement?.employeeId || ""}
+              onChange={(e) => setReplacement((r) => ({ ...r, employeeId: e.target.value }))}
+              disabled={replacementLoading} data-testid="plan-replacement-select">
+              <option value="">— Tanpa pengganti —</option>
+              {replacementOptions.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.full_name}{e.employee_number ? ` · ${e.employee_number}` : ""}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground">
+              Hanya karyawan aktif pada project yang sama dan tidak memiliki cuti project yang bertabrakan.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReplacement(null)} disabled={replacementSaving}>Batal</Button>
+            <Button onClick={saveReplacement} disabled={replacementSaving || replacementLoading}
+              data-testid="plan-replacement-submit">
+              {replacementSaving ? "Menyimpan…" : "Simpan"}
             </Button>
           </DialogFooter>
         </DialogContent>
