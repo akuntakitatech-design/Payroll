@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends
 from ..core.db import ASCENDING, DESCENDING, NO_ID, get_db, serialize_list
 from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.deps import AuthContext, get_auth
+from ..core.employee_status import today_local
 from ..core.policy import resolve_config
 from ..core.rbac import MODULES
 
@@ -337,6 +338,40 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
                 "count": inactive_users,
             }
         )
+
+    # ---- Exit clearance (Core HR): notifikasi tindakan nyata di lonceng ----------
+    if ctx.has_permission("exit_clearance", "view"):
+        exit_flt = dscope.with_scope(
+            {"company_id": cid, "status": {"$ne": "deleted"},
+             "case_state": {"$in": ["PENDING_APPROVAL"]}}, scope, "employee_id")
+        exit_pending = serialize_list(await db.exit_clearances.find(
+            exit_flt, {"case_state": 1, "last_working_date": 1}).to_list(5000))
+        today_iso = today_local()
+        overdue_exit = [r for r in exit_pending if str(r.get("last_working_date") or "") <= today_iso]
+        if exit_pending:
+            attention.append(
+                {
+                    "key": "exit_pending_approval",
+                    "severity": "warning",
+                    "title": f"{len(exit_pending)} exit clearance menunggu persetujuan",
+                    "description": "Periksa checklist serah terima dan selesaikan persetujuan agar status karyawan diperbarui.",
+                    "action_label": "Buka Exit Clearance",
+                    "action_link": "/employees/exit-clearance",
+                    "count": len(exit_pending),
+                }
+            )
+        if overdue_exit:
+            attention.append(
+                {
+                    "key": "exit_overdue",
+                    "severity": "critical",
+                    "title": f"{len(overdue_exit)} exit clearance melewati tanggal kerja terakhir",
+                    "description": "Kasus belum disetujui padahal tanggal kerja terakhir sudah tiba. Segera tindak lanjuti.",
+                    "action_label": "Buka Exit Clearance",
+                    "action_link": "/employees/exit-clearance",
+                    "count": len(overdue_exit),
+                }
+            )
 
     # ---------------- Module cards ------------------------------------------
     active_keys = {m["module_key"] for m in module_rows if m.get("is_active")} | {"hr_core"}

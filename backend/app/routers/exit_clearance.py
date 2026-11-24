@@ -30,6 +30,7 @@ SEQ = "EXIT_CLEARANCE"
 DRAFT, PENDING_APPROVAL, COMPLETED, CANCELLED = "DRAFT", "PENDING_APPROVAL", "COMPLETED", "CANCELLED"
 CASE_STATES = (DRAFT, PENDING_APPROVAL, COMPLETED, CANCELLED)
 OPEN_STATES = (DRAFT, PENDING_APPROVAL)
+CLOSED_STATES = (COMPLETED, CANCELLED)
 
 PENDING, DONE, NA = "PENDING", "DONE", "NA"
 ITEM_STATES = (PENDING, DONE, NA)
@@ -307,6 +308,63 @@ async def list_cases(
         for r in rows
     ]
     return {"items": items, "total": len(items)}
+
+
+@router.get("/history")
+async def exit_history(
+    case_state: Optional[str] = Query(None, alias="state"),
+    project_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    q: Optional[str] = None,
+    ctx: AuthContext = Depends(_view),
+):
+    """Histori kasus exit yang sudah Selesai atau Dibatalkan (kasus berjalan tidak termasuk)."""
+    scope = await dscope.get_scope(ctx)
+    flt = dscope.with_scope(
+        {"company_id": ctx.company_id, "status": {"$ne": "deleted"},
+         "case_state": {"$in": list(CLOSED_STATES)}}, scope, field_name="employee_id")
+    if case_state:
+        state = case_state.strip().upper()
+        if state not in CLOSED_STATES:
+            raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                       "Histori hanya memuat kasus Selesai atau Dibatalkan.")
+        flt["case_state"] = state
+    if project_id:
+        flt["project_id"] = project_id
+    if date_from:
+        flt["last_working_date"] = {"$gte": _parse_date(date_from, "Tanggal mulai").isoformat()}
+    if date_to:
+        flt["last_working_date"] = {**(flt.get("last_working_date") or {}),
+                                    "$lte": _parse_date(date_to, "Tanggal selesai").isoformat()}
+    rows = serialize_list(await ctx.tdb.exit_clearances.find(flt, NO_ID)
+                          .sort("last_working_date", -1).to_list(5000))
+    needle = (q or "").strip().lower()
+    if needle:
+        rows = [
+            r for r in rows
+            if needle in (r.get("employee_name") or "").lower()
+            or needle in (r.get("employee_number") or "").lower()
+            or needle in (r.get("case_number") or "").lower()
+        ]
+    items_by_case = await _items_for(ctx, [r["id"] for r in rows])
+    outstanding = await _outstanding_counts(ctx, [r.get("employee_id") for r in rows])
+    projects = await _project_names(ctx, [r.get("project_id") for r in rows])
+    items = [
+        _case_public(
+            r,
+            progress=_progress(items_by_case.get(r["id"], [])),
+            outstanding=outstanding.get(r.get("employee_id"), 0),
+            project_name=projects.get(r.get("project_id")),
+        )
+        for r in rows
+    ]
+    counts = {COMPLETED: 0, CANCELLED: 0}
+    for row in rows:
+        state = row.get("case_state")
+        if state in counts:
+            counts[state] += 1
+    return {"items": items, "total": len(items), "counts": counts}
 
 
 @router.get("/{clearance_id}")
