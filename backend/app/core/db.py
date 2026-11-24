@@ -168,6 +168,9 @@ TENANT_COLLECTIONS = [
     "roster_patterns",
     "project_roster_configs",
     "roster_leave_plans",
+    # Core HR - Exit Clearance (offboarding): kasus keluar + checklist serah terima per bagian.
+    "exit_clearances",
+    "exit_clearance_items",
     # Upgrade 01E - migrasi/impor Excel karyawan (metadata batch + hasil analisis per karyawan).
     # Tidak menyimpan file Excel mentah; nilai sensitif di hasil analisis selalu dimasking.
     "employee_import_batches",
@@ -478,6 +481,22 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "employee_id": "fk", "project_id": "fk", "pattern_id": "fk", "cycle_no": "i",
         "off_start": "s32", "off_end": "s32", "plan_status": "s32", "replacement_needed": "b",
         "decided_at": "dt", "decided_by": "fk", "decision_note": "t",
+    },
+    # Core HR - Exit Clearance. case_state: DRAFT | PENDING_APPROVAL | COMPLETED | CANCELLED.
+    # item_state: PENDING | DONE | NA. Nomor kasus memakai doc_sequence EXIT_CLEARANCE.
+    "exit_clearances": {
+        "case_number": "s64", "employee_id": "fk", "employee_number": "s64", "employee_name": "s",
+        "project_id": "fk", "exit_type": "s32", "request_date": "s32", "last_working_date": "s32",
+        "reason": "t", "notes": "t", "case_state": "s32",
+        "submitted_at": "dt", "submitted_by": "fk",
+        "decided_at": "dt", "decided_by": "fk", "decision_note": "t",
+        "completed_at": "dt", "completed_by": "fk",
+        "cancelled_at": "dt", "cancelled_by": "fk", "cancel_reason": "t",
+        "row_version": "i",
+    },
+    "exit_clearance_items": {
+        "clearance_id": "fk", "line_no": "i", "category": "s32", "name": "s",
+        "item_state": "s32", "note": "t", "decided_at": "dt", "decided_by": "fk",
     },
     # Upgrade 01E - batch impor. batch_status: ANALYZED | COMMITTING | COMMITTED | PARTIAL | FAILED | CANCELLED
     "employee_import_batches": {
@@ -913,6 +932,14 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     "roster_leave_plans": [
         ("uq_roster_plan_employee_start", ["company_id", "employee_id", "off_start"], True),
         ("ix_roster_plan_project", ["company_id", "project_id", "off_start"], False),
+    ],
+    "exit_clearances": [
+        ("ux_exit_case_number", ["company_id", "case_number"], True),
+        ("ix_exit_case_employee", ["company_id", "employee_id", "case_state"], False),
+        ("ix_exit_case_state_date", ["company_id", "case_state", "last_working_date"], False),
+    ],
+    "exit_clearance_items": [
+        ("ux_exit_item_line", ["company_id", "clearance_id", "line_no"], True),
     ],
     "employee_import_batches": [
         ("ix_employee_import_batch_recent", ["company_id", "created_at"], False),
