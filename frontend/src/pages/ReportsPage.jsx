@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BarChart3, Download, Package, Plane, RefreshCw, Search, ShieldCheck, UserMinus, Users,
+  BarChart3, Download, FolderArchive, Package, Plane, RefreshCw, Search, ShieldCheck, UserMinus, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -100,6 +100,7 @@ const ReportsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [bundling, setBundling] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(filters.q), 350);
@@ -167,6 +168,27 @@ const ReportsPage = () => {
     }
   };
 
+  const exportBundle = async () => {
+    if (!catalog.can_export) return;
+    setBundling(true);
+    try {
+      const res = await api.get("/reports/karyawan/bundle", { params, responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Biodata-Karyawan.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast.success("Bundel karyawan (biodata + dokumen) diunduh.");
+    } catch (err) {
+      toast.error(errorMessage(err, "Bundel karyawan gagal diunduh. Persempit filter bila terlalu besar."));
+    } finally {
+      setBundling(false);
+    }
+  };
+
   const shown = FILTERS_BY_REPORT[kind] || [];
   const show = (key) => shown.includes(key);
   const options = catalog.options || {};
@@ -183,10 +205,24 @@ const ReportsPage = () => {
         icon={BarChart3}
         actions={
           catalog.can_export && (
-            <Button onClick={exportReport} disabled={exporting || loading || !data} data-testid="reports-export">
-              <Download className="mr-2 h-4 w-4" />
-              {exporting ? "Menyiapkan…" : "Ekspor Excel"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={exportReport} disabled={exporting || loading || !data} data-testid="reports-export">
+                <Download className="mr-2 h-4 w-4" />
+                {exporting ? "Menyiapkan…" : "Ekspor Excel"}
+              </Button>
+              {kind === "karyawan" && (
+                <Button
+                  variant="outline"
+                  onClick={exportBundle}
+                  disabled={bundling || loading}
+                  title="Biodata Excel + dokumen versi terbaru per karyawan (maks. 200 karyawan, 150 MB)"
+                  data-testid="reports-bundle"
+                >
+                  <FolderArchive className="mr-2 h-4 w-4" />
+                  {bundling ? "Menyiapkan…" : "ZIP Biodata + Dokumen"}
+                </Button>
+              )}
+            </div>
           )
         }
       />

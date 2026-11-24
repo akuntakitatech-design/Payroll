@@ -14,10 +14,14 @@ Endpoint:
 """
 from __future__ import annotations
 
+import io
+import re
+import zipfile
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from openpyxl import Workbook
 
 from ..core import data_scope as dscope
 from ..core.asset_service import LIFECYCLE_STATES
@@ -25,6 +29,7 @@ from ..core.audit import log_action
 from ..core.db import NO_ID, get_db, serialize_list
 from ..core.deps import AuthContext, require_permission
 from ..core.employee_status import today_local
+from ..core.storage import get_object
 from ..core.time_excel import export_sheet
 from .exit_clearance import CASE_LABELS, EXIT_TYPES
 from .roster_mobilization import (APPROVAL_LABELS, APPROVAL_STATES, STATE_LABELS, _approval_state,
@@ -42,6 +47,13 @@ PLAN_LABELS = {"PLANNED": "Direncanakan", "CONFIRMED": "Terkonfirmasi", "POSTPON
 EMPLOYEE_STATUS_LABELS = {"active": "Aktif", "inactive": "Tidak Aktif"}
 
 MAX_ROWS = 20000
+
+# Batas bundel ZIP per karyawan (Modul 7). Dibuat konservatif agar satu permintaan
+# tidak menghabiskan memori server ketika filter terlalu luas.
+MAX_BUNDLE_EMPLOYEES = 200
+MAX_BUNDLE_BYTES = 150 * 1024 * 1024
+
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _err(code: int, msg: str) -> HTTPException:
@@ -64,6 +76,11 @@ def _parse_date(value: Optional[str], label: str) -> Optional[date]:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _safe_name(text: Any, fallback: str = "berkas") -> str:
+    out = _UNSAFE_NAME.sub("-", str(text or "")).strip("-.")
+    return out[:60] or fallback
 
 
 async def _name_map(ctx: AuthContext, collection: str, ids: List[Optional[str]]) -> Dict[str, str]:
@@ -643,5 +660,172 @@ async def export_report(kind: str, filters: Dict[str, Any] = Depends(_filters),
     return Response(
         content=blob,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --------------------------------------------------------------------------- bundle ZIP
+GENDER_LABELS = {"male": "Laki-laki", "female": "Perempuan"}
+MARITAL_LABELS = {"single": "Belum Menikah", "married": "Menikah", "divorced": "Cerai",
+                  "widowed": "Janda/Duda"}
+
+
+def _biodata_xlsx(employee: Dict[str, Any], names: Dict[str, str], docs: List[Dict[str, Any]]) -> bytes:
+    """Berkas biodata per karyawan: sheet Biodata (key/value) + sheet Dokumen."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Biodata"
+    ws.append(["Field", "Nilai"])
+    rows = [
+        ("NIK / No. Karyawan", employee.get("employee_number")),
+        ("Nama Lengkap", employee.get("full_name")),
+        ("NIK KTP", employee.get("nik")),
+        ("NPWP", employee.get("npwp")),
+        ("Jenis Kelamin", GENDER_LABELS.get(employee.get("gender"), employee.get("gender"))),
+        ("Tempat Lahir", employee.get("birth_place")),
+        ("Tanggal Lahir", employee.get("birth_date")),
+        ("Agama", employee.get("religion")),
+        ("Status Perkawinan", MARITAL_LABELS.get(employee.get("marital_status"), employee.get("marital_status"))),
+        ("Pendidikan", employee.get("education")),
+        ("Email", employee.get("email")),
+        ("Telepon", employee.get("phone")),
+        ("Alamat", employee.get("address")),
+        ("Kota", employee.get("city")),
+        ("Tanggal Masuk", employee.get("join_date")),
+        ("Project", names.get("project")),
+        ("Site / Lokasi Kerja", names.get("location")),
+        ("Departemen", names.get("department")),
+        ("Divisi", names.get("division")),
+        ("Jabatan", names.get("position")),
+        ("Status Kepegawaian", names.get("employment")),
+        ("Status Data", EMPLOYEE_STATUS_LABELS.get(employee.get("status"), employee.get("status"))),
+    ]
+    for label, value in rows:
+        ws.append([label, value if value is not None else ""])
+    ws.column_dimensions["A"].width = 26
+    ws.column_dimensions["B"].width = 46
+
+    sheet = wb.create_sheet("Dokumen")
+    sheet.append(["Tipe Dokumen", "Nama Dokumen", "Nomor", "Tanggal Terbit", "Berlaku Sampai",
+                  "Status Verifikasi", "Nama Berkas"])
+    for doc in docs:
+        sheet.append([
+            doc.get("document_type_name") or "", doc.get("name") or "", doc.get("document_number") or "",
+            doc.get("issued_date") or "", doc.get("expiry_date") or "",
+            VERIFICATION_LABELS.get(str(doc.get("verification_state") or "VERIFIED"), ""),
+            doc.get("file_name") or "",
+        ])
+    for letter, width in zip("ABCDEFG", (22, 32, 20, 16, 16, 22, 34)):
+        sheet.column_dimensions[letter].width = width
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+@router.get("/karyawan/bundle")
+async def export_employee_bundle(
+    project_id: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    q: Optional[str] = None,
+    employee_id: Optional[str] = None,
+    ctx: AuthContext = Depends(_export),
+):
+    """ZIP per karyawan: biodata (Excel) + seluruh dokumen versi terkini.
+
+    Filter sama dengan Laporan Karyawan. Dibatasi agar satu permintaan tidak menghabiskan memori
+    server: maksimum 200 karyawan dan 150 MB berkas.
+    """
+    db = get_db()
+    scope = await dscope.get_scope(ctx)
+    if employee_id:
+        rows = [await dscope.get_scoped_employee(ctx, employee_id)]
+    else:
+        flt: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}
+        if project_id:
+            flt["project_id"] = project_id
+        if status_filter:
+            if status_filter not in ("active", "inactive"):
+                raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                           "Status karyawan tidak dikenal. Pilihan: Aktif atau Tidak Aktif.")
+            flt["status"] = status_filter
+        needle = _text(q)
+        if needle:
+            flt["$or"] = [{"full_name": {"$regex": needle, "$options": "i"}},
+                          {"employee_number": {"$regex": needle, "$options": "i"}},
+                          {"nik": {"$regex": needle, "$options": "i"}}]
+        rows = serialize_list(await db.employees.find(dscope.with_scope(flt, scope), NO_ID)
+                              .sort("full_name", 1).to_list(MAX_BUNDLE_EMPLOYEES + 1))
+    if not rows:
+        raise _err(status.HTTP_404_NOT_FOUND, "Tidak ada karyawan yang cocok dengan filter ini.")
+    if len(rows) > MAX_BUNDLE_EMPLOYEES:
+        raise _err(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                   f"Bundel dibatasi {MAX_BUNDLE_EMPLOYEES} karyawan per unduhan. "
+                   "Persempit filter project atau gunakan pencarian.")
+
+    employee_ids = [r["id"] for r in rows]
+    doc_flt: Dict[str, Any] = {
+        "company_id": ctx.company_id, "owner_type": "employee", "owner_id": {"$in": employee_ids},
+        "is_deleted": False,
+        "$sql": (lambda t: t.c.superseded_by_document_id.is_(None)),
+    }
+    docs = serialize_list(await db.documents.find(doc_flt, NO_ID).sort("name", 1).to_list(MAX_ROWS))
+    type_names = await _name_map(ctx, "document_types", [d.get("document_type_id") for d in docs])
+    for doc in docs:
+        doc["document_type_name"] = type_names.get(doc.get("document_type_id"))
+    docs_by_employee: Dict[str, List[Dict[str, Any]]] = {}
+    for doc in docs:
+        docs_by_employee.setdefault(doc.get("owner_id"), []).append(doc)
+
+    names_map = {
+        "project": await _name_map(ctx, "projects", [r.get("project_id") for r in rows]),
+        "location": await _name_map(ctx, "work_locations", [r.get("work_location_id") for r in rows]),
+        "department": await _name_map(ctx, "departments", [r.get("department_id") for r in rows]),
+        "division": await _name_map(ctx, "divisions", [r.get("division_id") for r in rows]),
+        "position": await _name_map(ctx, "positions", [r.get("position_id") for r in rows]),
+        "employment": await _name_map(ctx, "employment_statuses", [r.get("employment_status_id") for r in rows]),
+    }
+
+    buffer = io.BytesIO()
+    failed: List[str] = []
+    total_bytes = 0
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for emp in rows:
+            folder = (f"{_safe_name(emp.get('employee_number'), 'karyawan')}_"
+                      f"{_safe_name(emp.get('full_name'), emp['id'][:8])}")
+            emp_docs = docs_by_employee.get(emp["id"], [])
+            per_names = {key: mp.get(emp.get(f"{key}_id")) for key, mp in
+                         (("project", names_map["project"]), ("location", names_map["location"]),
+                          ("department", names_map["department"]), ("division", names_map["division"]),
+                          ("position", names_map["position"]), ("employment", names_map["employment"]))}
+            archive.writestr(f"{folder}/biodata.xlsx", _biodata_xlsx(emp, per_names, emp_docs))
+            for doc in emp_docs:
+                if not doc.get("storage_path"):
+                    continue
+                file_label = (f"{_safe_name(doc.get('document_type_name'), 'dokumen')}-"
+                              f"{_safe_name(doc.get('file_name'), 'berkas')}")
+                try:
+                    data, _content_type = get_object(doc["storage_path"])
+                except Exception:  # noqa: BLE001 - satu berkas gagal tidak boleh menggagalkan bundel
+                    failed.append(f"{folder}/dokumen/{file_label}")
+                    continue
+                total_bytes += len(data)
+                if total_bytes > MAX_BUNDLE_BYTES:
+                    raise _err(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                               "Ukuran bundel melebihi 150 MB. Persempit filter (project atau pencarian) "
+                               "lalu unduh bertahap.")
+                archive.writestr(f"{folder}/dokumen/{file_label}", data)
+        if failed:
+            archive.writestr("BERKAS-GAGAL-DIAMBIL.txt",
+                             "Berkas berikut tidak dapat diambil dari object storage:\n" + "\n".join(failed))
+
+    generated = datetime.now().astimezone()
+    await log_action(ctx, "export", "report", None, "Bundel karyawan (ZIP)", module="hr_core",
+                     notes=f"Bundel ZIP {len(rows)} karyawan, {total_bytes} byte berkas, cakupan: "
+                           f"{_scope_label(scope)}")
+    filename = f"Biodata-Karyawan-{generated.strftime('%Y%m%d')}.zip"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
