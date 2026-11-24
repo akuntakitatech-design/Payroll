@@ -39,6 +39,8 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
     # Phase 2A CP3 - dokumen Saldo Awal (Opening Existing Holding) + nomor batch impor aset.
     "BAST_EXISTING": {"label": "Nomor Dokumen Saldo Awal Aset", "format": "BAST-EXS/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
     "ASSET_IMPORT": {"label": "Nomor Batch Impor Aset", "format": "IMP-AST/{YYYY}/{SEQ:6}", "reset_policy": YEARLY},
+    # Core HR - nomor kasus Exit Clearance (offboarding), reset tahunan.
+    "EXIT_CLEARANCE": {"label": "Nomor Kasus Exit Clearance", "format": "EXIT/{YYYY}/{SEQ:5}", "reset_policy": YEARLY},
 }
 
 

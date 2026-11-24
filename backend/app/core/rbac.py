@@ -83,6 +83,8 @@ RESOURCES: Dict[str, tuple] = {
     # Module 4 - Roster Proyek, Cuti Project & Mobilisasi (CP1: pola roster + H-30/H-10)
     "roster_pattern": ("Pola Roster", "mobilization", ["view", "create", "edit", "delete"]),
     "roster": ("Roster & Cuti Project", "mobilization", ["view", "create", "edit", "approve"]),
+    # Core HR - Exit Clearance (offboarding): checklist serah terima lintas bagian sebelum karyawan keluar.
+    "exit_clearance": ("Exit Clearance", "employee_core", ["view", "create", "edit", "delete", "approve"]),
     "finance_request": ("Permintaan Keuangan", "finance_request", ["view", "create", "edit", "delete", "approve", "export"]),
     "accounting": ("Akuntansi", "accounting", ["view", "create", "edit", "delete", "export"]),
     # Phase 2A CP1 - Manajemen Aset (modul `asset`). Otorisasi murni berbasis permission, bukan nama role.
@@ -177,6 +179,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
            "approval_workflow:view", "policy:view", "module:view",
            "attendance:view", "leave:view", "mobilization:view", "performance:view",
            "roster:view", "roster:create", "roster:edit",
+           "exit_clearance:view", "exit_clearance:create", "exit_clearance:edit", "exit_clearance:delete",
            # Time Management V1 — HR Admin mengelola shift, jadwal, absensi, cuti & lembur
            "attendance:create", "attendance:edit", "attendance:delete", "attendance:export",
            "leave:create", "leave:edit", "leave:delete", "leave:export",
@@ -208,6 +211,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "leave:approve", "attendance:approve", "contract:approve", "recruitment:approve",
         "mobilization:approve", "performance:approve", "role:view",
         "roster:approve",
+        "exit_clearance:approve",
         "payroll:approve", "payroll:config", "payroll:delete",
     ]
 
@@ -224,6 +228,8 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "payroll_component:edit", "payroll_component:delete",
         "employee_salary:view", "employee_salary:create", "employee_salary:edit",
         "employee_salary:export", "payslip:view_own",
+        # Core HR - Finance menutup item keuangan pada Exit Clearance & melihat kasusnya.
+        "exit_clearance:view", "exit_clearance:edit",
     ]
 
     manager = [
@@ -234,6 +240,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "attendance:create", "leave:create",
         "performance:view", "performance:approve", "mobilization:view",
         "roster:view",
+        "exit_clearance:view",
         "mobilization:approve", "finance_request:view", "finance_request:approve",
         "attendance:export", "leave:export",
         "payslip:view_own",
@@ -246,6 +253,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "attendance:create", "leave:create",
         "mobilization:view", "document:view", "project:view", "certification:view",
         "roster:view",
+        "exit_clearance:view",
         "payslip:view_own",
     ]
 
@@ -279,6 +287,9 @@ def default_role_permissions() -> Dict[str, List[str]]:
     # Module 4 - CP1: GA Admin dapat melihat & mengubah roster/konfirmasi; GA Staff melihat.
     asset_admin += ["roster:view", "roster:edit"]
     asset_staff += ["roster:view"]
+    # Core HR - GA menutup item aset pada Exit Clearance; GA Staff hanya melihat.
+    asset_admin += ["exit_clearance:view", "exit_clearance:edit"]
+    asset_staff += ["exit_clearance:view"]
     hr_admin = hr_admin + ["asset:view", "asset_document:view"]
     hr_manager = hr_manager + ["asset:view"]
     finance = finance + ["asset:view", "asset_value:view"]
