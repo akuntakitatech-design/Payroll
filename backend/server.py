@@ -44,6 +44,7 @@ from app.routers import (
     recruitment,
     recruitment_pipeline,
     recruitment_conversion,
+    reports,
     roster,
     roster_mobilization,
     reminders,
@@ -162,6 +163,7 @@ api.include_router(asset_import.router)  # Phase 2A CP3 - Impor Master Aset & Im
 api.include_router(asset_documents.router)  # Phase 2A CP4 - Dokumen Transaksi Aset + Employee Asset 360
 api.include_router(roster.router)  # Module 4 CP1 - Roster Proyek, Cuti Project (H-30/H-10)
 api.include_router(roster_mobilization.router)  # Module 4 CP2 - Mobilisasi GA & histori jadwal
+api.include_router(reports.router)  # Modul 7 - Pusat Laporan & Export (5 laporan lintas modul)
 
 app.include_router(api)
 
