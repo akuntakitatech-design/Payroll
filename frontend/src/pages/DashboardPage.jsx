@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { AlertCircle, Boxes, CalendarClock, Clock, RefreshCw, Users } from "lucide-react";
+import {
+  AlertCircle,
+  Boxes,
+  CalendarClock,
+  Clock,
+  Package,
+  Plane,
+  RefreshCw,
+  UserMinus,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDashboardData } from "@/lib/dashboardData";
 import { Button } from "@/components/ui/button";
@@ -166,6 +176,48 @@ const DashboardPage = () => {
                   tone="normal"
                   link="/setup/modules"
                   testId="kpi-modul-aktif-card"
+                />
+
+                <KpiCard
+                  label="Karyawan Cuti Project"
+                  value={kpi?.roster_on_leave?.value ?? 0}
+                  meta={kpi?.roster_on_leave?.meta}
+                  icon={Plane}
+                  tone="normal"
+                  locked={kpi?.roster_on_leave?.available === false}
+                  lockedReason={kpi?.roster_on_leave?.meta}
+                  lockedActionLabel="Lihat Modul"
+                  link={kpi?.roster_on_leave?.link || "/modules/mobilization/kembali"}
+                  testId="kpi-roster-cuti-card"
+                  actionTestId="kpi-roster-cuti-action-button"
+                />
+
+                <KpiCard
+                  label="Aset Terdaftar"
+                  value={kpi?.assets_registered?.value ?? 0}
+                  meta={kpi?.assets_registered?.meta}
+                  icon={Package}
+                  tone="normal"
+                  locked={kpi?.assets_registered?.available === false}
+                  lockedReason={kpi?.assets_registered?.meta}
+                  lockedActionLabel="Lihat Modul"
+                  link={kpi?.assets_registered?.link || "/modules/asset/assets"}
+                  testId="kpi-aset-card"
+                  actionTestId="kpi-aset-action-button"
+                />
+
+                <KpiCard
+                  label="Exit Clearance Berjalan"
+                  value={kpi?.exit_open?.value ?? 0}
+                  meta={kpi?.exit_open?.meta}
+                  icon={UserMinus}
+                  tone={kpi?.exit_open?.value > 0 ? "warning" : "success"}
+                  locked={kpi?.exit_open?.available === false}
+                  lockedReason={kpi?.exit_open?.meta}
+                  lockedActionLabel="Lihat Modul"
+                  link={kpi?.exit_open?.link || "/employees/exit-clearance"}
+                  testId="kpi-exit-card"
+                  actionTestId="kpi-exit-action-button"
                 />
               </div>
             </div>

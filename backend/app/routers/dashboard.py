@@ -340,13 +340,17 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
         )
 
     # ---- Exit clearance (Core HR): notifikasi tindakan nyata di lonceng ----------
+    today_iso = today_local()
+    exit_open = 0
+    exit_pending: List[Dict[str, Any]] = []
     if ctx.has_permission("exit_clearance", "view"):
         exit_flt = dscope.with_scope(
             {"company_id": cid, "status": {"$ne": "deleted"},
-             "case_state": {"$in": ["PENDING_APPROVAL"]}}, scope, "employee_id")
-        exit_pending = serialize_list(await db.exit_clearances.find(
+             "case_state": {"$in": ["DRAFT", "PENDING_APPROVAL"]}}, scope, "employee_id")
+        exit_rows = serialize_list(await db.exit_clearances.find(
             exit_flt, {"case_state": 1, "last_working_date": 1}).to_list(5000))
-        today_iso = today_local()
+        exit_open = len(exit_rows)
+        exit_pending = [r for r in exit_rows if r.get("case_state") == "PENDING_APPROVAL"]
         overdue_exit = [r for r in exit_pending if str(r.get("last_working_date") or "") <= today_iso]
         if exit_pending:
             attention.append(
@@ -373,6 +377,40 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
                 }
             )
 
+    # ---------------- KPI lintas modul (Modul 7) ---------------------------
+    roster_active = ctx.has_module("mobilization") and ctx.has_permission("roster", "view")
+    asset_active = ctx.has_module("asset") and ctx.has_permission("asset", "view")
+    exit_active = ctx.has_permission("exit_clearance", "view")
+    scope_projects = None if scope.is_all else list(scope.project_ids)
+
+    roster_on_leave = 0
+    mobilization_pending = 0
+    if roster_active:
+        plan_flt: Dict[str, Any] = {
+            "company_id": cid, "plan_status": "CONFIRMED",
+            "off_start": {"$lte": today_iso}, "off_end": {"$gte": today_iso},
+        }
+        if scope_projects is not None:
+            plan_flt["project_id"] = {"$in": scope_projects}
+        roster_on_leave = len(serialize_list(
+            await db.roster_leave_plans.find(plan_flt, {"id": 1}).to_list(5000)))
+        mob_flt: Dict[str, Any] = {
+            "company_id": cid, "approval_state": "PENDING_APPROVAL",
+            "mobilization_state": {"$ne": "CANCELLED"},
+        }
+        if scope_projects is not None:
+            mob_flt["project_id"] = {"$in": scope_projects}
+        mobilization_pending = len(serialize_list(
+            await db.roster_mobilizations.find(mob_flt, {"id": 1}).to_list(5000)))
+
+    assets_total = 0
+    assets_in_use = 0
+    if asset_active:
+        asset_flt = dscope.with_project_scope(
+            {"company_id": cid, "status": {"$ne": "deleted"}}, scope)
+        assets_total = await db.assets.count_documents(asset_flt)
+        assets_in_use = await db.assets.count_documents({**asset_flt, "lifecycle_state": "IN_USE"})
+
     # ---------------- Module cards ------------------------------------------
     active_keys = {m["module_key"] for m in module_rows if m.get("is_active")} | {"hr_core"}
 
@@ -394,9 +432,29 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             "note": "Modul aktif dan sudah bisa dipakai: data induk karyawan, kontrak kerja, sertifikasi dan pengingat masa berlaku.",
             "action_label": "Buka Data Karyawan",
         },
+        "attendance": {
+            "link": "/modules/attendance",
+            "note": "Modul aktif: shift, jadwal kerja, absensi GPS, koreksi, rekap, dan persetujuan.",
+            "action_label": "Buka Absensi",
+        },
+        "leave_overtime": {
+            "link": "/modules/leave_overtime",
+            "note": "Modul aktif: pengajuan cuti, izin, sakit, dan lembur dengan saldo berbasis buku besar.",
+            "action_label": "Buka Cuti & Lembur",
+        },
+        "payroll": {
+            "link": "/payroll/runs",
+            "note": "Modul aktif: penggajian bulanan, BPJS, dan PPh 21 metode TER.",
+            "action_label": "Buka Payroll",
+        },
+        "asset": {
+            "link": "/modules/asset/assets",
+            "note": "Modul aktif: register aset, penyerahan, pengembalian, pemeriksaan, dan BAST.",
+            "action_label": "Buka Manajemen Aset",
+        },
         "mobilization": {
             "link": "/modules/mobilization",
-            "note": "Modul aktif: pola roster project, kalender, rencana cuti H-30/H-10 (mobilisasi GA menyusul).",
+            "note": "Modul aktif: pola roster project, kalender, rencana cuti H-30/H-10, karyawan pengganti, dan mobilisasi GA dengan persetujuan HR.",
             "action_label": "Buka Roster",
         },
     }
@@ -508,6 +566,29 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             "total": counts["available_modules"],
             "meta": f"dari {counts['available_modules']} modul tersedia",
             "link": "/setup/modules",
+        },
+        "roster_on_leave": {
+            "available": roster_active,
+            "value": roster_on_leave if roster_active else None,
+            "meta": (
+                (f"{mobilization_pending} mobilisasi menunggu persetujuan HR" if mobilization_pending
+                 else "Rencana cuti terkonfirmasi untuk hari ini")
+                if roster_active else "Modul Roster & Mobilisasi belum aktif"
+            ),
+            "link": "/modules/mobilization/kembali",
+        },
+        "assets_registered": {
+            "available": asset_active,
+            "value": assets_total if asset_active else None,
+            "meta": (f"{assets_in_use} sedang dipakai" if asset_active else "Modul Manajemen Aset belum aktif"),
+            "link": "/modules/asset/assets",
+        },
+        "exit_open": {
+            "available": exit_active,
+            "value": exit_open if exit_active else None,
+            "meta": (f"{len(exit_pending)} menunggu persetujuan" if exit_active
+                     else "Anda tidak memiliki akses Exit Clearance"),
+            "link": "/employees/exit-clearance",
         },
     }
 
