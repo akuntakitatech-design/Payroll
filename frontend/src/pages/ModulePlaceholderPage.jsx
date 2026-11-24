@@ -34,7 +34,7 @@ const ModulePlaceholderPage = () => {
     }
     api.get("/modules").then(({ data }) => {
       const mod = data.items.find((item) => item.key === moduleKey);
-      if (current) setState({ loading: false, active: !!mod?.is_active, error: "" });
+      if (current) setState({ loading: false, active: !!mod?.is_effective, error: "" });
     }).catch((error) => {
       if (current) setState({ loading: false, active: false, error: errorMessage(error, "Status akses modul belum dapat dimuat.") });
     });

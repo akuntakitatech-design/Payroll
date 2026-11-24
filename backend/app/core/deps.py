@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .db import NO_ID, get_db
-from .rbac import WILDCARD, resource_module
+from .rbac import MODULES, WILDCARD, resource_module
 from .tenant_subscription import subscription_info, tenant_block_reason
 from .security import decode_token
 from .tenancy import TenantDatabase, get_tenant_db
@@ -124,6 +124,56 @@ async def _permissions_from_memberships(
     }
 
 
+# Modul prasyarat: modul turunan hanya efektif bila prasyaratnya juga aktif.
+# Tujuannya agar menonaktifkan satu modul ikut menutup seluruh fitur turunannya,
+# bukan hanya menyembunyikan menu. `hr_core` selalu aktif dan tidak dapat dimatikan.
+MODULE_REQUIRES: Dict[str, tuple] = {
+    "payroll": ("employee_core",),
+    "attendance": ("employee_core",),
+    "leave_overtime": ("employee_core",),
+    "recruitment": ("employee_core",),
+    "performance": ("employee_core",),
+    "asset": ("employee_core",),
+    "mobilization": ("employee_core",),
+    "finance_request": ("employee_core",),
+}
+
+
+def effective_modules(raw: Set[str]) -> Set[str]:
+    """Saring modul aktif terhadap prasyaratnya (fail-closed).
+
+    Modul yang aktif di `company_modules` tetap dianggap NONAKTIF bila salah satu
+    prasyaratnya mati. Siklus konfigurasi yang tidak masuk akal juga dibuat nonaktif.
+    """
+    active = set(raw) | {"hr_core"}
+    memo: Dict[str, bool] = {}
+
+    def _is_on(key: str, seen: tuple = ()) -> bool:
+        if key in memo:
+            return memo[key]
+        if key not in active or key in seen:
+            memo[key] = False
+            return False
+        ok = all(_is_on(req, seen + (key,)) for req in MODULE_REQUIRES.get(key, ()))
+        memo[key] = ok
+        return ok
+
+    return {k for k in active if _is_on(k)}
+
+
+def missing_prerequisite(module_key: str, modules: Set[str]) -> Optional[str]:
+    """Prasyarat pertama yang belum aktif, atau None bila tidak ada."""
+    for req in MODULE_REQUIRES.get(module_key, ()):
+        if req not in modules:
+            return req
+    return None
+
+
+def module_name(module_key: str) -> str:
+    """Nama tampilan modul dari katalog RBAC (fallback: key apa adanya)."""
+    return next((m["name"] for m in MODULES if m["key"] == module_key), module_key)
+
+
 async def company_modules(company_id: Optional[str]) -> Set[str]:
     if not company_id:
         return set()
@@ -131,9 +181,7 @@ async def company_modules(company_id: Optional[str]) -> Set[str]:
     rows = await db.company_modules.find(
         {"company_id": company_id, "is_active": True}, NO_ID
     ).to_list(200)
-    keys = {r["module_key"] for r in rows}
-    keys.add("hr_core")  # core module can never be switched off
-    return keys
+    return effective_modules({r["module_key"] for r in rows})
 
 
 async def accessible_companies(user_id: str) -> List[Dict[str, Any]]:
@@ -285,8 +333,8 @@ async def _base_auth(
 
     modules: Set[str] = set()
     if company_id:
-        modules = {r["module_key"] for r in module_rows}
-        modules.add("hr_core")  # modul inti tidak dapat dimatikan
+        # Modul turunan ikut nonaktif bila prasyaratnya belum aktif (MODULE_REQUIRES).
+        modules = effective_modules({r["module_key"] for r in module_rows})
 
     return AuthContext(
         user=user,
@@ -335,11 +383,18 @@ def require_permission(resource: str, action: str, module_key: Optional[str] = N
 
     async def _dep(ctx: AuthContext = Depends(get_auth)) -> AuthContext:
         if not ctx.has_module(needed_module):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                f"Modul terkait belum diaktifkan untuk perusahaan {ctx.company.get('name')}. "
-                "Hubungi Platform Admin untuk mengaktifkan modul tersebut.",
-            )
+            missing = missing_prerequisite(needed_module, ctx.modules)
+            if missing:
+                detail = (
+                    f"Modul {module_name(needed_module)} membutuhkan modul {module_name(missing)} "
+                    "yang belum diaktifkan untuk perusahaan ini. Hubungi Platform Admin untuk mengaktifkannya."
+                )
+            else:
+                detail = (
+                    f"Modul terkait belum diaktifkan untuk perusahaan {ctx.company.get('name')}. "
+                    "Hubungi Platform Admin untuk mengaktifkan modul tersebut."
+                )
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail)
         if not ctx.has_permission(resource, action):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,

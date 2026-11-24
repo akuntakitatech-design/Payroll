@@ -1,11 +1,15 @@
-import React, { useState } from "react";
-import { Link, Outlet } from "react-router-dom";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { KeyRound } from "lucide-react";
 import { DashboardDataProvider } from "@/lib/dashboardData";
 import { useAuth } from "@/lib/auth";
 import Sidebar, { usePlatformMode } from "./Sidebar";
 import Topbar from "./Topbar";
 import TenantSubscriptionBanner from "./TenantSubscriptionBanner";
+import ModuleGate from "@/components/common/ModuleGate";
+
+/** Jeda minimum antar-refresh sesi agar tidak membanjiri API saat pengguna berpindah halaman. */
+const SESSION_REFRESH_MS = 60000;
 
 /** Akun dengan password sementara (dibuat Platform/Tenant Admin) diminta segera mengganti password. */
 const MustChangePasswordBanner = () => {
@@ -33,6 +37,30 @@ const MustChangePasswordBanner = () => {
 const AppShell = () => {
   const [collapsed, setCollapsed] = useState(false);
   const platformMode = usePlatformMode();
+  const { refreshSession } = useAuth();
+  const location = useLocation();
+  const lastRefresh = useRef(Date.now());
+
+  // Aktivasi modul / perubahan hak akses berlaku di backend per request. Supaya menu
+  // dan guard route ikut berubah tanpa perlu login ulang, sesi disegarkan sesekali
+  // (maksimal sekali per menit) saat berpindah halaman atau kembali ke tab ini.
+  const maybeRefreshSession = useCallback(() => {
+    if (Date.now() - lastRefresh.current < SESSION_REFRESH_MS) return;
+    lastRefresh.current = Date.now();
+    refreshSession();
+  }, [refreshSession]);
+
+  useEffect(() => {
+    maybeRefreshSession();
+  }, [location.pathname, maybeRefreshSession]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") maybeRefreshSession();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [maybeRefreshSession]);
 
   return (
     // Provider dipasang di shell agar ringkasan dashboard hanya diambil sekali
@@ -45,7 +73,9 @@ const AppShell = () => {
           <MustChangePasswordBanner />
           {!platformMode && <TenantSubscriptionBanner />}
           <main className="min-w-0 flex-1 pb-16" data-testid="app-main">
-            <Outlet />
+            <ModuleGate>
+              <Outlet />
+            </ModuleGate>
           </main>
         </div>
       </div>

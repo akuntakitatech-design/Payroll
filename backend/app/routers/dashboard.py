@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends
 
 from ..core.db import ASCENDING, DESCENDING, NO_ID, get_db, serialize_list
 from ..core import data_scope as dscope  # Upgrade 01I
-from ..core.deps import AuthContext, get_auth
+from ..core.deps import AuthContext, get_auth, missing_prerequisite, module_name
 from ..core.employee_status import today_local
 from ..core.policy import resolve_config
 from ..core.rbac import MODULES
@@ -412,7 +412,9 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
         assets_in_use = await db.assets.count_documents({**asset_flt, "lifecycle_state": "IN_USE"})
 
     # ---------------- Module cards ------------------------------------------
-    active_keys = {m["module_key"] for m in module_rows if m.get("is_active")} | {"hr_core"}
+    # Status di sini memakai modul EFEKTIF: modul yang prasyaratnya mati ikut dianggap
+    # nonaktif, sehingga kartu di dashboard tidak menjanjikan fitur yang terkunci.
+    active_keys = set(ctx.modules)
 
     PLACEHOLDER_COPY = {
         "recruitment": "Pelamar masuk, tahapan seleksi dan persetujuan penawaran kerja.",
@@ -465,12 +467,15 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             continue
         is_active = mod["key"] in active_keys
         implemented = IMPLEMENTED_MODULES.get(mod["key"])
+        missing = missing_prerequisite(mod["key"], ctx.modules)
+        blocked_by = module_name(missing) if missing else None
         module_cards.append(
             {
                 "key": mod["key"],
                 "name": mod["name"],
                 "icon": mod.get("icon"),
                 "is_active": is_active,
+                "blocked_by": blocked_by,
                 "state": "available" if (implemented and is_active) else "placeholder",
                 "link": implemented["link"] if (implemented and is_active) else None,
                 "action_label": implemented["action_label"] if (implemented and is_active) else None,
@@ -479,9 +484,13 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
                     implemented["note"]
                     if (implemented and is_active)
                     else (
-                        "Modul aktif. Fungsi operasional akan tersedia pada tahap pengembangan berikutnya."
-                        if is_active
-                        else "Modul belum diaktifkan untuk perusahaan ini."
+                        f"Menunggu modul {blocked_by} diaktifkan."
+                        if blocked_by
+                        else (
+                            "Modul aktif. Fungsi operasional akan tersedia pada tahap pengembangan berikutnya."
+                            if is_active
+                            else "Modul belum diaktifkan untuk perusahaan ini."
+                        )
                     )
                 ),
             }

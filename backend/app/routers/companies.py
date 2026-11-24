@@ -6,7 +6,8 @@ from ..core.audit import log_action
 from ..core.branding_assets import is_tenant_logo_path, read_image_upload, tenant_logo_path
 from ..core.storage import StorageError, delete_object, get_object, put_object
 from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
-from ..core.deps import AuthContext, get_auth, get_auth_optional_company, require_permission, require_super_admin
+from ..core.deps import (AuthContext, get_auth, get_auth_optional_company, missing_prerequisite, module_name,
+                         require_permission, require_super_admin)
 from ..core.rbac import MODULES
 from ..core.tenant_subscription import SUBSCRIPTION_FIELDS
 from ..schemas import CompanyCreate, CompanySettingsUpdate, CompanyUpdate, ModuleToggleRequest
@@ -297,10 +298,15 @@ async def list_modules(ctx: AuthContext = Depends(get_auth)):
     out = []
     for mod in catalog:
         row = by_key.get(mod["key"], {})
+        blocked_by = missing_prerequisite(mod["key"], ctx.modules)
         out.append(
             {
                 **mod,
                 "is_active": bool(row.get("is_active")) or mod.get("is_core", False),
+                # is_effective=false berarti modul aktif di katalog tetapi prasyaratnya belum aktif,
+                # sehingga seluruh fiturnya tetap terkunci.
+                "is_effective": mod["key"] in ctx.modules,
+                "blocked_by": module_name(blocked_by) if blocked_by else None,
                 "company_module_id": row.get("id"),
                 "activated_at": row.get("activated_at"),
                 "notes": row.get("notes"),

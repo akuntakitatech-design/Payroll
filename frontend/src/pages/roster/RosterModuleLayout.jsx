@@ -50,21 +50,20 @@ export const RosterModuleTabs = ({ items }) => {
 };
 
 const RosterModuleLayout = () => {
-  const { can, hasModule } = useAuth();
+  const { can } = useAuth();
   useEffect(() => { document.title = "Roster & Mobilisasi · HRIS Suite"; }, []);
   const tabs = rosterTabs(can);
-  const moduleOn = hasModule("mobilization");
 
-  if (!moduleOn || !tabs.length) {
+  // Modul nonaktif ditangani satu kali oleh ModuleGate di AppShell; di sini hanya
+  // kasus tidak punya satu pun tab yang diizinkan.
+  if (!tabs.length) {
     return (
       <>
         <PageHeader title="Roster & Mobilisasi" />
         <EmptyState
           testId="roster-module-unavailable"
-          title={moduleOn ? "Anda belum memiliki akses Roster" : "Modul Roster & Mobilisasi belum aktif"}
-          description={moduleOn
-            ? "Minta administrator menambahkan hak akses roster pada peran Anda."
-            : "Modul Roster & Mobilisasi belum diaktifkan untuk perusahaan ini. Hubungi Platform Admin untuk mengaktifkannya."}
+          title="Anda belum memiliki akses Roster"
+          description="Minta administrator menambahkan hak akses roster pada peran Anda."
         />
       </>
     );

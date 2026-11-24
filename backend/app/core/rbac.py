@@ -51,7 +51,7 @@ RESOURCES: Dict[str, tuple] = {
     "certification_type": ("Tipe Sertifikasi", "hr_core", ["view", "create", "edit", "delete"]),
     "document_type": ("Tipe Dokumen", "hr_core", ["view", "create", "edit", "delete"]),
     # Modul 3 Blueprint HRGA: verify = Verifikasi dokumen (setujui/tolak) pada antrean verifikasi.
-    "document": ("Dokumen", "hr_core", ["view", "create", "edit", "delete", "export", "verify"]),
+    "document": ("Dokumen", "employee_core", ["view", "create", "edit", "delete", "export", "verify"]),
     # Modul 7 Blueprint HRGA - Pusat Laporan & Export lintas modul.
     "report": ("Laporan & Export", "hr_core", ["view", "export"]),
     "user": ("Pengguna", "hr_core", ["view", "create", "edit", "delete", "export"]),
