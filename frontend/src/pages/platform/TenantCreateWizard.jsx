@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, KeyRound, Loader2 } from "lucide-react";
+import { Boxes, Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, KeyRound, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import { MODULE_INFO } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const STEPS = ["Data Tenant", "Tenant Admin Pertama", "Review & Buat"];
+const STEPS = ["Data Tenant", "Tenant Admin Pertama", "Modul & Fitur", "Review & Buat"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[0-9+()\-\s]{6,20}$/;
 
@@ -36,6 +37,8 @@ const EMPTY = {
   admin_use_primary_email: true,
   admin_full_name: "",
   admin_email: "",
+  // Fondasi Data Karyawan dipilih secara default; modul lain mengikuti yang diambil tenant.
+  modules: ["employee_core"],
 };
 
 const suggestCode = (name) =>
@@ -73,6 +76,9 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [catalog, setCatalog] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -82,6 +88,20 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
       setErrors({});
       setResult(null);
     }
+  }, [open]);
+
+  const loadCatalog = () => {
+    setCatalogLoading(true);
+    setCatalogError("");
+    api
+      .get("/platform/modules")
+      .then(({ data }) => setCatalog(data.items || []))
+      .catch((err) => setCatalogError(errorMessage(err, "Katalog modul tidak dapat dimuat.")))
+      .finally(() => setCatalogLoading(false));
+  };
+
+  useEffect(() => {
+    if (open) loadCatalog();
   }, [open]);
 
   const set = (name, value) => {
@@ -116,8 +136,17 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
     return !Object.keys(e).length;
   };
 
-  const next = () => validateStep(step) && setStep((s) => Math.min(2, s + 1));
+  const next = () => validateStep(step) && setStep((s) => Math.min(3, s + 1));
   const back = () => setStep((s) => Math.max(0, s - 1));
+
+  const toggleModule = (key) => {
+    const mod = catalog.find((m) => m.key === key);
+    if (mod?.is_core) return;
+    setV((p) => ({
+      ...p,
+      modules: p.modules.includes(key) ? p.modules.filter((k) => k !== key) : [...p.modules, key],
+    }));
+  };
 
   const adminEmail = v.admin_use_primary_email ? v.email.trim().toLowerCase() : v.admin_email.trim().toLowerCase();
   const adminName = v.admin_use_primary_email ? v.pic_name.trim() : v.admin_full_name.trim();
@@ -142,6 +171,7 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
         admin_use_primary_email: v.admin_use_primary_email,
         admin_full_name: v.admin_use_primary_email ? null : v.admin_full_name.trim(),
         admin_email: v.admin_use_primary_email ? null : v.admin_email.trim().toLowerCase(),
+        modules: v.modules,
       });
       setResult(data);
       toast.success(`Tenant ${data.name} dan Tenant Admin pertama berhasil dibuat.`);
@@ -203,7 +233,7 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
               </DialogDescription>
             </DialogHeader>
 
-            <ol className="grid grid-cols-3 gap-2" data-testid="tenant-wizard-steps">
+            <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="tenant-wizard-steps">
               {STEPS.map((label, i) => (
                 <li
                   key={label}
@@ -305,6 +335,50 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
             )}
 
             {step === 2 && (
+              <div className="space-y-3" data-testid="tenant-wizard-step-modules">
+                <div className="rounded-lg border border-border bg-secondary px-3 py-2 text-[12px] text-secondary-foreground">
+                  Pilih modul yang diambil tenant. HR Core selalu aktif; menu tenant hanya menampilkan modul yang diaktifkan di sini.
+                </div>
+                {catalogError ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-danger-border bg-danger-soft px-3 py-2 text-sm text-destructive" role="alert" data-testid="wizard-modules-error">
+                    <span>{catalogError}</span>
+                    <Button variant="outline" size="sm" onClick={loadCatalog}>Coba lagi</Button>
+                  </div>
+                ) : catalogLoading ? (
+                  <div className="grid gap-2 sm:grid-cols-2" data-testid="wizard-modules-loading">
+                    {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-16 animate-pulse rounded-lg border border-border bg-muted" />)}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setV((p) => ({ ...p, modules: catalog.filter((m) => !m.is_core).map((m) => m.key) }))} data-testid="wizard-modules-select-all">Pilih semua</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setV((p) => ({ ...p, modules: [] }))} data-testid="wizard-modules-clear">Kosongkan</Button>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {catalog.map((mod) => {
+                        const info = MODULE_INFO[mod.key];
+                        const Icon = info?.icon || Boxes;
+                        const checked = mod.is_core || v.modules.includes(mod.key);
+                        return (
+                          <label key={mod.key} htmlFor={`wz-mod-${mod.key}`} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 transition-colors duration-150 hover:bg-accent">
+                            <Checkbox id={`wz-mod-${mod.key}`} checked={checked} disabled={mod.is_core} onCheckedChange={() => toggleModule(mod.key)} className="mt-0.5" data-testid={`wizard-module-${mod.key}`} />
+                            <span className="min-w-0">
+                              <span className="flex items-center gap-1.5 text-sm font-medium">
+                                <Icon className="h-3.5 w-3.5" />{mod.name}
+                                {mod.is_core && <Lock className="h-3 w-3 text-muted-foreground" />}
+                              </span>
+                              <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{mod.description}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {step === 3 && (
               <div className="grid gap-4 sm:grid-cols-2" data-testid="tenant-wizard-step-review">
                 <div className="rounded-lg border border-border p-3">
                   <p className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-ink-3">Tenant</p>
@@ -321,6 +395,11 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
                   <ReviewItem label="Grace period" value={`${v.grace_period_days} hari`} />
                   <ReviewItem label="Tenant Admin" value={adminName} testId="review-admin-name" />
                   <ReviewItem label="Email login admin" value={adminEmail} testId="review-admin-email" />
+                  <ReviewItem
+                    label="Modul diambil"
+                    value={catalog.filter((m) => v.modules.includes(m.key)).map((m) => m.name).join(", ") || "HR Core saja"}
+                    testId="review-modules"
+                  />
                 </div>
               </div>
             )}
@@ -335,7 +414,7 @@ export const TenantCreateWizard = ({ open, onOpenChange, onCreated }) => {
               <Button variant="outline" onClick={step === 0 ? () => onOpenChange(false) : back} disabled={submitting} data-testid="tenant-wizard-back">
                 {step === 0 ? "Batal" : (<><ChevronLeft className="mr-1 h-4 w-4" /> Kembali</>)}
               </Button>
-              {step < 2 ? (
+              {step < 3 ? (
                 <Button onClick={next} data-testid="tenant-wizard-next">
                   Lanjut <ChevronRight className="ml-1 h-4 w-4" />
                 </Button>

@@ -128,7 +128,7 @@ const DashboardPage = () => {
                   icon={Clock}
                   locked
                   lockedReason={kpi?.attendance_today?.meta}
-                  lockedActionLabel={kpi?.attendance_today?.action_label || "Lihat Aktivasi Modul"}
+                  lockedActionLabel={kpi?.attendance_today?.action_label || "Lihat Modul Perusahaan"}
                   link={kpi?.attendance_today?.link || "/setup/modules"}
                   testId="kpi-hadir-hari-ini-locked-card"
                   actionTestId="kpi-hadir-hari-ini-activate-button"
@@ -214,7 +214,7 @@ const DashboardPage = () => {
                 className="font-medium text-primary underline-offset-2 hover:underline"
                 data-testid="dashboard-modules-footnote-link"
               >
-                Lihat aktivasi modul
+                Lihat modul perusahaan
               </Link>
             </p>
           </>

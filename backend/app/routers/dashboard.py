@@ -446,7 +446,7 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             "meta": "Modul aktif, data kehadiran belum tersedia"
             if attendance_active
             else "Modul Absensi belum aktif",
-            "action_label": "Lihat Aktivasi Modul",
+            "action_label": "Lihat Modul Perusahaan",
             "link": "/setup/modules",
         },
         "contracts_ending": {

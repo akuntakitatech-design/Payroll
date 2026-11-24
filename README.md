@@ -133,7 +133,8 @@ payroll/
 │       │   └── pdf.py             # Generator slip gaji PDF (ReportLab)
 │       └── routers/               # Endpoint HTTP, satu file per domain (semua di bawah prefix /api)
 │           ├── auth.py            # /auth: login, refresh, switch-company, change-password, me
-│           ├── companies.py       # /companies: profil, settings, aktivasi modul
+│           ├── companies.py       # /companies: profil, settings, daftar modul tenant (read-only)
+│           ├── platform.py        # /platform: tenant, masa layanan, aktivasi modul per tenant (Platform Admin)
 │           ├── users.py           # /users & /roles: manajemen pengguna & peran
 │           ├── master.py          # /master/{resource}: CRUD generik master data
 │           ├── policies.py        # /policies: kebijakan perusahaan

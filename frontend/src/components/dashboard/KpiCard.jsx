@@ -42,7 +42,7 @@ const KpiCard = ({
   link,
   locked = false,
   lockedReason,
-  lockedActionLabel = "Lihat Aktivasi Modul",
+  lockedActionLabel = "Lihat Modul Perusahaan",
   testId,
   actionTestId,
 }) => {

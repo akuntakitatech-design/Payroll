@@ -311,61 +311,14 @@ async def list_modules(ctx: AuthContext = Depends(get_auth)):
 
 
 @router.put("/modules/toggle")
-async def toggle_module(
-    payload: ModuleToggleRequest, ctx: AuthContext = Depends(require_permission("module", "config"))
-):
-    db = get_db()
-    mod = await db.modules.find_one({"key": payload.module_key}, NO_ID)
-    if not mod:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Modul tidak ditemukan.")
-    if mod.get("is_core") and not payload.is_active:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Modul HR Core adalah modul dasar dan tidak dapat dinonaktifkan.",
-        )
-    before = await db.company_modules.find_one(
-        {"company_id": ctx.company_id, "module_key": payload.module_key}, NO_ID
-    )
-    if before:
-        patch = {"is_active": payload.is_active, "notes": payload.notes}
-        if payload.is_active:
-            patch["activated_at"] = now()
-        else:
-            patch["deactivated_at"] = now()
-        patch.update(audit_fields(ctx.user_id, creating=False))
-        await db.company_modules.update_one(
-            {"company_id": ctx.company_id, "module_key": payload.module_key}, {"$set": patch}
-        )
-    else:
-        doc = {
-            "id": new_id(),
-            "company_id": ctx.company_id,
-            "module_key": payload.module_key,
-            "is_active": payload.is_active,
-            "status": "active",
-            "activated_at": now() if payload.is_active else None,
-            "notes": payload.notes,
-        }
-        doc.update(audit_fields(ctx.user_id, creating=True))
-        await db.company_modules.insert_one(dict(doc))
-    if payload.is_active and payload.module_key == "asset":
-        # Phase 2A: master default Manajemen Aset (idempoten; tidak menimpa konfigurasi tenant).
-        from ..core.asset_service import seed_defaults
+async def toggle_module(payload: ModuleToggleRequest, ctx: AuthContext = Depends(get_auth)):
+    """Aktivasi modul dipindahkan ke Konsol Platform (Platform Admin).
 
-        await seed_defaults(ctx.company_id, ctx.user_id)
-    after = serialize(await db.company_modules.find_one(
-        {"company_id": ctx.company_id, "module_key": payload.module_key}, NO_ID
-    ))
-    await log_action(
-        ctx,
-        "activate" if payload.is_active else "deactivate",
-        "module",
-        after["id"],
-        mod["name"],
-        before=before,
-        after=after,
+    Endpoint dipertahankan agar klien lama mendapat pesan yang jelas (403), bukan
+    error routing. Sumber kebenaran tetap `company_modules` yang ditulis Platform Admin.
+    """
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        "Aktivasi modul dikelola oleh Platform Admin melalui Konsol Platform. "
+        "Hubungi Platform Admin untuk menambah atau menonaktifkan modul perusahaan Anda.",
     )
-    return {
-        "message": f"Modul {mod['name']} berhasil " + ("diaktifkan." if payload.is_active else "dinonaktifkan."),
-        "item": after,
-    }
