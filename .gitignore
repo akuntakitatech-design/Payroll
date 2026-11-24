@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# File kredensial lokal (jangan pernah di-commit)
+Cred*.txt
+*Cred*Secret*.txt
+
 # Python
 __pycache__/
 *.py[cod]
