@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { CalendarDays, CalendarRange, ClipboardList } from "lucide-react";
+import { CalendarDays, CalendarRange, ClipboardList, Plane, Undo2 } from "lucide-react";
 
 import PageHeader from "@/components/common/PageHeader";
 import EmptyState from "@/components/common/EmptyState";
@@ -12,6 +12,8 @@ export const rosterTabs = (can) =>
     can("roster", "view") && { to: "/modules/mobilization", label: "Ringkasan", icon: ClipboardList },
     can("roster", "view") && { to: "/modules/mobilization/kalender", label: "Kalender Roster", shortLabel: "Kalender", icon: CalendarRange },
     can("roster", "view") && { to: "/modules/mobilization/rencana", label: "Rencana Cuti (H-30/H-10)", shortLabel: "Rencana Cuti", icon: CalendarDays },
+    can("roster", "view") && { to: "/modules/mobilization/mobilisasi", label: "Mobilisasi GA", shortLabel: "Mobilisasi", icon: Plane },
+    can("roster", "view") && { to: "/modules/mobilization/kembali", label: "Karyawan Akan Kembali", shortLabel: "Akan Kembali", icon: Undo2 },
   ].filter(Boolean);
 
 export const RosterModuleTabs = ({ items }) => {
@@ -72,7 +74,7 @@ const RosterModuleLayout = () => {
     <>
       <PageHeader
         title="Roster & Mobilisasi"
-        subtitle="Pola roster per project, kalender kerja/off, serta rencana cuti project H-30 dan konfirmasi H-10."
+        subtitle="Pola roster per project, kalender kerja/off, rencana cuti H-30/H-10, mobilisasi GA, dan karyawan yang akan kembali."
       />
       <RosterModuleTabs items={tabs} />
       <Outlet />

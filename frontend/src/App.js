@@ -65,6 +65,8 @@ import RosterModuleLayout from "@/pages/roster/RosterModuleLayout";
 import RosterOverviewPage from "@/pages/roster/RosterOverviewPage";
 import RosterCalendarPage from "@/pages/roster/RosterCalendarPage";
 import RosterPlansPage from "@/pages/roster/RosterPlansPage";
+import RosterMobilizationPage from "@/pages/roster/RosterMobilizationPage";
+import RosterReturningPage from "@/pages/roster/RosterReturningPage";
 import AssetModuleLayout from "@/pages/asset/AssetModuleLayout";
 import AssetListPage from "@/pages/asset/AssetListPage";
 import AssetSettingsPage from "@/pages/asset/AssetSettingsPage";
@@ -220,6 +222,8 @@ const AppRoutes = () => (
         <Route index element={<RosterOverviewPage />} />
         <Route path="kalender" element={<RosterCalendarPage />} />
         <Route path="rencana" element={<RosterPlansPage />} />
+        <Route path="mobilisasi" element={<RosterMobilizationPage />} />
+        <Route path="kembali" element={<RosterReturningPage />} />
         <Route path="*" element={<Navigate to="/modules/mobilization" replace />} />
       </Route>
       <Route path="/modules/:moduleKey" element={<ModulePlaceholderPage />} />
