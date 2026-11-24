@@ -83,7 +83,7 @@ const AttendanceOverviewPage = () => {
             type="date"
             value={workDate}
             onChange={(e) => setWorkDate(e.target.value || todayIso())}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-ink-1 shadow-[var(--shadow-input)] transition-[border-color,box-shadow] duration-150 hover:border-border-strong focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/25"
             data-testid="overview-date-input"
           />
         </div>

@@ -77,7 +77,8 @@ const DashboardHeader = ({ greeting, firstName, company, counts, periodLabel, on
             <Button
               asChild
               size="sm"
-              className="h-9 rounded-lg bg-white text-primary shadow-xs hover:bg-white/90 active:bg-white/80"
+              variant="secondary"
+              className="h-9"
             >
               <Link to="/employees" data-testid="dashboard-header-primary-action">
                 <Plus className="mr-1.5 h-4 w-4" strokeWidth={2.25} />

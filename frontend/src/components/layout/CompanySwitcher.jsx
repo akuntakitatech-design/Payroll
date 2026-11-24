@@ -46,7 +46,7 @@ const CompanySwitcher = () => {
           aria-expanded={open}
           disabled={switching || single}
           data-testid="company-switcher-trigger"
-          className="h-9 max-w-[16rem] justify-between gap-2 bg-card"
+          className="h-9 max-w-[8rem] justify-between gap-2 border-border-strong bg-[image:var(--gradient-secondary)] shadow-[var(--shadow-raised)] xs:max-w-[11rem] sm:max-w-[16rem]"
         >
           <span className="flex min-w-0 items-center gap-2">
             {switching ? (

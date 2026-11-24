@@ -16,13 +16,15 @@ const EmptyState = ({
   <div
     data-testid={testId}
     className={cn(
-      "flex flex-col items-start gap-2 rounded-md border border-dashed border-border bg-muted/40 px-4 py-8 sm:px-6",
+      "flex flex-col items-start gap-2 rounded-xl border border-dashed border-border-strong bg-[linear-gradient(180deg,#FFFFFF_0%,hsl(var(--surface-2))_100%)] px-5 py-8 shadow-[var(--shadow-xs)] sm:px-6",
       className
     )}
   >
-    <div className="flex items-center gap-2 text-muted-foreground">
-      <Icon className="h-4 w-4" strokeWidth={1.75} />
-      <p className="text-sm font-semibold text-foreground">{title}</p>
+    <div className="flex items-center gap-2.5">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary-border bg-primary-soft text-primary shadow-[var(--shadow-xs)]">
+        <Icon className="h-4 w-4" strokeWidth={1.9} />
+      </span>
+      <p className="text-sm font-bold text-ink-1">{title}</p>
     </div>
     <p className="max-w-xl text-[13px] text-muted-foreground">{description}</p>
     {actionLabel && onAction && (

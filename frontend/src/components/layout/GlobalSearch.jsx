@@ -60,13 +60,13 @@ const GlobalSearch = () => {
         onClick={() => setOpen(true)}
         data-testid="topbar-search-input"
         aria-label="Buka pencarian global"
-        className="group hidden h-9 w-full max-w-[24rem] items-center gap-2.5 rounded-lg border border-input bg-card px-3 text-left transition-[border-color,box-shadow] duration-150 hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 md:flex"
+        className="group hidden h-9 w-full max-w-[24rem] items-center gap-2.5 rounded-lg border border-border-strong bg-[image:var(--gradient-secondary)] px-3 text-left shadow-[var(--shadow-raised)] transition-[border-color,box-shadow,background-color] duration-150 hover:border-primary-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 md:flex"
       >
         <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={2} />
         <span className="flex-1 truncate text-[13px] text-ink-3">
           Cari karyawan, dokumen, atau menu…
         </span>
-        <kbd className="hidden shrink-0 items-center gap-0.5 rounded border border-border bg-surface-1 px-1.5 py-0.5 text-[10.5px] font-medium text-ink-3 lg:inline-flex">
+        <kbd className="hidden shrink-0 items-center gap-0.5 rounded border border-border-strong bg-white px-1.5 py-0.5 text-[10.5px] font-semibold text-ink-3 shadow-[var(--shadow-xs)] lg:inline-flex">
           Ctrl K
         </kbd>
       </button>

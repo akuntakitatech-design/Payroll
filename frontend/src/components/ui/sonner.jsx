@@ -21,15 +21,15 @@ const Toaster = ({
       toastOptions={{
         classNames: {
           toast:
-            "group toast group-[.toaster]:rounded-md group-[.toaster]:bg-card group-[.toaster]:text-foreground group-[.toaster]:border group-[.toaster]:border-border group-[.toaster]:shadow-md group-[.toaster]:text-[13px]",
-          title: "group-[.toast]:text-[13px] group-[.toast]:font-semibold",
+            "group toast group-[.toaster]:rounded-xl group-[.toaster]:border group-[.toaster]:border-border-strong group-[.toaster]:bg-card group-[.toaster]:text-foreground group-[.toaster]:shadow-[var(--shadow-overlay)] group-[.toaster]:text-[13px]",
+          title: "group-[.toast]:text-[13px] group-[.toast]:font-bold",
           description: "group-[.toast]:text-[12px] group-[.toast]:text-muted-foreground",
           actionButton:
-            "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground group-[.toast]:rounded-md",
+            "group-[.toast]:rounded-lg group-[.toast]:border group-[.toast]:border-[hsl(var(--primary-active))] group-[.toast]:bg-[image:var(--gradient-primary)] group-[.toast]:text-white group-[.toast]:shadow-[var(--shadow-button-primary)]",
           cancelButton:
-            "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground group-[.toast]:rounded-md",
+            "group-[.toast]:rounded-lg group-[.toast]:border group-[.toast]:border-border-strong group-[.toast]:bg-muted group-[.toast]:text-ink-2",
           closeButton:
-            "group-[.toast]:bg-card group-[.toast]:text-muted-foreground group-[.toast]:border-border",
+            "group-[.toast]:border-border group-[.toast]:bg-card group-[.toast]:text-muted-foreground",
           success: "group-[.toaster]:[&_[data-icon]]:text-success",
           error: "group-[.toaster]:[&_[data-icon]]:text-danger",
           warning: "group-[.toaster]:[&_[data-icon]]:text-warning",

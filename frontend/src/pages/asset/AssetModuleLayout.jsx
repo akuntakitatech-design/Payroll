@@ -34,13 +34,15 @@ export const AssetModuleTabs = ({ items }) => {
   return (
     <div className="relative max-w-full border-b border-border bg-card">
       <nav ref={navRef} data-testid="asset-module-tabs" aria-label="Navigasi Manajemen Aset"
-        className="flex max-w-full snap-x gap-1 overflow-x-auto overscroll-x-contain px-4 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
+        className="flex max-w-full snap-x gap-1.5 overflow-x-auto overscroll-x-contain px-4 py-2 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
         {items.map((item) => (
           <NavLink key={item.to} to={item.to} end={false} data-testid={`asset-tab-${item.to.split("/").pop()}`}
             className={({ isActive }) => cn(
-              "inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] font-medium",
-              "transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-              isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:border-border-strong hover:text-foreground",
+              "inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-lg border border-transparent px-3 py-1.5 text-[13px] font-semibold",
+              "transition-[background-color,color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              isActive
+                ? "border-[hsl(var(--primary-active))] bg-[image:var(--gradient-primary)] text-white shadow-[var(--shadow-button-primary)]"
+                : "text-ink-2 hover:bg-[hsl(var(--surface-2))] hover:text-ink-1",
             )}>
             {item.icon && <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />}
             {item.shortLabel ? (

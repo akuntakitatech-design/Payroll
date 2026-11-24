@@ -48,7 +48,7 @@ const Topbar = () => {
   return (
     <header
       data-testid="app-topbar"
-      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:gap-3 sm:px-4"
+      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)] px-3 shadow-[0_1px_0_rgba(15,23,42,0.04)] sm:gap-3 sm:px-4"
     >
       {/* Menu navigasi untuk layar kecil */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -63,14 +63,14 @@ const Topbar = () => {
             <Menu className="h-5 w-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-[17rem] p-0" data-testid="mobile-nav-drawer">
+        <SheetContent side="left" className="w-[17rem] p-0 text-[hsl(var(--sidebar-text))]" data-testid="mobile-nav-drawer">
           <SidebarContent onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>
 
       {platformMode ? (
         <div className="flex min-w-0 flex-1 items-center gap-2" data-testid="topbar-platform-context">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-border bg-primary-soft px-2.5 py-1 text-[12px] font-semibold text-primary">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--navy-border))] bg-[hsl(var(--navy-soft))] px-2.5 py-1 text-[12px] font-semibold text-[hsl(var(--navy))]">
             <Gauge className="h-3.5 w-3.5" /> Konsol Platform
           </span>
           <span className="hidden truncate text-[12px] text-ink-3 md:inline">Pengelolaan tenant, masa layanan, dan branding platform</span>
@@ -81,7 +81,7 @@ const Topbar = () => {
             <CompanySwitcher />
           </div>
 
-          <span className="hidden h-6 w-px bg-border lg:inline-block" aria-hidden="true" />
+          <span className="hidden h-6 w-px bg-border-strong/70 lg:inline-block" aria-hidden="true" />
 
           {/* Pencarian global mengambil sisa ruang */}
           <div className="flex min-w-0 flex-1 items-center justify-end md:justify-start">
@@ -102,7 +102,7 @@ const Topbar = () => {
         )}
         {!platformMode && <NotificationBell />}
 
-        <span className="hidden h-6 w-px bg-border sm:inline-block" aria-hidden="true" />
+        <span className="hidden h-6 w-px bg-border-strong/70 sm:inline-block" aria-hidden="true" />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -110,9 +110,9 @@ const Topbar = () => {
               type="button"
               data-testid="topbar-user-menu"
               aria-label="Menu pengguna"
-              className="flex h-9 items-center gap-2 rounded-lg px-1.5 transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-9 items-center gap-2 rounded-lg border border-transparent px-1.5 transition-[background-color,box-shadow] duration-150 hover:bg-accent hover:shadow-[var(--shadow-xs)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary-border bg-primary-soft text-[11px] font-bold text-primary">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[hsl(var(--primary-active))] bg-[image:var(--gradient-primary)] text-[11px] font-bold text-white shadow-[var(--shadow-button-primary)]">
                 {initials(user?.full_name)}
               </span>
               <span className="hidden min-w-0 text-left sm:block">

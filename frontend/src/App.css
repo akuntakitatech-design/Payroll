@@ -3,13 +3,21 @@
     background-color: hsl(var(--background));
 }
 
-/* Satu-satunya gradient besar di aplikasi: panel brand pada halaman masuk. */
+/* Satu-satunya gradient besar di aplikasi: panel brand pada halaman masuk.
+ * Navy korporat dengan glow emerald tipis agar tetap berdimensi. */
 .login-accent {
-    background: linear-gradient(
-        165deg,
-        hsl(167 79% 18%) 0%,
-        hsl(175 77% 26%) 100%
-    );
+    background:
+        radial-gradient(
+            120% 90% at 85% 8%,
+            hsl(173 88% 30% / 0.38) 0%,
+            transparent 58%
+        ),
+        linear-gradient(
+            160deg,
+            hsl(204 60% 19%) 0%,
+            hsl(205 62% 14%) 55%,
+            hsl(206 65% 10%) 100%
+        );
 }
 
 /* Tekstur grid halus di panel hero login (opacity rendah, tanpa gradient tambahan). */
@@ -35,6 +43,6 @@
     position: sticky;
     top: 0;
     z-index: 2;
-    background-color: hsl(var(--muted));
+    background-color: hsl(var(--table-header));
     box-shadow: inset 0 -1px 0 hsl(var(--border));
 }

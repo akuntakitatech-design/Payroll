@@ -23,12 +23,12 @@ const NavItem = ({ item, collapsed, onNavigate }) => {
       data-testid={`sidebar-nav-item-${item.key}`}
       className={({ isActive }) =>
         cn(
-          "group relative flex items-center gap-2.5 rounded-lg py-2 pl-3 pr-2 text-[13px] font-medium text-ink-2",
+          "group relative flex items-center gap-2.5 rounded-lg border border-transparent py-2 pl-3 pr-2 text-[13px] font-medium text-[hsl(var(--sidebar-text-muted))]",
           "transition-[background-color,color,box-shadow] duration-150",
-          "hover:bg-[hsl(var(--sidebar-hover))] hover:text-ink-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-[hsl(var(--sidebar))]",
+          "hover:bg-[hsl(var(--sidebar-hover))] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary-border))] focus-visible:ring-offset-1 focus-visible:ring-offset-[hsl(var(--sidebar-deep))]",
           collapsed && "justify-center px-0",
           isActive &&
-            "bg-primary font-semibold text-primary-foreground shadow-sm hover:bg-primary-hover hover:text-primary-foreground"
+            "border-white/10 bg-[image:var(--gradient-sidebar-active)] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_rgba(0,0,0,0.35)] hover:text-white"
         )
       }
     >
@@ -37,8 +37,8 @@ const NavItem = ({ item, collapsed, onNavigate }) => {
           <Icon
             className={cn(
               "h-4 w-4 shrink-0 transition-transform duration-150",
-              !isActive && "text-primary/85 group-hover:translate-x-px group-hover:text-primary",
-              isActive && "text-primary-foreground"
+              !isActive && "text-[hsl(var(--sidebar-text-muted))] group-hover:translate-x-px group-hover:text-white",
+              isActive && "text-white"
             )}
             strokeWidth={isActive ? 2.1 : 1.85}
           />
@@ -70,11 +70,11 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col bg-[hsl(var(--sidebar))]" data-testid={platformMode ? "sidebar-platform-mode" : "sidebar-tenant-mode"}>
+      <div className="flex h-full flex-col bg-[image:var(--gradient-sidebar)]" data-testid={platformMode ? "sidebar-platform-mode" : "sidebar-tenant-mode"}>
         {/* Identitas: mode platform = logo PLATFORM; mode tenant = logo & nama TENANT */}
         <div
           className={cn(
-            "flex h-16 shrink-0 items-center gap-3 border-b border-border px-4",
+            "flex h-16 shrink-0 items-center gap-3 border-b border-[hsl(var(--sidebar-border))] px-4",
             collapsed && "justify-center px-2"
           )}
           data-testid="sidebar-identity"
@@ -92,10 +92,10 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
               />
               {!collapsed && (
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] font-bold leading-tight tracking-[-0.01em] text-ink-1" data-testid="sidebar-tenant-name">
+                  <p className="truncate text-[13px] font-bold leading-tight tracking-[-0.01em] text-white" data-testid="sidebar-tenant-name">
                     {company?.name || branding.app_name}
                   </p>
-                  <p className="truncate text-[11px] leading-tight text-ink-3" data-testid="sidebar-tenant-code">
+                  <p className="truncate text-[11px] leading-tight text-[hsl(var(--sidebar-text-muted))]" data-testid="sidebar-tenant-code">
                     {company?.code ? `Kode ${company.code}` : branding.subtitle}
                   </p>
                 </div>
@@ -113,7 +113,7 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
                     {group.label}
                   </p>
                 ) : (
-                  <div className="mx-auto mb-1.5 h-px w-6 bg-border" aria-hidden="true" />
+                  <div className="mx-auto mb-1.5 h-px w-6 bg-[hsl(var(--sidebar-border))]" aria-hidden="true" />
                 )}
                 {group.items.map((item) => (
                   <NavItem key={item.key} item={item} collapsed={collapsed} onNavigate={onNavigate} />
@@ -124,13 +124,13 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
         </ScrollArea>
 
         {!collapsed && (
-          <div className="shrink-0 border-t border-border px-4 py-3">
+          <div className="shrink-0 border-t border-[hsl(var(--sidebar-border))] px-4 py-3">
             {platformMode ? (
               company ? (
                 <NavLink
                   to="/"
                   onClick={onNavigate}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-ink-2 transition-colors duration-150 hover:bg-accent hover:text-ink-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-[hsl(var(--sidebar-text-muted))] transition-colors duration-150 hover:bg-[hsl(var(--sidebar-hover))] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary-border))]"
                   data-testid="sidebar-open-tenant-context"
                 >
                   <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
@@ -138,8 +138,8 @@ export const SidebarContent = ({ collapsed = false, onNavigate }) => {
                 </NavLink>
               ) : null
             ) : (
-              <p className="flex items-center gap-1.5 text-[11px] text-ink-3" data-testid="sidebar-powered-by">
-                Powered by <span className="font-semibold text-ink-2">{branding.app_name}</span>
+              <p className="flex items-center gap-1.5 text-[11px] text-[hsl(var(--sidebar-text-muted))]" data-testid="sidebar-powered-by">
+                Powered by <span className="font-semibold text-white">{branding.app_name}</span>
               </p>
             )}
           </div>
@@ -153,7 +153,7 @@ const Sidebar = ({ collapsed, setCollapsed }) => (
   <aside
     data-testid="app-sidebar"
     className={cn(
-      "relative hidden shrink-0 border-r border-border bg-[hsl(var(--sidebar))] lg:block",
+      "relative hidden shrink-0 border-r border-[hsl(var(--sidebar-border))] bg-[image:var(--gradient-sidebar)] lg:block",
       collapsed ? "w-16" : "w-64"
     )}
   >
@@ -164,7 +164,7 @@ const Sidebar = ({ collapsed, setCollapsed }) => (
         data-testid="sidebar-collapse-button"
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? "Perlebar menu" : "Perkecil menu"}
-        className="absolute -right-3 top-[68px] z-20 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card text-ink-2 shadow-card transition-colors duration-150 hover:bg-[hsl(var(--sidebar-hover))] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="absolute -right-3 top-[68px] z-20 flex h-6 w-6 items-center justify-center rounded-full border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-hover))] text-white shadow-[var(--shadow-raised)] transition-colors duration-150 hover:border-primary-border hover:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary-border))]"
       >
         {collapsed ? <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.25} /> : <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2.25} />}
       </button>

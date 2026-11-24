@@ -169,10 +169,10 @@ const LoginPage = () => {
             {FEATURES.map(({ icon: Icon, title, desc }, i) => (
               <div
                 key={title}
-                className="rounded-xl border border-white/15 bg-white/[0.07] p-4 backdrop-blur-sm"
+                className="rounded-xl border border-white/12 bg-white/[0.06] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm"
                 data-testid={`login-feature-card-${i}`}
               >
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-[image:var(--gradient-primary)] text-white shadow-[var(--shadow-button-primary)]">
                   <Icon className="h-4 w-4" strokeWidth={2} />
                 </span>
                 <p className="mt-3 text-sm font-semibold">{title}</p>
@@ -189,13 +189,13 @@ const LoginPage = () => {
 
       {/* Kolom kanan: form login */}
       <section className="flex items-center justify-center px-5 py-10 sm:px-10">
-        <div className="w-full max-w-[400px] space-y-7">
+        <div className="w-full max-w-[400px] space-y-6 rounded-2xl border border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
           <div className="lg:hidden">
             <PlatformLogo size="md" testId="login-mobile-logo" />
           </div>
 
           <div className="space-y-1.5">
-            <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-ink-1" data-testid="login-title">
+            <h1 className="text-[22px] font-bold tracking-[-0.02em] text-ink-1" data-testid="login-title">
               Masuk ke {branding.app_name}
             </h1>
             <p className="text-sm text-muted-foreground">Gunakan email dan kata sandi akun perusahaan Anda.</p>
