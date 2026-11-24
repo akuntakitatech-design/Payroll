@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { History, Plane, RefreshCw, Search, XCircle } from "lucide-react";
+import { CheckCircle2, History, Plane, RefreshCw, Search, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -29,6 +29,12 @@ const STATES = {
   CANCELLED: { label: "Dibatalkan", variant: "destructive" },
 };
 
+const APPROVALS = {
+  PENDING_APPROVAL: { label: "Menunggu Persetujuan HR", variant: "warning" },
+  APPROVED: { label: "Disetujui HR", variant: "success" },
+  REJECTED: { label: "Ditolak HR", variant: "destructive" },
+};
+
 const Stat = ({ label, value, tone = "default", testId }) => (
   <Card className="border-border bg-card p-3" data-testid={testId}>
     <p className="text-[12px] text-muted-foreground">{label}</p>
@@ -42,6 +48,18 @@ const emptyForm = {
   return_date: "", return_time: "", return_mode: "PESAWAT",
   return_carrier: "", return_ticket: "", return_from: "", return_to: "",
   accommodation: "", notes: "", reason: "",
+};
+
+const APPROVAL_HISTORY = {
+  PENDING_APPROVAL: "Menunggu Persetujuan HR",
+  APPROVED: "Disetujui HR",
+  REJECTED: "Ditolak HR",
+};
+
+const approvalSnapshotText = (data) => {
+  if (!data || !data.approval_state) return "-";
+  const label = APPROVAL_HISTORY[data.approval_state] || data.approval_state;
+  return data.approved_by_name ? `${label} · ${data.approved_by_name}` : label;
 };
 
 const snapshotText = (data) => {
@@ -60,10 +78,12 @@ const RosterMobilizationPage = () => {
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState(() => searchParams.get("project") || "");
   const [stateFilter, setStateFilter] = useState("");
+  const [approvalFilter, setApprovalFilter] = useState("");
   const [q, setQ] = useState("");
   const [includePast, setIncludePast] = useState(false);
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({});
+  const [approvalCounts, setApprovalCounts] = useState({});
   const [modes, setModes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -73,6 +93,11 @@ const RosterMobilizationPage = () => {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [approveTarget, setApproveTarget] = useState(null);
+  const [approveNote, setApproveNote] = useState("");
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [deciding, setDeciding] = useState(false);
   const [historyTarget, setHistoryTarget] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -90,11 +115,13 @@ const RosterMobilizationPage = () => {
       const params = {};
       if (projectId) params.project_id = projectId;
       if (stateFilter) params.state = stateFilter;
+      if (approvalFilter) params.approval_state = approvalFilter;
       if (q.trim()) params.q = q.trim();
       if (includePast) params.include_past = true;
       const { data } = await api.get("/roster/mobilizations", { params });
       setRows(data.items || []);
       setCounts(data.counts || {});
+      setApprovalCounts(data.approval_counts || {});
       setModes(data.modes || []);
     } catch (err) {
       setError(errorMessage(err, "Data mobilisasi tidak dapat dimuat."));
@@ -102,7 +129,7 @@ const RosterMobilizationPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [projectId, stateFilter, q, includePast]);
+  }, [projectId, stateFilter, approvalFilter, q, includePast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -193,6 +220,44 @@ const RosterMobilizationPage = () => {
     }
   };
 
+  const approve = async () => {
+    if (!approveTarget) return;
+    setDeciding(true);
+    try {
+      const { data } = await api.post(`/roster/mobilizations/${approveTarget.plan_id}/approve`,
+        { note: approveNote.trim() || null });
+      toast.success(data.message || "Mobilisasi disetujui.");
+      setApproveTarget(null);
+      setApproveNote("");
+      await load();
+    } catch (err) {
+      toast.error(errorMessage(err, "Mobilisasi gagal disetujui."));
+    } finally {
+      setDeciding(false);
+    }
+  };
+
+  const reject = async () => {
+    if (!rejectTarget) return;
+    if (rejectReason.trim().length < 3) {
+      toast.error("Alasan penolakan wajib diisi (minimal 3 karakter).");
+      return;
+    }
+    setDeciding(true);
+    try {
+      const { data } = await api.post(`/roster/mobilizations/${rejectTarget.plan_id}/reject`,
+        { reason: rejectReason.trim() });
+      toast.success(data.message || "Mobilisasi ditolak.");
+      setRejectTarget(null);
+      setRejectReason("");
+      await load();
+    } catch (err) {
+      toast.error(errorMessage(err, "Mobilisasi gagal ditolak."));
+    } finally {
+      setDeciding(false);
+    }
+  };
+
   const openHistory = async (row) => {
     setHistoryTarget(row);
     setHistory([]);
@@ -208,11 +273,14 @@ const RosterMobilizationPage = () => {
   };
 
   const canEdit = can("roster", "edit");
+  const canApprove = can("roster", "approve");
 
   return (
     <PageBody>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Belum diatur" value={counts.NOT_SET} tone="warning" testId="mob-stat-not-set" />
+        <Stat label="Menunggu Persetujuan HR" value={approvalCounts.PENDING_APPROVAL} tone="warning"
+          testId="mob-stat-pending" />
         <Stat label="Direncanakan" value={counts.PLANNED} testId="mob-stat-planned" />
         <Stat label="Berangkat / cuti" value={counts.DEPARTED} testId="mob-stat-departed" />
         <Stat label="Sudah kembali" value={counts.RETURNED} testId="mob-stat-returned" />
@@ -220,7 +288,7 @@ const RosterMobilizationPage = () => {
       </div>
 
       <Card className="border-border bg-card p-4" data-testid="mob-controls">
-        <div className="grid gap-3 lg:grid-cols-[1fr_180px_1fr_auto] lg:items-end">
+        <div className="grid gap-3 lg:grid-cols-[1fr_170px_190px_1fr_auto] lg:items-end">
           <div>
             <Label htmlFor="mob-project" className="text-[13px]">Project</Label>
             <select id="mob-project" className={`${selectClass} mt-1`} value={projectId}
@@ -236,6 +304,16 @@ const RosterMobilizationPage = () => {
               <option value="">Semua status</option>
               {Object.entries(STATES).map(([value, st]) => (
                 <option key={value} value={value}>{st.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label htmlFor="mob-approval" className="text-[13px]">Persetujuan</Label>
+            <select id="mob-approval" className={`${selectClass} mt-1`} value={approvalFilter}
+              onChange={(e) => setApprovalFilter(e.target.value)} data-testid="mob-approval">
+              <option value="">Semua persetujuan</option>
+              {Object.entries(APPROVALS).map(([value, ap]) => (
+                <option key={value} value={value}>{ap.label}</option>
               ))}
             </select>
           </div>
@@ -259,7 +337,8 @@ const RosterMobilizationPage = () => {
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
           Hanya rencana cuti yang sudah dikonfirmasi (H-10) yang dapat dimobilisasi. Tanggal berangkat dan kembali
-          harus di dalam periode off agar karyawan kembali sebelum hari kerja.
+          harus di dalam periode off agar karyawan kembali sebelum hari kerja. Mobilisasi yang diatur GA berstatus
+          Menunggu Persetujuan HR sampai disetujui HR Manager.
         </p>
       </Card>
 
@@ -290,6 +369,7 @@ const RosterMobilizationPage = () => {
                   <TableHead>Berangkat</TableHead>
                   <TableHead>Kembali</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Persetujuan</TableHead>
                   <TableHead className="text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -329,12 +409,47 @@ const RosterMobilizationPage = () => {
                         ) : "-"}
                       </TableCell>
                       <TableCell><Badge variant={st.variant}>{st.label}</Badge></TableCell>
+                      <TableCell>
+                        {mob ? (
+                          <div className="space-y-1">
+                            <Badge variant={(APPROVALS[mob.approval_state] || {}).variant || "outline"}>
+                              {(APPROVALS[mob.approval_state] || {}).label || mob.approval_state_label}
+                            </Badge>
+                            {mob.approval_state === "REJECTED" && mob.approval_note && (
+                              <p className="max-w-[200px] truncate text-[11px] text-muted-foreground"
+                                title={mob.approval_note}>
+                                {mob.approval_note}
+                              </p>
+                            )}
+                            {mob.approval_state === "APPROVED" && mob.approved_by_name && (
+                              <p className="text-[11px] text-muted-foreground">oleh {mob.approved_by_name}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
+                        <div className="flex flex-wrap justify-end gap-1">
                           {canEdit && (
                             <Button size="sm" variant="outline" onClick={() => openForm(row)}
                               data-testid={`mob-edit-${row.plan_id}`}>
                               {mob ? "Ubah" : "Atur"}
+                            </Button>
+                          )}
+                          {canApprove && mob && !["RETURNED", "CANCELLED"].includes(row.travel_state)
+                            && mob.approval_state !== "APPROVED" && (
+                            <Button size="sm" variant="outline" onClick={() => { setApproveNote(""); setApproveTarget(row); }}
+                              data-testid={`mob-approve-${row.plan_id}`}>
+                              <CheckCircle2 className="mr-1 h-3.5 w-3.5" />Setujui
+                            </Button>
+                          )}
+                          {canApprove && mob && !["RETURNED", "CANCELLED"].includes(row.travel_state)
+                            && mob.approval_state !== "REJECTED" && (
+                            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
+                              onClick={() => { setRejectReason(""); setRejectTarget(row); }}
+                              data-testid={`mob-reject-${row.plan_id}`}>
+                              <XCircle className="mr-1 h-3.5 w-3.5" />Tolak
                             </Button>
                           )}
                           {canEdit && mob && !["RETURNED", "CANCELLED"].includes(row.travel_state) && (
@@ -525,6 +640,46 @@ const RosterMobilizationPage = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={!!approveTarget} onOpenChange={(open) => { if (!open && !deciding) setApproveTarget(null); }}>
+        <DialogContent className="bg-card sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Setujui mobilisasi</DialogTitle>
+            <DialogDescription>
+              {approveTarget?.employee_name} · berangkat {formatDate(approveTarget?.mobilization?.depart_date)}, kembali{" "}
+              {formatDate(approveTarget?.mobilization?.return_date)}.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea rows={2} value={approveNote} placeholder="Catatan persetujuan (opsional)"
+            onChange={(e) => setApproveNote(e.target.value)} data-testid="mob-approve-note" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setApproveTarget(null)} disabled={deciding}>Batal</Button>
+            <Button onClick={approve} disabled={deciding} data-testid="mob-approve-submit">
+              {deciding ? "Menyetujui…" : "Setujui Mobilisasi"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!rejectTarget} onOpenChange={(open) => { if (!open && !deciding) setRejectTarget(null); }}>
+        <DialogContent className="bg-card sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Tolak mobilisasi</DialogTitle>
+            <DialogDescription>
+              {rejectTarget?.employee_name}. Alasan wajib diisi agar GA dapat memperbaiki jadwal lalu mengajukan ulang.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea rows={3} value={rejectReason} placeholder="Alasan penolakan (wajib, minimal 3 karakter)"
+            onChange={(e) => setRejectReason(e.target.value)} data-testid="mob-reject-reason" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectTarget(null)} disabled={deciding}>Batal</Button>
+            <Button variant="destructive" onClick={reject}
+              disabled={deciding || rejectReason.trim().length < 3} data-testid="mob-reject-submit">
+              {deciding ? "Menolak…" : "Tolak Mobilisasi"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!historyTarget} onOpenChange={(open) => !open && setHistoryTarget(null)}>
         <DialogContent className="bg-card sm:max-w-2xl">
           <DialogHeader>
@@ -548,11 +703,22 @@ const RosterMobilizationPage = () => {
                     </span>
                   </div>
                   <p className="mt-2 text-[12px]">
-                    <span className="text-muted-foreground">Sebelum:</span> {snapshotText(h.before_data)}
+                    {["APPROVED", "REJECTED"].includes(h.change_type) ? (
+                      <>
+                        <span className="text-muted-foreground">Status:</span>{" "}
+                        {approvalSnapshotText(h.before_data)} → {approvalSnapshotText(h.after_data)}
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-muted-foreground">Sebelum:</span> {snapshotText(h.before_data)}
+                      </>
+                    )}
                   </p>
-                  <p className="text-[12px]">
-                    <span className="text-muted-foreground">Sesudah:</span> {snapshotText(h.after_data)}
-                  </p>
+                  {!["APPROVED", "REJECTED"].includes(h.change_type) && (
+                    <p className="text-[12px]">
+                      <span className="text-muted-foreground">Sesudah:</span> {snapshotText(h.after_data)}
+                    </p>
+                  )}
                   {h.reason && (
                     <p className="mt-1 text-[12px]"><span className="text-muted-foreground">Alasan:</span> {h.reason}</p>
                   )}

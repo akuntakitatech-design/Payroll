@@ -161,12 +161,16 @@ const RosterReturningPage = () => {
                               {mob.return_carrier || "-"}{mob.return_ticket ? ` · ${mob.return_ticket}` : ""}
                             </p>
                           </>
+                        ) : mob && mob.approval_state === "PENDING_APPROVAL" ? (
+                          <Badge variant="warning">Menunggu Persetujuan HR</Badge>
                         ) : (
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="warning">Belum diatur</Badge>
+                            <Badge variant={mob && mob.approval_state === "REJECTED" ? "destructive" : "warning"}>
+                              {mob && mob.approval_state === "REJECTED" ? "Ditolak HR" : "Belum diatur"}
+                            </Badge>
                             <Button asChild size="sm" variant="ghost">
                               <Link to={`/modules/mobilization/mobilisasi${row.project_id ? `?project=${row.project_id}` : ""}`}>
-                                Atur
+                                {mob ? "Perbaiki" : "Atur"}
                               </Link>
                             </Button>
                           </div>

@@ -491,6 +491,7 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
     },
     # Module 4 CP2 - Mobilisasi GA: satu catatan per rencana cuti (keberangkatan + kepulangan).
     # mobilization_state: PLANNED | CANCELLED. Status DEPARTED/RETURNED diturunkan dari tanggal.
+    # Module 4 - Approval GA -> HR Manager: approval_state PENDING_APPROVAL | APPROVED | REJECTED.
     "roster_mobilizations": {
         "plan_id": "fk", "project_id": "fk", "employee_id": "fk",
         "depart_date": "s32", "depart_time": "s32", "depart_mode": "s32",
@@ -499,6 +500,8 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "return_carrier": "s", "return_ticket": "s64", "return_from": "s", "return_to": "s",
         "accommodation": "t", "notes": "t", "mobilization_state": "s32",
         "cancelled_at": "dt", "cancelled_by": "fk", "cancel_reason": "t",
+        "approval_state": "s32", "approval_note": "t",
+        "approved_by": "fk", "approved_by_name": "s", "approved_at": "dt",
     },
     # Module 4 CP2 - Histori perubahan jadwal (append-only): siapa, kapan, alasan, sebelum/sesudah.
     "roster_schedule_changes": {
@@ -963,6 +966,7 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
         ("uq_roster_mobilization_plan", ["company_id", "plan_id"], True),
         ("ix_roster_mobilization_project", ["company_id", "project_id", "depart_date"], False),
         ("ix_roster_mobilization_return", ["company_id", "return_date"], False),
+        ("ix_roster_mobilization_approval", ["company_id", "approval_state"], False),
     ],
     "roster_schedule_changes": [
         ("ix_roster_change_plan", ["company_id", "plan_id", "changed_at"], False),
