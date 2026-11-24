@@ -6,6 +6,8 @@ CP2 mencakup:
 - Halaman data "Karyawan Akan Kembali": karyawan yang sedang cuti project dan tanggal kembalinya.
 - Histori perubahan jadwal (append-only): perubahan tanggal/jam/moda tercatat beserta alasan,
   pelaku, dan data sebelum/sesudah.
+- Approval HR Manager: mobilisasi yang dibuat/diubah GA berstatus PENDING_APPROVAL sampai
+disetujui (APPROVED) atau ditolak (REJECTED) oleh pemegang permission `roster:approve`.
 
 Hanya rencana cuti berstatus CONFIRMED (keputusan H-10) yang dapat dimobilisasi. Tanggal berangkat
 dan kembali wajib berada di dalam periode off rencana cuti agar karyawan kembali sebelum hari kerja.
@@ -52,6 +54,19 @@ CHANGE_LABELS: Dict[str, str] = {
     "UPDATED": "Data mobilisasi diubah",
     "SCHEDULE_CHANGED": "Jadwal diubah",
     "CANCELLED": "Mobilisasi dibatalkan",
+    "APPROVED": "Mobilisasi disetujui HR",
+    "REJECTED": "Mobilisasi ditolak HR",
+}
+
+# Approval GA -> HR Manager (Blueprint Modul 4). Data lama tanpa nilai dianggap APPROVED.
+PENDING_APPROVAL = "PENDING_APPROVAL"
+APPROVED = "APPROVED"
+REJECTED = "REJECTED"
+APPROVAL_STATES = (PENDING_APPROVAL, APPROVED, REJECTED)
+APPROVAL_LABELS: Dict[str, str] = {
+    PENDING_APPROVAL: "Menunggu Persetujuan HR",
+    APPROVED: "Disetujui HR",
+    REJECTED: "Ditolak HR",
 }
 
 SCHEDULE_FIELDS = (
@@ -69,6 +84,7 @@ TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 _view = require_permission("roster", "view")
 _edit = require_permission("roster", "edit")
+_approve = require_permission("roster", "approve")
 
 
 def _err(code: int, msg: str) -> HTTPException:
@@ -139,6 +155,13 @@ def _travel_state(mob: Optional[Dict[str, Any]], today: date) -> str:
     return "PLANNED"
 
 
+def _approval_state(mob: Optional[Dict[str, Any]]) -> str:
+    """Mobilisasi lama (sebelum fitur approval) dianggap sudah disetujui."""
+    if not mob:
+        return ""
+    return str(mob.get("approval_state") or APPROVED)
+
+
 def _mob_public(mob: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not mob:
         return None
@@ -166,6 +189,12 @@ def _mob_public(mob: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "mobilization_state": mob.get("mobilization_state"),
         "cancel_reason": mob.get("cancel_reason"),
         "cancelled_at": mob.get("cancelled_at"),
+        "approval_state": _approval_state(mob),
+        "approval_state_label": APPROVAL_LABELS.get(_approval_state(mob), _approval_state(mob)),
+        "approval_note": mob.get("approval_note"),
+        "approved_by": mob.get("approved_by"),
+        "approved_by_name": mob.get("approved_by_name"),
+        "approved_at": mob.get("approved_at"),
         "updated_at": mob.get("updated_at"),
     }
 
@@ -287,6 +316,7 @@ def _travel_values(mob: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 async def list_mobilizations(
     project_id: Optional[str] = None,
     travel_state: Optional[str] = Query(None, alias="state"),
+    approval_state: Optional[str] = Query(None, description="PENDING_APPROVAL | APPROVED | REJECTED"),
     q: Optional[str] = None,
     include_past: bool = False,
     ctx: AuthContext = Depends(_view),
@@ -294,6 +324,12 @@ async def list_mobilizations(
     """Daftar rencana cuti terkonfirmasi beserta data mobilisasi GA (termasuk yang belum diatur)."""
     if travel_state and travel_state.upper() not in TRAVEL_STATES:
         raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY, "Status perjalanan tidak dikenal.")
+    wanted_approval = ""
+    if approval_state:
+        wanted_approval = approval_state.strip().upper()
+        if wanted_approval not in APPROVAL_STATES:
+            raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                       "Status persetujuan tidak dikenal. Pilihan: Menunggu Persetujuan HR, Disetujui HR, Ditolak HR.")
     plans = await _confirmed_plans(ctx, project_id=project_id, include_past=include_past)
     mobs = await _mobilizations_by_plan(ctx, [p["id"] for p in plans])
     employees = await _employee_map(ctx, [p.get("employee_id") for p in plans])
@@ -312,14 +348,23 @@ async def list_mobilizations(
     counts = {key: 0 for key in TRAVEL_STATES}
     for row in rows:
         counts[row["travel_state"]] = counts.get(row["travel_state"], 0) + 1
+    approval_counts = {key: 0 for key in APPROVAL_STATES}
+    for row in rows:
+        mob = row.get("mobilization")
+        if mob:
+            approval_counts[mob["approval_state"]] = approval_counts.get(mob["approval_state"], 0) + 1
     if travel_state:
         rows = [r for r in rows if r["travel_state"] == travel_state.upper()]
+    if wanted_approval:
+        rows = [r for r in rows
+                if (r.get("mobilization") or {}).get("approval_state") == wanted_approval]
     rows.sort(key=lambda r: (
         1 if not r.get("mobilization") else 0,
         (r.get("mobilization") or {}).get("depart_date") or r.get("off_start") or "",
         r.get("employee_name") or "",
     ))
-    return {"items": rows, "total": len(rows), "counts": counts,
+    return {"items": rows, "total": len(rows), "counts": counts, "approval_counts": approval_counts,
+            "approval_states": [{"value": k, "label": v} for k, v in APPROVAL_LABELS.items()],
             "modes": [{"value": k, "label": v} for k, v in MODE_LABELS.items()]}
 
 
@@ -347,7 +392,8 @@ async def list_returning(
         row["return_date"] = return_date
         row["days_until_return"] = (date.fromisoformat(return_date[:10]) - today).days
         row["on_leave"] = str(plan.get("off_start") or "") <= today.isoformat() <= str(plan.get("off_end") or "")
-        row["transport_ready"] = bool(mob) and (mob or {}).get("mobilization_state") != "CANCELLED"
+        row["transport_ready"] = bool(mob) and (mob or {}).get("mobilization_state") != "CANCELLED" \
+            and _approval_state(mob) == APPROVED
         rows.append(row)
     rows.sort(key=lambda r: (r["return_date"], r.get("employee_name") or ""))
     counts = {
@@ -448,10 +494,20 @@ async def upsert_mobilization(plan_id: str, payload: Dict[str, Any] = Body(...),
     if schedule_changed and (not reason or len(reason) < 3):
         raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
                    "Alasan perubahan jadwal wajib diisi (minimal 3 karakter).")
+    # Approval GA -> HR Manager: perubahan oleh GA mengembalikan mobilisasi ke antrean persetujuan.
+    # Pemegang `roster:approve` yang mengubah sendiri langsung disetujui.
+    can_approve = ctx.has_permission("roster", "approve")
+    approval_fields: Dict[str, Any] = {
+        "approval_state": APPROVED if can_approve else PENDING_APPROVAL,
+        "approval_note": None,
+        "approved_by": ctx.user_id if can_approve else None,
+        "approved_by_name": (ctx.user or {}).get("full_name") if can_approve else None,
+        "approved_at": now() if can_approve else None,
+    }
     if existing:
         await ctx.tdb.roster_mobilizations.update_one(
             {"company_id": ctx.company_id, "id": existing["id"]},
-            {"$set": {**values, "mobilization_state": "PLANNED",
+            {"$set": {**values, **approval_fields, "mobilization_state": "PLANNED",
                       "cancelled_at": None, "cancelled_by": None, "cancel_reason": None,
                       **audit_fields(ctx.user_id, creating=False)}})
         mobilization_id = existing["id"]
@@ -461,7 +517,8 @@ async def upsert_mobilization(plan_id: str, payload: Dict[str, Any] = Body(...),
             "id": mobilization_id, "company_id": ctx.company_id, "status": "active",
             "plan_id": plan_id, "project_id": plan.get("project_id"),
             "employee_id": plan.get("employee_id"), **values,
-            "mobilization_state": "PLANNED", **audit_fields(ctx.user_id, creating=True),
+            "mobilization_state": "PLANNED", **approval_fields,
+            **audit_fields(ctx.user_id, creating=True),
         })
     after = await ctx.tdb.roster_mobilizations.find_one(
         {"company_id": ctx.company_id, "id": mobilization_id}, NO_ID)
@@ -475,8 +532,9 @@ async def upsert_mobilization(plan_id: str, payload: Dict[str, Any] = Body(...),
                      after=_travel_values(after),
                      notes=f"{CHANGE_LABELS.get(change_type, change_type)}"
                            + (f": {reason}" if reason else ""))
-    return {"message": "Mobilisasi disimpan.", "item": _mob_public(after),
-            "change_type": change_type}
+    return {"message": "Mobilisasi disimpan." if can_approve
+                       else "Mobilisasi disimpan dan menunggu persetujuan HR Manager.",
+            "item": _mob_public(after), "change_type": change_type}
 
 
 @router.post("/mobilizations/{plan_id}/cancel")
@@ -510,3 +568,73 @@ async def cancel_mobilization(plan_id: str, payload: Dict[str, Any] = Body(...),
                      before={"state": "PLANNED"}, after={"state": "CANCELLED"},
                      notes=f"Mobilisasi dibatalkan: {reason}")
     return {"message": "Mobilisasi dibatalkan.", "item": _mob_public(after)}
+
+
+@router.post("/mobilizations/{plan_id}/approve")
+async def approve_mobilization(plan_id: str, payload: Dict[str, Any] = Body(default={}),
+                               ctx: AuthContext = Depends(_approve)):
+    """Setujui mobilisasi yang diajukan GA (Blueprint Modul 4: GA -> approval HR Manager)."""
+    plan = await _plan_or_404(ctx, plan_id)
+    mob = await ctx.tdb.roster_mobilizations.find_one(
+        {"company_id": ctx.company_id, "plan_id": plan_id}, NO_ID)
+    if not mob:
+        raise _err(status.HTTP_404_NOT_FOUND, "Mobilisasi belum diatur untuk rencana cuti ini.")
+    if mob.get("mobilization_state") == "CANCELLED":
+        raise _err(status.HTTP_409_CONFLICT, "Mobilisasi sudah dibatalkan dan tidak perlu disetujui.")
+    if _approval_state(mob) == APPROVED:
+        raise _err(status.HTTP_409_CONFLICT, "Mobilisasi ini sudah disetujui.")
+    if _travel_state(mob, _today()) == "RETURNED":
+        raise _err(status.HTTP_409_CONFLICT, "Perjalanan sudah selesai; persetujuan tidak dapat diberikan.")
+    note = _text(payload.get("note"), 500)
+    before = {"approval_state": _approval_state(mob), "approval_note": mob.get("approval_note"),
+              "approved_by_name": mob.get("approved_by_name")}
+    await ctx.tdb.roster_mobilizations.update_one(
+        {"company_id": ctx.company_id, "id": mob["id"]},
+        {"$set": {"approval_state": APPROVED, "approval_note": note,
+                  "approved_by": ctx.user_id, "approved_by_name": (ctx.user or {}).get("full_name"),
+                  "approved_at": now(), **audit_fields(ctx.user_id, creating=False)}})
+    after = await ctx.tdb.roster_mobilizations.find_one(
+        {"company_id": ctx.company_id, "id": mob["id"]}, NO_ID)
+    after_snapshot = {"approval_state": APPROVED, "approval_note": note,
+                      "approved_by_name": after.get("approved_by_name")}
+    await _write_history(ctx, plan, after, "APPROVED", before, after_snapshot, note)
+    await log_action(ctx, "approve", "roster", mob["id"], f"Mobilisasi {plan.get('employee_id')}",
+                     before=before, after={"approval_state": APPROVED},
+                     notes=note or "Mobilisasi disetujui HR Manager.")
+    return {"message": "Mobilisasi disetujui.", "item": _mob_public(after)}
+
+
+@router.post("/mobilizations/{plan_id}/reject")
+async def reject_mobilization(plan_id: str, payload: Dict[str, Any] = Body(default={}),
+                              ctx: AuthContext = Depends(_approve)):
+    """Tolak mobilisasi disertai alasan; GA dapat memperbaiki lalu mengajukan ulang."""
+    reason = _text(payload.get("reason"), 500)
+    if not reason or len(reason) < 3:
+        raise _err(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                   "Alasan penolakan wajib diisi (minimal 3 karakter).")
+    plan = await _plan_or_404(ctx, plan_id)
+    mob = await ctx.tdb.roster_mobilizations.find_one(
+        {"company_id": ctx.company_id, "plan_id": plan_id}, NO_ID)
+    if not mob:
+        raise _err(status.HTTP_404_NOT_FOUND, "Mobilisasi belum diatur untuk rencana cuti ini.")
+    if mob.get("mobilization_state") == "CANCELLED":
+        raise _err(status.HTTP_409_CONFLICT, "Mobilisasi sudah dibatalkan.")
+    if _approval_state(mob) == REJECTED:
+        raise _err(status.HTTP_409_CONFLICT, "Mobilisasi ini sudah ditolak.")
+    before = {"approval_state": _approval_state(mob), "approval_note": mob.get("approval_note"),
+              "approved_by_name": mob.get("approved_by_name")}
+    await ctx.tdb.roster_mobilizations.update_one(
+        {"company_id": ctx.company_id, "id": mob["id"]},
+        {"$set": {"approval_state": REJECTED, "approval_note": reason,
+                  "approved_by": ctx.user_id, "approved_by_name": (ctx.user or {}).get("full_name"),
+                  "approved_at": now(), **audit_fields(ctx.user_id, creating=False)}})
+    after = await ctx.tdb.roster_mobilizations.find_one(
+        {"company_id": ctx.company_id, "id": mob["id"]}, NO_ID)
+    after_snapshot = {"approval_state": REJECTED, "approval_note": reason,
+                      "approved_by_name": after.get("approved_by_name")}
+    await _write_history(ctx, plan, after, "REJECTED", before, after_snapshot, reason)
+    await log_action(ctx, "reject", "roster", mob["id"], f"Mobilisasi {plan.get('employee_id')}",
+                     before=before, after={"approval_state": REJECTED},
+                     notes=f"Mobilisasi ditolak: {reason}")
+    return {"message": "Mobilisasi ditolak. GA dapat memperbaiki jadwal lalu mengajukan ulang.",
+            "item": _mob_public(after)}
