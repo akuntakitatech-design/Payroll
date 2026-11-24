@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Eye, FileText, Loader2, MoreHorizontal, Trash2, Upload } from "lucide-react";
+import { Download, Eye, FileText, Loader2, MoreHorizontal, ShieldCheck, ShieldX, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -11,8 +11,10 @@ import StatusBadge from "@/components/common/StatusBadge";
 import DocumentPreviewDialog from "@/components/common/DocumentPreview";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
@@ -29,6 +31,39 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+const VERIFICATION_META = {
+  PENDING: { status: "pending", label: "Menunggu Verifikasi" },
+  VERIFIED: { status: "verified", label: "Terverifikasi" },
+  REJECTED: { status: "rejected", label: "Ditolak" },
+};
+
+const VERIFICATION_FILTER_OPTIONS = [
+  { value: "PENDING", label: "Menunggu Verifikasi" },
+  { value: "VERIFIED", label: "Terverifikasi" },
+  { value: "REJECTED", label: "Ditolak" },
+];
+
+const VerificationBadge = ({ state }) => {
+  const meta = VERIFICATION_META[state] || VERIFICATION_META.VERIFIED;
+  return <StatusBadge status={meta.status} label={meta.label} />;
+};
+
+const Stat = ({ label, value, tone = "default", onClick, active, testId }) => (
+  <Card
+    className={`border-border bg-card p-3 ${onClick ? "cursor-pointer transition-colors hover:border-primary-border" : ""} ${active ? "border-primary-border ring-1 ring-primary/30" : ""}`}
+    data-testid={testId}
+    onClick={onClick}
+    role={onClick ? "button" : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+  >
+    <p className="text-[12px] text-muted-foreground">{label}</p>
+    <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone === "warning" ? "text-warning" : ""}`}>
+      {value ?? 0}
+    </p>
+  </Card>
+);
+
 const DocumentsPage = () => {
   const { can, company } = useAuth();
   const [rows, setRows] = useState([]);
@@ -39,6 +74,8 @@ const DocumentsPage = () => {
   const [debounced, setDebounced] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
+  const [verificationFilter, setVerificationFilter] = useState("");
+  const [verificationSummary, setVerificationSummary] = useState(null);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
 
@@ -51,6 +88,12 @@ const DocumentsPage = () => {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [downloading, setDownloading] = useState(null);
   const [previewId, setPreviewId] = useState(null);
+  const [verifyTarget, setVerifyTarget] = useState(null);
+  const [verifyNote, setVerifyNote] = useState("");
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [verificationError, setVerificationError] = useState("");
+  const [verificationLoading, setVerificationLoading] = useState(false);
   const fileInput = useRef(null);
 
   useEffect(() => {
@@ -74,6 +117,7 @@ const DocumentsPage = () => {
       if (debounced) params.q = debounced;
       if (typeFilter) params.document_type_id = typeFilter;
       if (ownerFilter) params.owner_type = ownerFilter;
+      if (verificationFilter) params.verification_state = verificationFilter;
       const res = await api.get("/documents", { params });
       setRows(res.data.items || []);
       setMeta({
@@ -88,15 +132,25 @@ const DocumentsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debounced, typeFilter, ownerFilter]);
+  }, [page, limit, debounced, typeFilter, ownerFilter, verificationFilter]);
+
+  const loadVerificationSummary = useCallback(async () => {
+    try {
+      const res = await api.get("/documents/verification-summary");
+      setVerificationSummary(res.data);
+    } catch {
+      /* ringkasan bersifat pelengkap; daftar tetap dapat digunakan */
+    }
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
   useEffect(() => {
     loadCatalog();
+    loadVerificationSummary();
     document.title = "Arsip Dokumen · HRIS Suite";
-  }, [loadCatalog, company?.id]);
+  }, [loadCatalog, loadVerificationSummary, company?.id]);
 
   const openUpload = () => {
     setForm({ document_type_id: catalog.document_types[0]?.id || "", name: "", owner_type: "company" });
@@ -163,11 +217,65 @@ const DocumentsPage = () => {
       toast.success(res.data.message);
       setConfirm(null);
       load();
+      loadVerificationSummary();
     } catch (err) {
       toast.error(errorMessage(err, "Dokumen tidak dapat dihapus."));
       setConfirm(null);
     } finally {
       setConfirmLoading(false);
+    }
+  };
+
+  const refreshAll = () => {
+    load();
+    loadVerificationSummary();
+  };
+
+  const openVerify = (row) => {
+    setVerificationError("");
+    setVerifyNote("");
+    setVerifyTarget(row);
+  };
+
+  const openReject = (row) => {
+    setVerificationError("");
+    setRejectReason("");
+    setRejectTarget(row);
+  };
+
+  const runVerify = async () => {
+    if (!verifyTarget) return;
+    setVerificationLoading(true);
+    setVerificationError("");
+    try {
+      const res = await api.post(`/documents/${verifyTarget.id}/verify`, { note: verifyNote.trim() || null });
+      toast.success(res.data.message);
+      setVerifyTarget(null);
+      refreshAll();
+    } catch (err) {
+      setVerificationError(errorMessage(err, "Dokumen tidak dapat diverifikasi."));
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const runReject = async () => {
+    if (!rejectTarget) return;
+    if (rejectReason.trim().length < 3) {
+      setVerificationError("Alasan penolakan wajib diisi (minimal 3 karakter).");
+      return;
+    }
+    setVerificationLoading(true);
+    setVerificationError("");
+    try {
+      const res = await api.post(`/documents/${rejectTarget.id}/reject`, { reason: rejectReason.trim() });
+      toast.success(res.data.message);
+      setRejectTarget(null);
+      refreshAll();
+    } catch (err) {
+      setVerificationError(errorMessage(err, "Dokumen tidak dapat ditolak."));
+    } finally {
+      setVerificationLoading(false);
     }
   };
 
@@ -227,6 +335,21 @@ const DocumentsPage = () => {
     },
     { key: "status", header: "Status", render: (row) => <StatusBadge status={row.status} /> },
     {
+      key: "verification_state",
+      header: "Verifikasi",
+      hideOnMobile: true,
+      render: (row) => (
+        <div className="space-y-1">
+          <VerificationBadge state={row.verification_state} />
+          {row.verification_state === "REJECTED" && row.verification_note && (
+            <p className="max-w-[220px] truncate text-[11px] text-muted-foreground" title={row.verification_note}>
+              {row.verification_note}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
       key: "actions",
       header: "",
       className: "w-12 text-right",
@@ -248,6 +371,20 @@ const DocumentsPage = () => {
             <DropdownMenuItem onClick={() => download(row)} data-testid={`doc-download-${row.id}`}>
               <Download className="mr-2 h-4 w-4" /> Unduh berkas
             </DropdownMenuItem>
+            {can("document", "verify") && row.verification_state !== "VERIFIED" && (
+              <DropdownMenuItem onClick={() => openVerify(row)} data-testid={`doc-verify-${row.id}`}>
+                <ShieldCheck className="mr-2 h-4 w-4" /> Verifikasi dokumen
+              </DropdownMenuItem>
+            )}
+            {can("document", "verify") && row.verification_state !== "REJECTED" && (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => openReject(row)}
+                data-testid={`doc-reject-${row.id}`}
+              >
+                <ShieldX className="mr-2 h-4 w-4" /> Tolak dokumen
+              </DropdownMenuItem>
+            )}
             {can("document", "delete") && (
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
@@ -263,7 +400,7 @@ const DocumentsPage = () => {
     },
   ];
 
-  const hasFilters = !!debounced || !!typeFilter || !!ownerFilter;
+  const hasFilters = !!debounced || !!typeFilter || !!ownerFilter || !!verificationFilter;
   const noTypes = catalog.document_types.length === 0;
 
   return (
@@ -280,6 +417,33 @@ const DocumentsPage = () => {
         }
       />
       <PageBody>
+        {can("document", "verify") && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="doc-verification-stats">
+            <Stat
+              label="Menunggu Verifikasi"
+              value={verificationSummary?.counts?.PENDING}
+              tone="warning"
+              active={verificationFilter === "PENDING"}
+              onClick={() => { setVerificationFilter("PENDING"); setPage(1); }}
+              testId="doc-stat-pending"
+            />
+            <Stat
+              label="Terverifikasi"
+              value={verificationSummary?.counts?.VERIFIED}
+              active={verificationFilter === "VERIFIED"}
+              onClick={() => { setVerificationFilter("VERIFIED"); setPage(1); }}
+              testId="doc-stat-verified"
+            />
+            <Stat
+              label="Ditolak"
+              value={verificationSummary?.counts?.REJECTED}
+              active={verificationFilter === "REJECTED"}
+              onClick={() => { setVerificationFilter("REJECTED"); setPage(1); }}
+              testId="doc-stat-rejected"
+            />
+          </div>
+        )}
+
         {noTypes && (
           <div className="rounded-lg border border-border bg-secondary px-4 py-3 text-sm text-secondary-foreground">
             Belum ada Tipe Dokumen. Buat tipe dokumen terlebih dahulu di menu{" "}
@@ -300,6 +464,7 @@ const DocumentsPage = () => {
             setSearch("");
             setTypeFilter("");
             setOwnerFilter("");
+            setVerificationFilter("");
             setPage(1);
           }}
         >
@@ -325,6 +490,19 @@ const DocumentsPage = () => {
             allLabel="Semua pemilik"
             testId="filter-owner-type"
           />
+          {can("document", "verify") && (
+            <FilterSelect
+              label="Verifikasi"
+              value={verificationFilter}
+              onChange={(v) => {
+                setVerificationFilter(v);
+                setPage(1);
+              }}
+              options={VERIFICATION_FILTER_OPTIONS}
+              allLabel="Semua status"
+              testId="filter-verification-state"
+            />
+          )}
         </FilterBar>
 
         <TableCard>
@@ -527,6 +705,83 @@ const DocumentsPage = () => {
         loading={confirmLoading}
         onConfirm={runConfirm}
       />
+
+      <Dialog open={!!verifyTarget} onOpenChange={(v) => !v && setVerifyTarget(null)}>
+        <DialogContent className="bg-card sm:max-w-lg" data-testid="doc-verify-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-semibold">Verifikasi Dokumen</DialogTitle>
+            <DialogDescription>
+              Dokumen <span className="font-medium text-foreground">{verifyTarget?.name}</span> akan ditandai
+              Terverifikasi beserta nama Anda sebagai verifikator.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="doc-verify-note">Catatan Verifikasi (opsional)</Label>
+            <Textarea
+              id="doc-verify-note"
+              rows={3}
+              value={verifyNote}
+              onChange={(e) => setVerifyNote(e.target.value)}
+              placeholder="Contoh: berkas terbaca jelas dan sesuai data karyawan."
+              data-testid="doc-verify-note"
+            />
+          </div>
+          {verificationError && (
+            <div className="rounded-lg border border-danger-border bg-danger-soft px-3 py-2 text-sm text-destructive" data-testid="doc-verify-error">
+              {verificationError}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setVerifyTarget(null)} disabled={verificationLoading}>
+              Batal
+            </Button>
+            <Button onClick={runVerify} disabled={verificationLoading} data-testid="doc-verify-confirm">
+              {verificationLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Verifikasi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!rejectTarget} onOpenChange={(v) => !v && setRejectTarget(null)}>
+        <DialogContent className="bg-card sm:max-w-lg" data-testid="doc-reject-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-semibold">Tolak Dokumen</DialogTitle>
+            <DialogDescription>
+              Dokumen <span className="font-medium text-foreground">{rejectTarget?.name}</span> akan ditandai Ditolak.
+              Alasan wajib diisi agar pemilik dokumen tahu apa yang harus diperbaiki.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="doc-reject-reason">
+              Alasan Penolakan <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              id="doc-reject-reason"
+              rows={3}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Contoh: hasil pindai buram, unggah ulang dengan resolusi lebih tinggi."
+              data-testid="doc-reject-reason"
+            />
+            <p className="text-xs text-muted-foreground">Minimal 3 karakter, maksimal 500 karakter.</p>
+          </div>
+          {verificationError && (
+            <div className="rounded-lg border border-danger-border bg-danger-soft px-3 py-2 text-sm text-destructive" data-testid="doc-reject-error">
+              {verificationError}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setRejectTarget(null)} disabled={verificationLoading}>
+              Batal
+            </Button>
+            <Button variant="destructive" onClick={runReject} disabled={verificationLoading} data-testid="doc-reject-confirm">
+              {verificationLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Tolak Dokumen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

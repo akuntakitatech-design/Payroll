@@ -330,6 +330,10 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         "document_number": "s", "issued_date": "s32", "expiry_date": "s32", "notes": "t",
         "file_name": "s", "storage_path": "s512", "file_size": "bi", "file_extension": "s64",
         "mime_type": "s", "is_deleted": "b", "version": "i", "is_demo_data": "b",
+        # Modul 3 Blueprint HRGA - verifikasi dokumen oleh HR (antrean verifikasi).
+        # PENDING = menunggu verifikasi, VERIFIED = terverifikasi, REJECTED = ditolak (alasan wajib).
+        "verification_state": "s64", "verification_note": "t",
+        "verified_by": "fk", "verified_by_name": "s", "verified_at": "dt",
     },
     "employees": {
         "full_name": "s", "employee_number": "s64", "nik": "s64", "npwp": "s64", "gender": "s64",
@@ -896,7 +900,8 @@ INDEX_SPECS: Dict[str, List[Tuple[str, List[str], bool]]] = {
     ],
     "config_overrides": [("ix_config_lookup", ["company_id", "config_key", "scope_type"], False)],
     "approval_steps": [("ix_steps_workflow", ["company_id", "workflow_id", "step_order"], False)],
-    "documents": [("ix_documents_owner", ["company_id", "owner_type", "owner_id"], False)],
+    "documents": [("ix_documents_owner", ["company_id", "owner_type", "owner_id"], False),
+                  ("ix_documents_verification", ["company_id", "verification_state"], False)],
     "employees": [
         ("ix_employee_current_status", ["company_id", "current_employee_status_id"], False),
         ("ix_employee_number", ["company_id", "employee_number"], False),

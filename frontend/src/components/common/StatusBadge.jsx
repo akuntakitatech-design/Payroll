@@ -9,6 +9,7 @@ const STYLES = {
   draft: "border-border bg-muted text-muted-foreground",
   pending: "border-warning-border bg-warning-soft text-warning",
   approved: "border-success-border bg-success-soft text-success",
+  verified: "border-success-border bg-success-soft text-success",
   rejected: "border-danger-border bg-danger-soft text-danger",
   archived: "border-warning-border bg-warning-soft text-warning",
   deleted: "border-danger-border bg-danger-soft text-danger",
