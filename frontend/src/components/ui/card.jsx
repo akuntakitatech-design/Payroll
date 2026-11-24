@@ -2,11 +2,11 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-// Kartu operasional: latar putih + border netral halus, tanpa shadow mengambang.
+// Kartu premium: putih solid, border slate, shadow berdimensi proporsional.
 const Card = React.forwardRef(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("rounded-card border border-border bg-card text-card-foreground shadow-card", className)}
+    className={cn("rounded-card border border-border bg-card text-card-foreground shadow-[var(--shadow-card)]", className)}
     {...props} />
 ))
 Card.displayName = "Card"
@@ -22,7 +22,7 @@ CardHeader.displayName = "CardHeader"
 const CardTitle = React.forwardRef(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-base font-semibold leading-tight", className)}
+    className={cn("text-[15px] font-bold leading-tight text-ink-1", className)}
     {...props} />
 ))
 CardTitle.displayName = "CardTitle"

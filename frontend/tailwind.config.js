@@ -33,7 +33,11 @@ module.exports = {
         lg: 'var(--shadow-md)',
         xl: 'var(--shadow-overlay)',
         xs: 'var(--shadow-xs)',
-        premium: 'var(--shadow-float-lg)'
+        premium: 'var(--shadow-float-lg)',
+        card: 'var(--shadow-card)',
+        raised: 'var(--shadow-raised)',
+        input: 'var(--shadow-input)',
+        overlay: 'var(--shadow-overlay)'
       },
       colors: {
         background: 'hsl(var(--background))',
@@ -122,6 +126,261 @@ module.exports = {
         },
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
+        navy: {
+          DEFAULT: 'hsl(var(--navy))',
+          deep: 'hsl(var(--navy-deep))',
+          mid: 'hsl(var(--navy-mid))',
+          soft: 'hsl(var(--navy-soft))',
+          border: 'hsl(var(--navy-border))'
+        },
+        sidebar: {
+          DEFAULT: 'hsl(var(--sidebar))',
+          deep: 'hsl(var(--sidebar-deep))',
+          hover: 'hsl(var(--sidebar-hover))',
+          text: 'hsl(var(--sidebar-text))',
+          muted: 'hsl(var(--sidebar-text-muted))',
+          section: 'hsl(var(--sidebar-section))',
+          border: 'hsl(var(--sidebar-border))'
+        },
+        table: {
+          header: 'hsl(var(--table-header))',
+          alt: 'hsl(var(--row-alt))',
+          hover: 'hsl(var(--row-hover))'
+        },
+        /* Remap palet pastel bawaan Tailwind ke token status aplikasi.
+         * Tujuannya: seluruh halaman lama otomatis memakai warna yang konsisten
+         * tanpa perlu mengubah ratusan kelas di tiap file. */
+        amber: {
+          50: 'hsl(var(--warning-soft))',
+          100: 'hsl(var(--warning-soft))',
+          200: 'hsl(var(--warning-border))',
+          300: 'hsl(var(--warning-border))',
+          400: 'hsl(var(--warning))',
+          500: 'hsl(var(--warning))',
+          600: 'hsl(var(--warning))',
+          700: 'hsl(var(--warning))',
+          800: 'hsl(var(--warning))',
+          900: 'hsl(var(--warning))',
+          950: 'hsl(var(--warning))'
+        },
+        orange: {
+          50: 'hsl(var(--warning-soft))',
+          100: 'hsl(var(--warning-soft))',
+          200: 'hsl(var(--warning-border))',
+          300: 'hsl(var(--warning-border))',
+          400: 'hsl(var(--warning))',
+          500: 'hsl(var(--warning))',
+          600: 'hsl(var(--warning))',
+          700: 'hsl(var(--warning))',
+          800: 'hsl(var(--warning))',
+          900: 'hsl(var(--warning))'
+        },
+        yellow: {
+          50: 'hsl(var(--warning-soft))',
+          100: 'hsl(var(--warning-soft))',
+          200: 'hsl(var(--warning-border))',
+          300: 'hsl(var(--warning-border))',
+          400: 'hsl(var(--warning))',
+          500: 'hsl(var(--warning))',
+          600: 'hsl(var(--warning))',
+          700: 'hsl(var(--warning))',
+          800: 'hsl(var(--warning))',
+          900: 'hsl(var(--warning))'
+        },
+        rose: {
+          50: 'hsl(var(--danger-soft))',
+          100: 'hsl(var(--danger-soft))',
+          200: 'hsl(var(--danger-border))',
+          300: 'hsl(var(--danger-border))',
+          400: 'hsl(var(--danger))',
+          500: 'hsl(var(--danger))',
+          600: 'hsl(var(--danger))',
+          700: 'hsl(var(--danger))',
+          800: 'hsl(var(--danger))',
+          900: 'hsl(var(--danger))',
+          950: 'hsl(var(--danger))'
+        },
+        red: {
+          50: 'hsl(var(--danger-soft))',
+          100: 'hsl(var(--danger-soft))',
+          200: 'hsl(var(--danger-border))',
+          300: 'hsl(var(--danger-border))',
+          400: 'hsl(var(--danger))',
+          500: 'hsl(var(--danger))',
+          600: 'hsl(var(--danger))',
+          700: 'hsl(var(--danger))',
+          800: 'hsl(var(--danger))',
+          900: 'hsl(var(--danger))'
+        },
+        sky: {
+          50: 'hsl(var(--info-soft))',
+          100: 'hsl(var(--info-soft))',
+          200: 'hsl(var(--info-border))',
+          300: 'hsl(var(--info-border))',
+          400: 'hsl(var(--info))',
+          500: 'hsl(var(--info))',
+          600: 'hsl(var(--info))',
+          700: 'hsl(var(--info))',
+          800: 'hsl(var(--info))',
+          900: 'hsl(var(--info))'
+        },
+        blue: {
+          50: 'hsl(var(--info-soft))',
+          100: 'hsl(var(--info-soft))',
+          200: 'hsl(var(--info-border))',
+          300: 'hsl(var(--info-border))',
+          400: 'hsl(var(--info))',
+          500: 'hsl(var(--info))',
+          600: 'hsl(var(--info))',
+          700: 'hsl(var(--info))',
+          800: 'hsl(var(--info))',
+          900: 'hsl(var(--info))'
+        },
+        indigo: {
+          50: 'hsl(var(--info-soft))',
+          100: 'hsl(var(--info-soft))',
+          200: 'hsl(var(--info-border))',
+          300: 'hsl(var(--info-border))',
+          400: 'hsl(var(--info))',
+          500: 'hsl(var(--info))',
+          600: 'hsl(var(--info))',
+          700: 'hsl(var(--info))',
+          800: 'hsl(var(--info))',
+          900: 'hsl(var(--info))'
+        },
+        violet: {
+          50: 'hsl(var(--maintenance-soft))',
+          100: 'hsl(var(--maintenance-soft))',
+          200: 'hsl(var(--maintenance-border))',
+          300: 'hsl(var(--maintenance-border))',
+          400: 'hsl(var(--maintenance))',
+          500: 'hsl(var(--maintenance))',
+          600: 'hsl(var(--maintenance))',
+          700: 'hsl(var(--maintenance))',
+          800: 'hsl(var(--maintenance))',
+          900: 'hsl(var(--maintenance))'
+        },
+        purple: {
+          50: 'hsl(var(--maintenance-soft))',
+          100: 'hsl(var(--maintenance-soft))',
+          200: 'hsl(var(--maintenance-border))',
+          300: 'hsl(var(--maintenance-border))',
+          400: 'hsl(var(--maintenance))',
+          500: 'hsl(var(--maintenance))',
+          600: 'hsl(var(--maintenance))',
+          700: 'hsl(var(--maintenance))',
+          800: 'hsl(var(--maintenance))',
+          900: 'hsl(var(--maintenance))'
+        },
+        pink: {
+          50: 'hsl(var(--maintenance-soft))',
+          100: 'hsl(var(--maintenance-soft))',
+          200: 'hsl(var(--maintenance-border))',
+          300: 'hsl(var(--maintenance-border))',
+          400: 'hsl(var(--maintenance))',
+          500: 'hsl(var(--maintenance))',
+          600: 'hsl(var(--maintenance))',
+          700: 'hsl(var(--maintenance))',
+          800: 'hsl(var(--maintenance))',
+          900: 'hsl(var(--maintenance))'
+        },
+        emerald: {
+          50: 'hsl(var(--success-soft))',
+          100: 'hsl(var(--success-soft))',
+          200: 'hsl(var(--success-border))',
+          300: 'hsl(var(--success-border))',
+          400: 'hsl(var(--success))',
+          500: 'hsl(var(--success))',
+          600: 'hsl(var(--success))',
+          700: 'hsl(var(--success))',
+          800: 'hsl(var(--success))',
+          900: 'hsl(var(--success))'
+        },
+        green: {
+          50: 'hsl(var(--success-soft))',
+          100: 'hsl(var(--success-soft))',
+          200: 'hsl(var(--success-border))',
+          300: 'hsl(var(--success-border))',
+          400: 'hsl(var(--success))',
+          500: 'hsl(var(--success))',
+          600: 'hsl(var(--success))',
+          700: 'hsl(var(--success))',
+          800: 'hsl(var(--success))',
+          900: 'hsl(var(--success))'
+        },
+        lime: {
+          50: 'hsl(var(--success-soft))',
+          100: 'hsl(var(--success-soft))',
+          200: 'hsl(var(--success-border))',
+          300: 'hsl(var(--success-border))',
+          400: 'hsl(var(--success))',
+          500: 'hsl(var(--success))',
+          600: 'hsl(var(--success))',
+          700: 'hsl(var(--success))',
+          800: 'hsl(var(--success))',
+          900: 'hsl(var(--success))'
+        },
+        teal: {
+          50: 'hsl(var(--teal-soft))',
+          100: 'hsl(var(--teal-soft))',
+          200: 'hsl(var(--teal-border))',
+          300: 'hsl(var(--teal-border))',
+          400: 'hsl(var(--teal))',
+          500: 'hsl(var(--teal))',
+          600: 'hsl(var(--teal))',
+          700: 'hsl(var(--teal))',
+          800: 'hsl(var(--teal))',
+          900: 'hsl(var(--teal))'
+        },
+        cyan: {
+          50: 'hsl(var(--teal-soft))',
+          100: 'hsl(var(--teal-soft))',
+          200: 'hsl(var(--teal-border))',
+          300: 'hsl(var(--teal-border))',
+          400: 'hsl(var(--teal))',
+          500: 'hsl(var(--teal))',
+          600: 'hsl(var(--teal))',
+          700: 'hsl(var(--teal))',
+          800: 'hsl(var(--teal))',
+          900: 'hsl(var(--teal))'
+        },
+        slate: {
+          50: 'hsl(var(--surface-2))',
+          100: 'hsl(var(--muted))',
+          200: 'hsl(var(--border))',
+          300: 'hsl(var(--border-strong))',
+          400: 'hsl(var(--muted-foreground))',
+          500: 'hsl(var(--muted-foreground))',
+          600: 'hsl(var(--ink-3))',
+          700: 'hsl(var(--ink-2))',
+          800: 'hsl(var(--ink-1))',
+          900: 'hsl(var(--ink-1))',
+          950: 'hsl(var(--ink-1))'
+        },
+        gray: {
+          50: 'hsl(var(--surface-2))',
+          100: 'hsl(var(--muted))',
+          200: 'hsl(var(--border))',
+          300: 'hsl(var(--border-strong))',
+          400: 'hsl(var(--muted-foreground))',
+          500: 'hsl(var(--muted-foreground))',
+          600: 'hsl(var(--ink-3))',
+          700: 'hsl(var(--ink-2))',
+          800: 'hsl(var(--ink-1))',
+          900: 'hsl(var(--ink-1))'
+        },
+        zinc: {
+          50: 'hsl(var(--surface-2))',
+          100: 'hsl(var(--muted))',
+          200: 'hsl(var(--border))',
+          300: 'hsl(var(--border-strong))',
+          400: 'hsl(var(--muted-foreground))',
+          500: 'hsl(var(--muted-foreground))',
+          600: 'hsl(var(--ink-3))',
+          700: 'hsl(var(--ink-2))',
+          800: 'hsl(var(--ink-1))',
+          900: 'hsl(var(--ink-1))'
+        },
         chart: {
           '1': 'hsl(var(--chart-1))',
           '2': 'hsl(var(--chart-2))',
@@ -164,13 +423,18 @@ module.exports = {
           '50%': {
             opacity: '0.45'
           }
+        },
+        shimmer: {
+          '0%': { backgroundPosition: '200% 0' },
+          '100%': { backgroundPosition: '-200% 0' }
         }
       },
       animation: {
         'accordion-down': 'accordion-down 0.18s ease-out',
         'accordion-up': 'accordion-up 0.18s ease-out',
         rise: 'rise 0.32s cubic-bezier(0.16, 1, 0.3, 1) both',
-        'pulse-soft': 'pulse-soft 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+        'pulse-soft': 'pulse-soft 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        shimmer: 'shimmer 1.5s linear infinite'
       }
     }
   },

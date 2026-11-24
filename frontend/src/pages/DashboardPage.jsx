@@ -211,7 +211,7 @@ const DashboardPage = () => {
               &mdash; bukan kegagalan sistem.{" "}
               <Link
                 to="/setup/modules"
-                className="font-medium text-primary underline-offset-2 hover:underline"
+                className="font-semibold text-primary-strong underline-offset-2 hover:underline"
                 data-testid="dashboard-modules-footnote-link"
               >
                 Lihat modul perusahaan
