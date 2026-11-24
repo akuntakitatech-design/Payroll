@@ -2,14 +2,14 @@ import logging
 
 from sqlalchemy import false as sa_false  # Upgrade 01I
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 
 from ..core import completeness  # Upgrade 01F
 from ..core.audit import log_action
 from ..core.config import settings
-from ..core.db import NO_ID, get_db, new_id, now, serialize, serialize_list
+from ..core.db import NO_ID, audit_fields, get_db, new_id, now, serialize, serialize_list
 from ..core.deps import AuthContext, get_auth, require_permission
 from ..core import data_scope as dscope  # Upgrade 01I
 from ..core.repo import TenantRepository
@@ -65,6 +65,7 @@ async def list_documents(
     owner_id: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
     verification_state: Optional[str] = Query(None, description="PENDING | VERIFIED | REJECTED"),
+    only_current: bool = Query(True, description="Hanya versi terbaru tiap dokumen"),
     page: int = 1,
     limit: int = 20,
     ctx: AuthContext = Depends(require_permission("document", "view")),
@@ -84,6 +85,10 @@ async def list_documents(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                 "Status verifikasi tidak dikenal. Pilihan: Menunggu Verifikasi, Terverifikasi, Ditolak.")
         filters["verification_state"] = state
+    if only_current:
+        # Modul 3: versi lama tetap tersimpan sebagai histori tetapi tidak tampil di daftar utama.
+        # `$sql` aman karena dibangun di server (bukan input pengguna) dan digabung dengan cakupan data.
+        filters["$sql"] = (lambda t: t.c.superseded_by_document_id.is_(None))
     filters = await _scoped_doc_filters(ctx, filters)  # Upgrade 01I
     repo = TenantRepository("documents", ctx.company_id)
     result = await repo.list(
@@ -107,6 +112,8 @@ async def list_documents(
         item["document_type_category"] = t.get("category")
         item["verification_state"] = _verification_state(item)
         item["verification_state_label"] = VERIFICATION_LABELS.get(item["verification_state"], item["verification_state"])
+        item["version"] = int(item.get("version") or 1)
+        item["is_current"] = not item.get("superseded_by_document_id")
     return result
 
 
@@ -170,32 +177,8 @@ async def _assert_applicant_writable(ctx: AuthContext, owner_type: Optional[str]
         )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
-async def upload_document(
-    file: UploadFile = File(...),
-    document_type_id: str = Form(...),
-    name: str = Form(...),
-    owner_type: str = Form("company"),
-    owner_id: Optional[str] = Form(None),
-    owner_label: Optional[str] = Form(None),
-    document_number: Optional[str] = Form(None),
-    issued_date: Optional[str] = Form(None),
-    expiry_date: Optional[str] = Form(None),
-    notes: Optional[str] = Form(None),
-    ctx: AuthContext = Depends(require_permission("document", "create")),
-):
-    await _ensure_owner_writable_in_scope(ctx, owner_type, owner_id)  # Upgrade 01I
-    await _assert_applicant_writable(ctx, owner_type, owner_id)
-    db = get_db()
-    doc_type = serialize(
-        await db.document_types.find_one({"company_id": ctx.company_id, "id": document_type_id}, NO_ID)
-    )
-    if not doc_type:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Tipe dokumen tidak ditemukan. Buat tipe dokumen terlebih dahulu di menu Tipe Dokumen.",
-        )
-
+async def _store_file(ctx: AuthContext, doc_type: Dict[str, Any], file: UploadFile) -> Dict[str, Any]:
+    """Validasi format/ukuran sesuai Tipe Dokumen lalu simpan berkas ke object storage."""
     ext = Path(file.filename or "").suffix.lower().lstrip(".")
     allowed = doc_type.get("allowed_extensions")
     if allowed:
@@ -230,6 +213,42 @@ async def upload_document(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Penyimpanan berkas sedang tidak tersedia. Coba unggah kembali beberapa saat lagi.",
         ) from exc
+    return {
+        "file_name": file.filename,
+        "storage_path": result.get("path", path),
+        "file_size": result.get("size", len(payload)),
+        "file_extension": ext,
+        "mime_type": content_type,
+    }
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def upload_document(
+    file: UploadFile = File(...),
+    document_type_id: str = Form(...),
+    name: str = Form(...),
+    owner_type: str = Form("company"),
+    owner_id: Optional[str] = Form(None),
+    owner_label: Optional[str] = Form(None),
+    document_number: Optional[str] = Form(None),
+    issued_date: Optional[str] = Form(None),
+    expiry_date: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    ctx: AuthContext = Depends(require_permission("document", "create")),
+):
+    await _ensure_owner_writable_in_scope(ctx, owner_type, owner_id)  # Upgrade 01I
+    await _assert_applicant_writable(ctx, owner_type, owner_id)
+    db = get_db()
+    doc_type = serialize(
+        await db.document_types.find_one({"company_id": ctx.company_id, "id": document_type_id}, NO_ID)
+    )
+    if not doc_type:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Tipe dokumen tidak ditemukan. Buat tipe dokumen terlebih dahulu di menu Tipe Dokumen.",
+        )
+
+    file_fields = await _store_file(ctx, doc_type, file)
 
     repo = TenantRepository("documents", ctx.company_id)
     # Modul 3: pengunggah yang memegang `document:verify` (HR) langsung dianggap mengesahkan
@@ -254,13 +273,10 @@ async def upload_document(
             "issued_date": issued_date,
             "expiry_date": expiry_date,
             "notes": notes,
-            "file_name": file.filename,
-            "storage_path": result.get("path", path),
-            "file_size": result.get("size", len(payload)),
-            "file_extension": ext,
-            "mime_type": content_type,
+            **file_fields,
             "is_deleted": False,
             "version": 1,
+            "superseded_by_document_id": None,
             "verification_state": verification_state,
             "verification_note": None,
             **verified_fields,
@@ -475,9 +491,142 @@ async def delete_document(
     doc = await repo.get(document_id)
     await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
     await _assert_applicant_writable(ctx, doc.get("owner_type"), doc.get("owner_id"))
+    was_current = not doc.get("superseded_by_document_id")
+    group_id = doc.get("document_group_id") or doc.get("id")
     before, after = await repo.update(
         document_id, {"is_deleted": True, "status": "archived"}, ctx.user_id
     )
+    promoted = None
+    if was_current:
+        # Modul 3: bila versi terbaru dihapus, versi sebelumnya yang masih aktif kembali menjadi versi terkini.
+        rows = serialize_list(await ctx.tdb.documents.find(
+            {"company_id": ctx.company_id, "id": {"$ne": document_id}, "is_deleted": False,
+             "$or": [{"id": group_id}, {"document_group_id": group_id}]}, NO_ID).to_list(500))
+        if rows:
+            promoted = max(rows, key=lambda r: int(r.get("version") or 1))
+            await ctx.tdb.documents.update_one(
+                {"company_id": ctx.company_id, "id": promoted["id"]},
+                {"$set": {"superseded_by_document_id": None, "superseded_at": None,
+                          "superseded_by": None, "superseded_by_name": None,
+                          **audit_fields(ctx.user_id, creating=False)}})
     await log_action(ctx, "delete", "document", document_id, doc.get("name"), before=before, after=after)
     await completeness.safe_refresh(ctx.company_id, [doc.get("owner_id") if doc.get("owner_type") == "employee" else None], "document", ctx.user_id)  # Upgrade 01F
-    return {"message": f"Dokumen '{doc.get('name')}' berhasil dihapus dari daftar aktif."}
+    message = f"Dokumen '{doc.get('name')}' berhasil dihapus dari daftar aktif."
+    if promoted:
+        message += f" Versi {int(promoted.get('version') or 1)} kembali menjadi versi terkini."
+    return {"message": message}
+
+
+async def _group_versions(ctx: AuthContext, group_id: str) -> List[Dict[str, Any]]:
+    rows = serialize_list(await ctx.tdb.documents.find(
+        {"company_id": ctx.company_id, "$or": [{"id": group_id}, {"document_group_id": group_id}]},
+        NO_ID).sort("version", -1).to_list(500))
+    user_ids = sorted({r.get("created_by") for r in rows if r.get("created_by")})
+    users: Dict[str, str] = {}
+    if user_ids:
+        users = {u["id"]: u.get("full_name") for u in await get_db().users.find(
+            {"id": {"$in": user_ids}}, {"id": 1, "full_name": 1}).to_list(len(user_ids) + 1)}
+    out = []
+    for row in rows:
+        state = _verification_state(row)
+        out.append({
+            "id": row["id"],
+            "version": int(row.get("version") or 1),
+            "name": row.get("name"),
+            "file_name": row.get("file_name"),
+            "file_size": row.get("file_size"),
+            "is_current": not row.get("superseded_by_document_id") and not row.get("is_deleted"),
+            "is_deleted": bool(row.get("is_deleted")),
+            "verification_state": state,
+            "verification_state_label": VERIFICATION_LABELS.get(state, state),
+            "uploaded_by_name": users.get(row.get("created_by")),
+            "created_at": row.get("created_at"),
+            "superseded_at": row.get("superseded_at"),
+            "superseded_by_name": row.get("superseded_by_name"),
+        })
+    return out
+
+
+@router.get("/{document_id}/versions")
+async def list_versions(document_id: str, ctx: AuthContext = Depends(require_permission("document", "view"))):
+    """Riwayat versi dokumen (terbaru lebih dulu) beserta status verifikasinya."""
+    repo = TenantRepository("documents", ctx.company_id)
+    doc = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, doc)  # Upgrade 01I
+    group_id = doc.get("document_group_id") or doc["id"]
+    items = await _group_versions(ctx, group_id)
+    return {"items": items, "total": len(items), "group_id": group_id}
+
+
+@router.post("/{document_id}/new-version", status_code=status.HTTP_201_CREATED)
+async def upload_new_version(
+    document_id: str,
+    file: UploadFile = File(...),
+    document_number: Optional[str] = Form(None),
+    issued_date: Optional[str] = Form(None),
+    expiry_date: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    ctx: AuthContext = Depends(require_permission("document", "edit")),
+):
+    """Unggah versi baru dokumen. Versi lama tetap tersimpan sebagai histori dan ditandai digantikan."""
+    db = get_db()
+    repo = TenantRepository("documents", ctx.company_id)
+    current = await repo.get(document_id)
+    await _ensure_doc_in_scope(ctx, current)  # Upgrade 01I
+    await _assert_applicant_writable(ctx, current.get("owner_type"), current.get("owner_id"))
+    if current.get("is_deleted") or current.get("status") == "archived":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Dokumen yang sudah diarsipkan tidak dapat diberi versi baru.")
+    doc_type = serialize(await db.document_types.find_one(
+        {"company_id": ctx.company_id, "id": current.get("document_type_id")}, NO_ID))
+    if not doc_type:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Tipe dokumen pada dokumen ini sudah tidak tersedia. Hubungi administrator.")
+    file_fields = await _store_file(ctx, doc_type, file)
+
+    group_id = current.get("document_group_id") or current["id"]
+    existing_versions = await _group_versions(ctx, group_id)
+    next_version = max([v["version"] for v in existing_versions] or [1]) + 1
+    can_verify = ctx.has_permission("document", "verify")
+    verification_state = VERIFIED if can_verify else PENDING
+    verified_fields: Dict[str, Any] = {}
+    if verification_state == VERIFIED:
+        verified_fields = {"verified_by": ctx.user_id, "verified_by_name": (ctx.user or {}).get("full_name"),
+                           "verified_at": now()}
+    created = await repo.create(
+        {
+            "document_type_id": current.get("document_type_id"),
+            "name": current.get("name"),
+            "owner_type": current.get("owner_type"),
+            "owner_id": current.get("owner_id"),
+            "owner_label": current.get("owner_label"),
+            "document_number": document_number if document_number is not None else current.get("document_number"),
+            "issued_date": issued_date if issued_date is not None else current.get("issued_date"),
+            "expiry_date": expiry_date if expiry_date is not None else current.get("expiry_date"),
+            "notes": notes if notes is not None else current.get("notes"),
+            **file_fields,
+            "is_deleted": False,
+            "version": next_version,
+            "document_group_id": group_id,
+            "superseded_by_document_id": None,
+            "verification_state": verification_state,
+            "verification_note": None,
+            **verified_fields,
+        },
+        ctx.user_id,
+    )
+    await ctx.tdb.documents.update_many(
+        {"company_id": ctx.company_id, "id": {"$ne": created["id"]}, "superseded_by_document_id": None,
+         "$or": [{"id": group_id}, {"document_group_id": group_id}]},
+        {"$set": {"superseded_by_document_id": created["id"], "superseded_at": now(),
+                  "superseded_by": ctx.user_id, "superseded_by_name": (ctx.user or {}).get("full_name"),
+                  "document_group_id": group_id, **audit_fields(ctx.user_id, creating=False)}})
+    created["document_type_name"] = doc_type.get("name")
+    created["verification_state_label"] = VERIFICATION_LABELS.get(verification_state, verification_state)
+    await log_action(ctx, "upload", "document", created["id"], created.get("name"), after=created,
+                     notes=f"Versi baru v{next_version} untuk dokumen {group_id}")
+    await completeness.safe_refresh(
+        ctx.company_id,
+        [created.get("owner_id") if created.get("owner_type") == "employee" else None],
+        "document", ctx.user_id)  # Upgrade 01F
+    return {"message": f"Versi {next_version} berhasil diunggah. Versi sebelumnya tetap tersimpan sebagai histori.",
+            "item": created}

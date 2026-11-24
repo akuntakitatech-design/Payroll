@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Eye, FileText, Loader2, MoreHorizontal, ShieldCheck, ShieldX, Trash2, Upload } from "lucide-react";
+import { Download, Eye, FileText, History, Loader2, MoreHorizontal, ShieldCheck, ShieldX, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -94,6 +96,15 @@ const DocumentsPage = () => {
   const [rejectReason, setRejectReason] = useState("");
   const [verificationError, setVerificationError] = useState("");
   const [verificationLoading, setVerificationLoading] = useState(false);
+  const [onlyCurrent, setOnlyCurrent] = useState(true);
+  const [versionTarget, setVersionTarget] = useState(null);
+  const [versionFile, setVersionFile] = useState(null);
+  const [versionForm, setVersionForm] = useState({ document_number: "", issued_date: "", expiry_date: "", notes: "" });
+  const [versionError, setVersionError] = useState("");
+  const [versionSaving, setVersionSaving] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState(null);
+  const [versions, setVersions] = useState([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const fileInput = useRef(null);
 
   useEffect(() => {
@@ -118,6 +129,7 @@ const DocumentsPage = () => {
       if (typeFilter) params.document_type_id = typeFilter;
       if (ownerFilter) params.owner_type = ownerFilter;
       if (verificationFilter) params.verification_state = verificationFilter;
+      if (!onlyCurrent) params.only_current = false;
       const res = await api.get("/documents", { params });
       setRows(res.data.items || []);
       setMeta({
@@ -132,7 +144,7 @@ const DocumentsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debounced, typeFilter, ownerFilter, verificationFilter]);
+  }, [page, limit, debounced, typeFilter, ownerFilter, verificationFilter, onlyCurrent]);
 
   const loadVerificationSummary = useCallback(async () => {
     try {
@@ -231,6 +243,60 @@ const DocumentsPage = () => {
     loadVerificationSummary();
   };
 
+  const openNewVersion = (row) => {
+    setVersionTarget(row);
+    setVersionFile(null);
+    setVersionForm({
+      document_number: row.document_number || "",
+      issued_date: row.issued_date || "",
+      expiry_date: row.expiry_date || "",
+      notes: "",
+    });
+    setVersionError("");
+  };
+
+  const submitVersion = async () => {
+    if (!versionTarget) return;
+    if (!versionFile) {
+      setVersionError("Pilih berkas versi baru terlebih dahulu.");
+      return;
+    }
+    setVersionSaving(true);
+    setVersionError("");
+    try {
+      const fd = new FormData();
+      fd.append("file", versionFile);
+      if (versionForm.document_number) fd.append("document_number", versionForm.document_number);
+      if (versionForm.issued_date) fd.append("issued_date", versionForm.issued_date);
+      if (versionForm.expiry_date) fd.append("expiry_date", versionForm.expiry_date);
+      if (versionForm.notes) fd.append("notes", versionForm.notes);
+      const res = await api.post(`/documents/${versionTarget.id}/new-version`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      toast.success(res.data.message || "Versi baru diunggah.");
+      setVersionTarget(null);
+      refreshAll();
+    } catch (err) {
+      setVersionError(errorMessage(err, "Versi baru gagal diunggah."));
+    } finally {
+      setVersionSaving(false);
+    }
+  };
+
+  const openVersions = async (row) => {
+    setHistoryTarget(row);
+    setVersions([]);
+    setVersionsLoading(true);
+    try {
+      const res = await api.get(`/documents/${row.id}/versions`);
+      setVersions(res.data.items || []);
+    } catch (err) {
+      toast.error(errorMessage(err, "Riwayat versi tidak dapat dimuat."));
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
   const openVerify = (row) => {
     setVerificationError("");
     setVerifyNote("");
@@ -284,10 +350,17 @@ const DocumentsPage = () => {
       key: "name",
       header: "Dokumen",
       render: (row) => (
-        <div className="flex min-w-0 items-start gap-2">
+          <div className="flex min-w-0 items-start gap-2">
           <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
-            <p className="truncate font-medium">{row.name}</p>
+            <p className="truncate font-medium">
+              {row.name}
+              {row.version > 1 && (
+                <Badge variant="secondary" className="ml-1.5 align-middle text-[10px]" data-testid={`doc-version-${row.id}`}>
+                  v{row.version}
+                </Badge>
+              )}
+            </p>
             <p className="truncate text-xs text-muted-foreground">
               {row.file_name} · {formatFileSize(row.file_size)}
             </p>
@@ -370,6 +443,14 @@ const DocumentsPage = () => {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => download(row)} data-testid={`doc-download-${row.id}`}>
               <Download className="mr-2 h-4 w-4" /> Unduh berkas
+            </DropdownMenuItem>
+            {can("document", "edit") && (
+              <DropdownMenuItem onClick={() => openNewVersion(row)} data-testid={`doc-new-version-${row.id}`}>
+                <Upload className="mr-2 h-4 w-4" /> Unggah versi baru
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={() => openVersions(row)} data-testid={`doc-versions-${row.id}`}>
+              <History className="mr-2 h-4 w-4" /> Riwayat versi
             </DropdownMenuItem>
             {can("document", "verify") && row.verification_state !== "VERIFIED" && (
               <DropdownMenuItem onClick={() => openVerify(row)} data-testid={`doc-verify-${row.id}`}>
@@ -503,6 +584,14 @@ const DocumentsPage = () => {
               testId="filter-verification-state"
             />
           )}
+          <label className="flex items-center gap-2 self-end pb-2 text-[12px] text-muted-foreground">
+            <Switch
+              checked={onlyCurrent}
+              onCheckedChange={(v) => { setOnlyCurrent(v); setPage(1); }}
+              data-testid="filter-only-current"
+            />
+            Hanya versi terbaru
+          </label>
         </FilterBar>
 
         <TableCard>
@@ -779,6 +868,118 @@ const DocumentsPage = () => {
               {verificationLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Tolak Dokumen
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!versionTarget} onOpenChange={(v) => !v && !versionSaving && setVersionTarget(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto bg-card sm:max-w-lg" data-testid="doc-new-version-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-semibold">Unggah Versi Baru</DialogTitle>
+            <DialogDescription>
+              {versionTarget?.name} · versi {(versionTarget?.version || 1) + 1}. Versi lama tetap tersimpan
+              sebagai histori dan ditandai digantikan.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="doc-version-file">
+                Berkas Versi Baru <span className="text-destructive">*</span>
+              </Label>
+              <Input id="doc-version-file" type="file"
+                onChange={(e) => { setVersionFile(e.target.files?.[0] || null); setVersionError(""); }}
+                data-testid="doc-version-file" />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="doc-version-number">Nomor Dokumen</Label>
+                <Input id="doc-version-number" value={versionForm.document_number}
+                  onChange={(e) => setVersionForm((f) => ({ ...f, document_number: e.target.value }))}
+                  data-testid="doc-version-number" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="doc-version-issued">Tanggal Terbit</Label>
+                <Input id="doc-version-issued" type="date" value={versionForm.issued_date}
+                  onChange={(e) => setVersionForm((f) => ({ ...f, issued_date: e.target.value }))}
+                  data-testid="doc-version-issued" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="doc-version-expiry">Berlaku Sampai</Label>
+                <Input id="doc-version-expiry" type="date" value={versionForm.expiry_date}
+                  onChange={(e) => setVersionForm((f) => ({ ...f, expiry_date: e.target.value }))}
+                  data-testid="doc-version-expiry" />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="doc-version-notes">Catatan</Label>
+                <Textarea id="doc-version-notes" rows={2} value={versionForm.notes}
+                  onChange={(e) => setVersionForm((f) => ({ ...f, notes: e.target.value }))}
+                  data-testid="doc-version-notes" />
+              </div>
+            </div>
+            {versionError && (
+              <div className="rounded-lg border border-danger-border bg-danger-soft px-3 py-2 text-sm text-destructive" data-testid="doc-version-error">
+                {versionError}
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setVersionTarget(null)} disabled={versionSaving}>Batal</Button>
+            <Button onClick={submitVersion} disabled={versionSaving} data-testid="doc-version-submit">
+              {versionSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Unggah Versi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!historyTarget} onOpenChange={(v) => !v && setHistoryTarget(null)}>
+        <DialogContent className="bg-card sm:max-w-xl" data-testid="doc-versions-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-semibold">Riwayat Versi</DialogTitle>
+            <DialogDescription>{historyTarget?.name}</DialogDescription>
+          </DialogHeader>
+          {versionsLoading ? (
+            <Skeleton className="h-32 w-full rounded-xl" />
+          ) : versions.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">Belum ada riwayat versi.</p>
+          ) : (
+            <div className="max-h-[55vh] space-y-2 overflow-y-auto">
+              {versions.map((v) => (
+                <div key={v.id} className="rounded-lg border border-border p-3" data-testid={`doc-version-item-${v.id}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={v.is_current ? "default" : "outline"}>v{v.version}</Badge>
+                      {v.is_current && <span className="text-[11px] font-medium text-success">Versi terkini</span>}
+                      {v.is_deleted && <Badge variant="destructive">Dihapus</Badge>}
+                    </div>
+                    <span className="text-[11px] text-muted-foreground">
+                      {formatDate(v.created_at)}{v.uploaded_by_name ? ` · ${v.uploaded_by_name}` : ""}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-[12px] text-muted-foreground">
+                    {v.file_name} · {formatFileSize(v.file_size)}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <StatusBadge
+                      status={v.verification_state === "VERIFIED" ? "verified" : v.verification_state.toLowerCase()}
+                      label={v.verification_state_label}
+                    />
+                    {v.superseded_at && (
+                      <span className="text-[11px] text-muted-foreground">
+                        Digantikan {formatDate(v.superseded_at)}
+                        {v.superseded_by_name ? ` oleh ${v.superseded_by_name}` : ""}
+                      </span>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => setPreviewId(v.id)} data-testid={`doc-version-preview-${v.id}`}>
+                      <Eye className="mr-1 h-3.5 w-3.5" />Lihat
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHistoryTarget(null)}>Tutup</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
