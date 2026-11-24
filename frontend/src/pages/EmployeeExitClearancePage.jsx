@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ClipboardList, Plus, RefreshCw, Search, UserMinus } from "lucide-react";
+import { ClipboardList, History, Plus, RefreshCw, Search, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -177,6 +177,11 @@ const EmployeeExitClearancePage = () => {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={load} disabled={loading} data-testid="exit-refresh">
               <RefreshCw className="mr-1.5 h-4 w-4" />Muat ulang
+            </Button>
+            <Button asChild variant="outline" data-testid="exit-history-link">
+              <Link to="/employees/exit-clearance/history">
+                <History className="mr-1.5 h-4 w-4" />Histori
+              </Link>
             </Button>
             {can("exit_clearance", "create") && (
               <Button onClick={openDialog} data-testid="exit-create-open">

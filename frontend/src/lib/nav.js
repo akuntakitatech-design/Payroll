@@ -115,6 +115,7 @@ export const NAV_GROUPS = [
       { key: "employee-update-form", label: "Form Pembaruan Data", to: "/employees/update-form", icon: ClipboardList, resource: "employee", action: "view", module: "employee_core" },
       { key: "employee-update-verifications", label: "Verifikasi Pembaruan Data", to: "/employees/update-verifications", icon: UserCheck, resource: "employee_form", action: "verify", module: "employee_core" },
       { key: "employee-exit-clearance", label: "Exit Clearance", to: "/employees/exit-clearance", icon: UserMinus, resource: "exit_clearance", action: "view", module: "employee_core" },
+      { key: "employee-exit-history", label: "Histori Exit", to: "/employees/exit-clearance/history", icon: History, resource: "exit_clearance", action: "view", module: "employee_core" },
       { key: "reminders", label: "Kalender Masa Berlaku", to: "/reminders", icon: CalendarClock, resource: "document", action: "view", module: "employee_core" },
     ],
   },
