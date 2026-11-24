@@ -328,6 +328,17 @@ async def change_employee_status(
         previous = await db[TABLE].find_one(
             {"company_id": ctx.company_id, "id": employee["current_employee_status_id"]}, NO_ID)
 
+    # Core HR: status kepegawaian yang mewajibkan Project/Site tidak boleh diaktifkan tanpa penempatan.
+    if new_status.get("system_category") != "STANDBY":
+        employment_status_row = await db.employment_statuses.find_one(
+            {"company_id": ctx.company_id, "id": employee.get("employment_status_id")}, NO_ID)
+        if (employment_status_row or {}).get("requires_project") and not (
+                employee.get("project_id") or employee.get("work_location_id")):
+            raise _unprocessable(
+                f"Karyawan berstatus kepegawaian '{employment_status_row.get('name')}' wajib memiliki Project/Site. "
+                "Tetapkan penempatan terlebih dahulu, atau gunakan Status Karyawan berkategori Standby."
+            )
+
     legacy_before = employee.get("status")
     legacy_after = legacy_for(new_status["system_category"])
     actor_name = ctx.user.get("full_name") if ctx.user else None

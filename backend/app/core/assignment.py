@@ -73,6 +73,20 @@ async def active_assignment(company_id: str, employee_id: str) -> Optional[Dict[
         {"company_id": company_id, "employee_id": employee_id, "assignment_status": ACTIVE}, NO_ID)
 
 
+async def employment_status_requires_project(company_id: str, employment_status_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Baris Status Kepegawaian bila status tersebut mewajibkan Project/Site aktif."""
+    if not employment_status_id:
+        return None
+    row = await get_tenant_db(company_id)["employment_statuses"].find_one(
+        {"company_id": company_id, "id": employment_status_id, "status": {"$ne": "deleted"}}, NO_ID)
+    return row if (row or {}).get("requires_project") else None
+
+
+def has_placement(data: Dict[str, Any]) -> bool:
+    """Project/Site dianggap terpenuhi bila salah satu terisi."""
+    return bool(data.get("project_id") or data.get("work_location_id"))
+
+
 async def create_initial_for_new_employee(company_id: str, employee: Dict[str, Any], source: str,
                                           user_id: Optional[str], today: str) -> Optional[str]:
     """Karyawan baru yang langsung punya project -> assignment ACTIVE pertama.

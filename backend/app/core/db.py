@@ -306,7 +306,7 @@ TABLE_SPECS: Dict[str, Dict[str, str]] = {
         **MASTER, "client_name": "s", "branch_id": "fk", "work_location_id": "fk", "cost_center_id": "fk",
         "start_date": "s32", "end_date": "s32", "contract_value": "f", "project_manager_user_id": "fk",
     },
-    "employment_statuses": {**MASTER, "is_permanent": "b", "requires_contract": "b"},
+    "employment_statuses": {**MASTER, "is_permanent": "b", "requires_contract": "b", "requires_project": "b"},
     "contract_types": {**MASTER, "duration_months": "i", "is_extendable": "b", "max_extension": "i"},
     "certification_types": {
         **MASTER, "issuing_body": "s", "validity_months": "i", "is_mandatory": "b", "reminder_days": "i",

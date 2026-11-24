@@ -205,6 +205,14 @@ async def end(employee_id: str, payload: EndIn, ctx: AuthContext = Depends(requi
     old = await asg.active_assignment(ctx.company_id, employee_id)
     if not old:
         raise _err("Karyawan tidak memiliki penempatan aktif.", status.HTTP_409_CONFLICT)
+    # Core HR: status kepegawaian yang mewajibkan Project/Site wajib pindah ke Standby saat demobilisasi.
+    requires_project = await asg.employment_status_requires_project(ctx.company_id, emp.get("employment_status_id"))
+    if requires_project and not payload.change_status_id:
+        raise _err(
+            f"Karyawan berstatus kepegawaian '{requires_project.get('name')}' mewajibkan Project/Site. "
+            "Saat mengakhiri penempatan, pilih Status Karyawan berkategori Standby.",
+            status.HTTP_409_CONFLICT,
+        )
     end_date = _check_date(payload.end_date, "tanggal akhir", not_before=old.get("start_date"))
     reason = payload.reason.strip()
     status_payload = None
@@ -218,6 +226,11 @@ async def end(employee_id: str, payload: EndIn, ctx: AuthContext = Depends(requi
             raise _err("Status karyawan tujuan tidak ditemukan / nonaktif pada perusahaan aktif Anda.")
         if st["id"] == emp.get("current_employee_status_id"):
             raise _err("Status karyawan tujuan sama dengan status saat ini.")
+        if requires_project and st.get("system_category") != "STANDBY":
+            raise _err(
+                f"Status kepegawaian '{requires_project.get('name')}' mewajibkan Project/Site. "
+                "Pilih Status Karyawan berkategori Standby saat mengakhiri penempatan."
+            )
         status_payload = EmployeeStatusChange(new_status_id=st["id"], effective_date=end_date,
                                               reason=f"Penempatan berakhir: {reason}"[:255], notes=payload.notes)
     old_end = {"assignment_status": asg.ENDED, "end_date": end_date, "end_reason": reason, "end_notes": payload.notes,
