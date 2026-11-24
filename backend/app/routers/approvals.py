@@ -32,7 +32,7 @@ APPROVER_TYPES = [
 
 SCOPE_TYPES = [
     {"key": "company", "label": "Seluruh Perusahaan"},
-    {"key": "branch", "label": "Cabang Tertentu"},
+    {"key": "branch", "label": "Unit Operasional Tertentu"},
     {"key": "division", "label": "Divisi Tertentu"},
     {"key": "project", "label": "Proyek Tertentu"},
 ]

@@ -29,7 +29,7 @@ def _perm(action: str):
 
 def _self_perm(action: str):
     """Upgrade 01I: endpoint MANDIRI (pengajuan/daftar/pembatalan milik caller) tidak diblokir guard modul
-    belum-scope-aware; cabang yang menyentuh karyawan lain tetap wajib cakupan penuh (403 untuk restricted)."""
+    belum-scope-aware; unit operasional yang menyentuh karyawan lain tetap wajib cakupan penuh (403 untuk restricted)."""
     return require_permission("leave", action, "leave_overtime", self_service=True)
 
 

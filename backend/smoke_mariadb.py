@@ -44,11 +44,11 @@ for ep in endpoints:
     check(f"GET {ep}", r.status_code in (200, 403), f"{r.status_code} {r.text[:120]}")
 
 # create + update + delete a master record
-r = call("POST", "/master/branches", token, json={"code": "SMK-01", "name": "Cabang Smoke", "city": "Jakarta"})
+r = call("POST", "/master/branches", token, json={"code": "SMK-01", "name": "Unit Operasional Smoke", "city": "Jakarta"})
 check("POST branch", r.status_code in (200, 201), r.text[:200])
 if r.status_code in (200, 201):
     bid = r.json().get("id") or r.json().get("item", {}).get("id")
-    r2 = call("PUT", f"/master/branches/{bid}", token, json={"code": "SMK-01", "name": "Cabang Smoke Edit"})
+    r2 = call("PUT", f"/master/branches/{bid}", token, json={"code": "SMK-01", "name": "Unit Operasional Smoke Edit"})
     check("PUT branch", r2.status_code == 200, r2.text[:200])
     r3 = call("GET", f"/master/branches?q=Smoke", token)
     check("search regex branch", r3.status_code == 200 and any("Smoke" in (i.get("name") or "") for i in r3.json().get("items", [])), r3.text[:150])

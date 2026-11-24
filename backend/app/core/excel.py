@@ -45,7 +45,7 @@ COLUMNS: List[Tuple[str, str, bool, str, Optional[str]]] = [
     ("Jabatan (teks)", "job_title", False, "Nama jabatan bebas", None),
     ("Tanggal Masuk", "join_date", False, "Format YYYY-MM-DD", None),
     ("Status Kepegawaian", "employment_status_id", False, "Harus ada di master", "employment_statuses"),
-    ("Cabang", "branch_id", False, "Harus ada di master", "branches"),
+    ("Unit Operasional", "branch_id", False, "Harus ada di master", "branches"),
     ("Lokasi Kerja", "work_location_id", False, "Harus ada di master", "work_locations"),
     ("Departemen", "department_id", False, "Harus ada di master", "departments"),
     ("Divisi", "division_id", False, "Harus ada di master", "divisions"),
@@ -64,7 +64,7 @@ COLUMNS: List[Tuple[str, str, bool, str, Optional[str]]] = [
 
 MASTER_LABELS = {
     "employment_statuses": "Status Kepegawaian",
-    "branches": "Cabang",
+    "branches": "Unit Operasional",
     "work_locations": "Lokasi Kerja",
     "departments": "Departemen",
     "divisions": "Divisi",

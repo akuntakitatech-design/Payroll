@@ -5,14 +5,14 @@
 export const MASTER_CONFIG = {
   branches: {
     resource: "branch",
-    label: "Cabang",
-    singular: "Cabang",
+    label: "Unit Operasional",
+    singular: "Unit Operasional",
     subtitle:
-      "Daftar cabang perusahaan. Cabang menjadi acuan lokasi kerja, departemen, dan kebijakan turunan.",
+      "Daftar unit operasional perusahaan. Unit operasional menjadi acuan lokasi kerja, departemen, dan kebijakan turunan.",
     columns: ["code", "name", "city", "province", "is_head_office"],
     fields: [
-      { name: "code", label: "Kode Cabang", required: true, placeholder: "HO", hint: "Huruf besar, unik per perusahaan." },
-      { name: "name", label: "Nama Cabang", required: true, placeholder: "Head Office Jakarta" },
+      { name: "code", label: "Kode Unit Operasional", required: true, placeholder: "HO", hint: "Huruf besar, unik per perusahaan." },
+      { name: "name", label: "Nama Unit Operasional", required: true, placeholder: "Head Office Jakarta" },
       { name: "city", label: "Kota" },
       { name: "province", label: "Provinsi" },
       { name: "postal_code", label: "Kode Pos" },
@@ -33,7 +33,7 @@ export const MASTER_CONFIG = {
     fields: [
       { name: "code", label: "Kode Lokasi", required: true },
       { name: "name", label: "Nama Lokasi", required: true },
-      { name: "branch_id", label: "Cabang", type: "select", relation: "branches" },
+      { name: "branch_id", label: "Unit Operasional", type: "select", relation: "branches" },
       {
         name: "location_type",
         label: "Jenis Lokasi",
@@ -87,12 +87,12 @@ export const MASTER_CONFIG = {
     resource: "department",
     label: "Departemen",
     singular: "Departemen",
-    subtitle: "Struktur departemen beserta cabang dan cost center penanggung biaya.",
+    subtitle: "Struktur departemen beserta unit operasional dan cost center penanggung biaya.",
     columns: ["code", "name", "branch_id", "cost_center_id"],
     fields: [
       { name: "code", label: "Kode Departemen", required: true },
       { name: "name", label: "Nama Departemen", required: true },
-      { name: "branch_id", label: "Cabang", type: "select", relation: "branches" },
+      { name: "branch_id", label: "Unit Operasional", type: "select", relation: "branches" },
       { name: "cost_center_id", label: "Cost Center", type: "select", relation: "cost-centers" },
       { name: "parent_id", label: "Departemen Induk", type: "select", relation: "departments", hint: "Kosongkan bila departemen tingkat atas." },
       { name: "description", label: "Deskripsi", type: "textarea", colSpan: 2 },
@@ -153,7 +153,7 @@ export const MASTER_CONFIG = {
     fields: [
       { name: "code", label: "Kode Cost Center", required: true },
       { name: "name", label: "Nama Cost Center", required: true },
-      { name: "branch_id", label: "Cabang", type: "select", relation: "branches" },
+      { name: "branch_id", label: "Unit Operasional", type: "select", relation: "branches" },
       { name: "description", label: "Deskripsi", type: "textarea", colSpan: 2 },
     ],
   },
@@ -167,7 +167,7 @@ export const MASTER_CONFIG = {
       { name: "code", label: "Kode Proyek", required: true },
       { name: "name", label: "Nama Proyek", required: true },
       { name: "client_name", label: "Nama Klien" },
-      { name: "branch_id", label: "Cabang", type: "select", relation: "branches" },
+      { name: "branch_id", label: "Unit Operasional", type: "select", relation: "branches" },
       { name: "work_location_id", label: "Lokasi Kerja", type: "select", relation: "work-locations" },
       { name: "cost_center_id", label: "Cost Center", type: "select", relation: "cost-centers" },
       { name: "start_date", label: "Tanggal Mulai", type: "date" },
@@ -367,7 +367,7 @@ export const COLUMN_LABELS = {
   city: "Kota",
   province: "Provinsi",
   is_head_office: "Kantor Pusat",
-  branch_id: "Cabang",
+  branch_id: "Unit Operasional",
   location_type: "Jenis",
   radius_meter: "Radius (m)",
   cost_center_id: "Cost Center",

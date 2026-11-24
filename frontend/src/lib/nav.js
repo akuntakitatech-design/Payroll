@@ -73,7 +73,7 @@ export const NAV_GROUPS = [
     label: "Organisasi",
     items: [
       { key: "setup", label: "Pusat Setup", to: "/setup", icon: SlidersHorizontal, resource: "company", action: "view" },
-      { key: "branches", label: "Cabang", to: "/setup/branches", icon: Network, resource: "branch", action: "view" },
+      { key: "branches", label: "Unit Operasional", to: "/setup/branches", icon: Network, resource: "branch", action: "view" },
       { key: "work-locations", label: "Lokasi Kerja", to: "/setup/work-locations", icon: MapPin, resource: "work_location", action: "view" },
       { key: "departments", label: "Departemen", to: "/setup/departments", icon: Layers, resource: "department", action: "view" },
       { key: "divisions", label: "Divisi", to: "/setup/divisions", icon: GitBranch, resource: "division", action: "view" },
@@ -237,7 +237,7 @@ export const MODULE_INFO = {
     icon: CalendarDays,
     summary: "Pengajuan cuti dan lembur yang mengikuti kebijakan tiap unit.",
     features: [
-      "Kuota cuti mengikuti kebijakan perusahaan/cabang/proyek",
+      "Kuota cuti mengikuti kebijakan perusahaan/unit operasional/proyek",
       "Pengajuan dari ponsel oleh karyawan",
       "Persetujuan berjenjang sesuai alur yang Anda atur",
       "Saldo cuti terhitung otomatis",

@@ -10,7 +10,7 @@ MASTERS: Dict[str, Dict[str, Any]] = {
     "branches": {
         "resource": "branch",
         "collection": "branches",
-        "label": "Cabang",
+        "label": "Unit Operasional",
         "fields": ["code", "name", "address", "city", "province", "postal_code", "phone", "email", "is_head_office", "notes"],
         "required": ["code", "name"],
         "unique": ["code"],

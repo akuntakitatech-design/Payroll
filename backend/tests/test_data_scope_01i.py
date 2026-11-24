@@ -601,7 +601,7 @@ async def t_unscoped_modules(env):
         check(f"self-service tetap tersedia untuk restricted: GET {path}", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
     r = await env.c.get("/api/leave/requests?mine=true", headers=env.rops)
     check("self-service mine=true: tidak memuat pengajuan karyawan lain", r.status_code == 200 and r.json().get("total") == 0)
-    # Mengajukan untuk karyawan LAIN (cabang HR) tetap 403 untuk restricted walau endpoint self-service
+    # Mengajukan untuk karyawan LAIN (unit operasional HR) tetap 403 untuk restricted walau endpoint self-service
     lt = {"id": new_id(), "company_id": env.cid, "status": "active", "code": f"L{RUN}", "name": f"Cuti Uji {MARK}",
           "category": "annual", "deduct_balance": False, "created_at": now(), "updated_at": now()}
     await env.tdb.leave_types.insert_one(dict(lt))

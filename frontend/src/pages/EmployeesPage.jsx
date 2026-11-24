@@ -196,7 +196,7 @@ const EmployeesPage = () => {
       { name: "job_title", label: "Sebutan Jabatan" },
       { name: "join_date", label: "Tanggal Masuk", type: "date" },
       { name: "employment_status_id", label: "Status Kepegawaian", type: "select", options: options("employment_statuses") },
-      { name: "branch_id", label: "Cabang", type: "select", options: options("branches") },
+      { name: "branch_id", label: "Unit Operasional", type: "select", options: options("branches") },
       { name: "work_location_id", label: "Lokasi Kerja", type: "select", options: options("work_locations") },
       { name: "department_id", label: "Departemen", type: "select", options: options("departments") },
       { name: "division_id", label: "Divisi", type: "select", options: options("divisions") },

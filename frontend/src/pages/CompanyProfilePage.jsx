@@ -64,7 +64,7 @@ const FIELDS = [
 ];
 
 const COUNT_LABELS = {
-  branches: "Cabang",
+  branches: "Unit Operasional",
   work_locations: "Lokasi Kerja",
   departments: "Departemen",
   divisions: "Divisi",
