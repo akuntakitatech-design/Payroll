@@ -1,0 +1,83 @@
+import React, { useEffect, useRef } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { CalendarDays, CalendarRange, ClipboardList } from "lucide-react";
+
+import PageHeader from "@/components/common/PageHeader";
+import EmptyState from "@/components/common/EmptyState";
+import { useAuth } from "@/lib/auth";
+import { cn } from "@/lib/utils";
+
+export const rosterTabs = (can) =>
+  [
+    can("roster", "view") && { to: "/modules/mobilization", label: "Ringkasan", icon: ClipboardList },
+    can("roster", "view") && { to: "/modules/mobilization/kalender", label: "Kalender Roster", shortLabel: "Kalender", icon: CalendarRange },
+    can("roster", "view") && { to: "/modules/mobilization/rencana", label: "Rencana Cuti (H-30/H-10)", shortLabel: "Rencana Cuti", icon: CalendarDays },
+  ].filter(Boolean);
+
+export const RosterModuleTabs = ({ items }) => {
+  const navRef = useRef(null);
+  const location = useLocation();
+  useEffect(() => {
+    const el = navRef.current?.querySelector('[aria-current="page"]');
+    if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [location.pathname]);
+  return (
+    <div className="relative max-w-full border-b border-border bg-card">
+      <nav ref={navRef} data-testid="roster-module-tabs" aria-label="Navigasi Roster & Mobilisasi"
+        className="flex max-w-full snap-x gap-1 overflow-x-auto overscroll-x-contain px-4 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
+        {items.map((item) => (
+          <NavLink key={item.to} to={item.to} end={item.to === "/modules/mobilization"}
+            data-testid={`roster-tab-${item.to.split("/").pop()}`}
+            className={({ isActive }) => cn(
+              "inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] font-medium",
+              "transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:border-border-strong hover:text-foreground",
+            )}>
+            {item.icon && <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />}
+            {item.shortLabel ? (
+              <>
+                <span className="sm:hidden">{item.shortLabel}</span>
+                <span className="hidden sm:inline">{item.label}</span>
+              </>
+            ) : item.label}
+          </NavLink>
+        ))}
+      </nav>
+    </div>
+  );
+};
+
+const RosterModuleLayout = () => {
+  const { can, hasModule } = useAuth();
+  useEffect(() => { document.title = "Roster & Mobilisasi · HRIS Suite"; }, []);
+  const tabs = rosterTabs(can);
+  const moduleOn = hasModule("mobilization");
+
+  if (!moduleOn || !tabs.length) {
+    return (
+      <>
+        <PageHeader title="Roster & Mobilisasi" />
+        <EmptyState
+          testId="roster-module-unavailable"
+          title={moduleOn ? "Anda belum memiliki akses Roster" : "Modul Roster & Mobilisasi belum aktif"}
+          description={moduleOn
+            ? "Minta administrator menambahkan hak akses roster pada peran Anda."
+            : "Modul Roster & Mobilisasi belum diaktifkan untuk perusahaan ini. Hubungi Platform Admin untuk mengaktifkannya."}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Roster & Mobilisasi"
+        subtitle="Pola roster per project, kalender kerja/off, serta rencana cuti project H-30 dan konfirmasi H-10."
+      />
+      <RosterModuleTabs items={tabs} />
+      <Outlet />
+    </>
+  );
+};
+
+export default RosterModuleLayout;

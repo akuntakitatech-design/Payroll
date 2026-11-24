@@ -43,6 +43,7 @@ from app.routers import (
     recruitment,
     recruitment_pipeline,
     recruitment_conversion,
+    roster,
     reminders,
     schedules,
     settings_mail,
@@ -156,6 +157,7 @@ api.include_router(asset_lifecycle.router)  # Phase 2A CP2 - Penyerahan/Pengemba
 api.include_router(asset_opening.router)  # Phase 2A CP3 - Saldo Awal / Opening Existing Holding (BAST-EXS)
 api.include_router(asset_import.router)  # Phase 2A CP3 - Impor Master Aset & Impor Saldo Awal
 api.include_router(asset_documents.router)  # Phase 2A CP4 - Dokumen Transaksi Aset + Employee Asset 360
+api.include_router(roster.router)  # Module 4 CP1 - Roster Proyek, Cuti Project (H-30/H-10)
 
 app.include_router(api)
 

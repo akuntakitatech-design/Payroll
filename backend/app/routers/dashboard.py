@@ -358,7 +358,12 @@ async def summary(ctx: AuthContext = Depends(get_auth)):
             "link": "/employees",
             "note": "Modul aktif dan sudah bisa dipakai: data induk karyawan, kontrak kerja, sertifikasi dan pengingat masa berlaku.",
             "action_label": "Buka Data Karyawan",
-        }
+        },
+        "mobilization": {
+            "link": "/modules/mobilization",
+            "note": "Modul aktif: pola roster project, kalender, rencana cuti H-30/H-10 (mobilisasi GA menyusul).",
+            "action_label": "Buka Roster",
+        },
     }
 
     module_cards = []

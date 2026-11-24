@@ -80,6 +80,9 @@ RESOURCES: Dict[str, tuple] = {
     "employee_salary": ("Struktur Gaji Karyawan", "payroll", ["view", "create", "edit", "delete", "export"]),
     "payslip": ("Slip Gaji Saya", "payroll", ["view_own"]),
     "mobilization": ("Mobilisasi", "mobilization", ["view", "create", "edit", "delete", "approve"]),
+    # Module 4 - Roster Proyek, Cuti Project & Mobilisasi (CP1: pola roster + H-30/H-10)
+    "roster_pattern": ("Pola Roster", "mobilization", ["view", "create", "edit", "delete"]),
+    "roster": ("Roster & Cuti Project", "mobilization", ["view", "create", "edit", "approve"]),
     "finance_request": ("Permintaan Keuangan", "finance_request", ["view", "create", "edit", "delete", "approve", "export"]),
     "accounting": ("Akuntansi", "accounting", ["view", "create", "edit", "delete", "export"]),
     # Phase 2A CP1 - Manajemen Aset (modul `asset`). Otorisasi murni berbasis permission, bukan nama role.
@@ -105,7 +108,7 @@ MODULES: List[dict] = [
     {"key": "leave_overtime", "name": "Cuti & Lembur", "description": "Pengajuan cuti, izin, sakit, dan lembur dengan saldo berbasis buku besar.", "is_core": False, "icon": "CalendarDays", "sort_order": 5, "status": "available"},
     {"key": "performance", "name": "Kinerja / KPI", "description": "Penilaian kinerja dan KPI.", "is_core": False, "icon": "Target", "sort_order": 6, "status": "planned"},
     {"key": "payroll", "name": "Payroll", "description": "Penggajian bulanan, BPJS, PPh 21 metode TER.", "is_core": False, "icon": "Wallet", "sort_order": 7, "status": "available"},
-    {"key": "mobilization", "name": "Mobilisasi", "description": "Penempatan proyek, mobilisasi & demobilisasi.", "is_core": False, "icon": "Plane", "sort_order": 8, "status": "planned"},
+    {"key": "mobilization", "name": "Roster & Mobilisasi", "description": "Roster proyek, rencana cuti H-30/H-10, dan mobilisasi GA.", "is_core": False, "icon": "Plane", "sort_order": 8, "status": "available"},
     {"key": "finance_request", "name": "Permintaan Keuangan", "description": "Kasbon, reimbursement, permintaan dana.", "is_core": False, "icon": "Receipt", "sort_order": 9, "status": "planned"},
     {"key": "accounting", "name": "Akuntansi", "description": "Modul akuntansi opsional.", "is_core": False, "icon": "BookOpen", "sort_order": 10, "status": "planned"},
     {"key": "asset", "name": "Manajemen Aset", "description": "Master aset per unit fisik: kategori, lokasi, kondisi, dan status aset.", "is_core": False, "icon": "Package", "sort_order": 11, "status": "available"},
@@ -140,7 +143,7 @@ PLATFORM_ONLY_PERMISSIONS = {"company:create", "company:delete"}
 MASTER_RESOURCES = [
     "branch", "work_location", "department", "division", "position", "job_grade",
     "cost_center", "project", "employment_status", "contract_type",
-    "certification_type", "document_type",
+    "certification_type", "document_type", "roster_pattern",
 ]
 
 
@@ -173,6 +176,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         + ["user:view", "user:create", "user:edit", "audit_log:view", "settings:view",
            "approval_workflow:view", "policy:view", "module:view",
            "attendance:view", "leave:view", "mobilization:view", "performance:view",
+           "roster:view", "roster:create", "roster:edit",
            # Time Management V1 — HR Admin mengelola shift, jadwal, absensi, cuti & lembur
            "attendance:create", "attendance:edit", "attendance:delete", "attendance:export",
            "leave:create", "leave:edit", "leave:delete", "leave:export",
@@ -203,6 +207,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "policy:config", "audit_log:export", "settings:config", "company:edit",
         "leave:approve", "attendance:approve", "contract:approve", "recruitment:approve",
         "mobilization:approve", "performance:approve", "role:view",
+        "roster:approve",
         "payroll:approve", "payroll:config", "payroll:delete",
     ]
 
@@ -228,6 +233,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         "leave:view", "leave:approve", "attendance:view", "attendance:approve",
         "attendance:create", "leave:create",
         "performance:view", "performance:approve", "mobilization:view",
+        "roster:view",
         "mobilization:approve", "finance_request:view", "finance_request:approve",
         "attendance:export", "leave:export",
         "payslip:view_own",
@@ -239,6 +245,7 @@ def default_role_permissions() -> Dict[str, List[str]]:
         # Time Management V1 — supervisor juga karyawan (absen & ajukan sendiri)
         "attendance:create", "leave:create",
         "mobilization:view", "document:view", "project:view", "certification:view",
+        "roster:view",
         "payslip:view_own",
     ]
 
@@ -269,6 +276,9 @@ def default_role_permissions() -> Dict[str, List[str]]:
     # Phase 2A CP4 (preset): GA Admin semua; GA Staff unggah & lihat (tanpa hapus); HR Admin lihat (Profil Karyawan 360).
     asset_admin += _crud(["asset_document"], ["view", "create", "delete"])
     asset_staff += _crud(["asset_document"], ["view", "create"])
+    # Module 4 - CP1: GA Admin dapat melihat & mengubah roster/konfirmasi; GA Staff melihat.
+    asset_admin += ["roster:view", "roster:edit"]
+    asset_staff += ["roster:view"]
     hr_admin = hr_admin + ["asset:view", "asset_document:view"]
     hr_manager = hr_manager + ["asset:view"]
     finance = finance + ["asset:view", "asset_value:view"]

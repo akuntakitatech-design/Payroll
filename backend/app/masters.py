@@ -108,6 +108,16 @@ MASTERS: Dict[str, Dict[str, Any]] = {
         },
         "refs": [],
     },
+    "roster-patterns": {
+        "resource": "roster_pattern",
+        "collection": "roster_patterns",
+        "label": "Pola Roster",
+        "fields": ["code", "name", "work_days", "off_days", "description"],
+        "required": ["code", "name", "work_days", "off_days"],
+        "unique": ["code"],
+        "search": ["code", "name"],
+        "refs": [("project_roster_configs", "pattern_id", "Konfigurasi Roster Project")],
+    },
     "employment-statuses": {
         "resource": "employment_status",
         "collection": "employment_statuses",
@@ -206,6 +216,7 @@ NUMERIC_FIELDS = {
     "latitude", "longitude", "radius_meter", "gps_accuracy_max_meter", "level", "min_salary", "max_salary",
     "duration_months", "max_extension", "validity_months", "reminder_days",
     "contract_value", "max_size_mb",
+    "work_days", "off_days",  # Module 4 - Roster
     "severity", "sort_order",  # Phase 2A master aset
 }
 BOOLEAN_FIELDS = {
