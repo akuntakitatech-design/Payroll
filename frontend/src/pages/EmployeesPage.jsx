@@ -33,6 +33,7 @@ import { EmployeeStatusBadge } from "@/components/employees/EmployeeStatusBadge"
 import ChangeStatusDialog from "@/components/employees/ChangeStatusDialog";
 import { STATUS_CATEGORIES } from "@/lib/employeeStatus";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 const StatTile = ({ label, value, hint, icon: Icon, tone = "default", testId }) => {
   const tones = {
@@ -54,6 +55,39 @@ const StatTile = ({ label, value, hint, icon: Icon, tone = "default", testId }) 
   );
 };
 
+const HeadcountPanel = ({ title, items = [], total, withoutLabel, withoutCount, testId }) => {
+  const max = items.length ? Math.max(...items.map((i) => i.count)) : 1;
+  return (
+    <Card className="border-border bg-card p-4" data-testid={testId}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-section-title">{title}</h2>
+        <span className="text-[12px] text-muted-foreground tabular-nums">{total} karyawan aktif</span>
+      </div>
+      {items.length ? (
+        <div className="mt-3 space-y-2">
+          {items.slice(0, 6).map((item) => (
+            <div key={item.id} className="flex items-center gap-3 text-sm" data-testid={`${testId}-row-${item.id}`}>
+              <span className="min-w-0 flex-1 truncate">{item.name}{item.code ? ` · ${item.code}` : ""}</span>
+              <span className="hidden h-1.5 w-24 overflow-hidden rounded-full bg-muted sm:block">
+                <span className="block h-full rounded-full bg-primary" style={{ width: `${Math.max(4, Math.round((item.count / max) * 100))}%` }} />
+              </span>
+              <span className="w-8 text-right font-medium tabular-nums">{item.count}</span>
+            </div>
+          ))}
+          {items.length > 6 && <p className="text-[11px] text-muted-foreground">+{items.length - 6} lainnya</p>}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-muted-foreground">Belum ada karyawan aktif yang ditempatkan.</p>
+      )}
+      {withoutCount > 0 && (
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          {withoutLabel}: <span className="font-semibold text-foreground">{withoutCount}</span>
+        </p>
+      )}
+    </Card>
+  );
+};
+
 const EmployeesPage = () => {
   const { can, company } = useAuth();
   const navigate = useNavigate();
@@ -66,7 +100,7 @@ const EmployeesPage = () => {
 
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [filters, setFilters] = useState({ department_id: "", status: "", project_id: "", employee_status_id: "", status_category: "" });
+  const [filters, setFilters] = useState({ department_id: "", division_id: "", position_id: "", status: "", project_id: "", employee_status_id: "", status_category: "" });
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
 
@@ -169,7 +203,7 @@ const EmployeesPage = () => {
       { name: "position_id", label: "Jabatan", type: "select", options: options("positions") },
       { name: "job_grade_id", label: "Grade / Level", type: "select", options: options("job_grades") },
       { name: "cost_center_id", label: "Cost Center", type: "select", options: options("cost_centers") },
-      { name: "project_id", label: "Penempatan Proyek", type: "select", options: options("projects") },
+      { name: "project_id", label: "Penempatan Proyek", type: "select", options: options("projects"), hint: "Wajib bila Status Kepegawaian mewajibkan Project/Site." },
       { name: "bank_name", label: "Nama Bank" },
       { name: "bank_account_number", label: "Nomor Rekening" },
       { name: "bank_account_name", label: "Nama Pemilik Rekening" },
@@ -454,6 +488,27 @@ const EmployeesPage = () => {
           </div>
         )}
 
+        {stats?.headcount && (
+          <div className="grid gap-3 lg:grid-cols-2">
+            <HeadcountPanel
+              title="Headcount per Project"
+              items={stats.headcount.by_project}
+              total={stats.active}
+              withoutLabel="Belum ditempatkan pada project"
+              withoutCount={stats.headcount.without_project}
+              testId="headcount-project"
+            />
+            <HeadcountPanel
+              title="Headcount per Site"
+              items={stats.headcount.by_work_location}
+              total={stats.active}
+              withoutLabel="Belum memiliki lokasi kerja"
+              withoutCount={stats.headcount.without_work_location}
+              testId="headcount-work-location"
+            />
+          </div>
+        )}
+
         <FilterBar
           search={search}
           onSearchChange={(v) => {
@@ -465,7 +520,7 @@ const EmployeesPage = () => {
           activeFilterCount={Object.values(filters).filter(Boolean).length + (debounced ? 1 : 0)}
           onReset={() => {
             setSearch("");
-            setFilters({ department_id: "", status: "", project_id: "", employee_status_id: "", status_category: "" });
+            setFilters({ department_id: "", division_id: "", position_id: "", status: "", project_id: "", employee_status_id: "", status_category: "" });
             setPage(1);
           }}
         >
@@ -479,6 +534,28 @@ const EmployeesPage = () => {
             options={options("departments")}
             allLabel="Semua departemen"
             testId="filter-department"
+          />
+          <FilterSelect
+            label="Divisi"
+            value={filters.division_id}
+            onChange={(v) => {
+              setFilters((p) => ({ ...p, division_id: v }));
+              setPage(1);
+            }}
+            options={options("divisions")}
+            allLabel="Semua divisi"
+            testId="filter-division"
+          />
+          <FilterSelect
+            label="Jabatan"
+            value={filters.position_id}
+            onChange={(v) => {
+              setFilters((p) => ({ ...p, position_id: v }));
+              setPage(1);
+            }}
+            options={options("positions")}
+            allLabel="Semua jabatan"
+            testId="filter-position"
           />
           <FilterSelect
             label="Proyek"

@@ -112,7 +112,7 @@ MASTERS: Dict[str, Dict[str, Any]] = {
         "resource": "employment_status",
         "collection": "employment_statuses",
         "label": "Status Kepegawaian",
-        "fields": ["code", "name", "is_permanent", "requires_contract", "description"],
+        "fields": ["code", "name", "is_permanent", "requires_contract", "requires_project", "description"],
         "required": ["code", "name"],
         "unique": ["code"],
         "search": ["code", "name"],
@@ -209,7 +209,7 @@ NUMERIC_FIELDS = {
     "severity", "sort_order",  # Phase 2A master aset
 }
 BOOLEAN_FIELDS = {
-    "is_head_office", "is_supervisory", "is_permanent", "requires_contract",
+    "is_head_office", "is_supervisory", "is_permanent", "requires_contract", "requires_project",
     "is_extendable", "is_mandatory", "has_expiry", "geofence_enabled",
     "serial_number_required", "is_usable", "is_default",  # Phase 2A master aset
 }

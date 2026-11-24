@@ -185,6 +185,30 @@ async def _enrich(company_id: str, items: List[Dict[str, Any]], horizon_days: in
     return items
 
 
+async def _business_status_category(ctx: AuthContext, employee: Dict[str, Any]) -> Optional[str]:
+    status_id = employee.get("current_employee_status_id")
+    if not status_id:
+        return None
+    row = await ctx.tdb.employee_business_statuses.find_one(
+        {"company_id": ctx.company_id, "id": status_id}, NO_ID)
+    return (row or {}).get("system_category")
+
+
+async def _ensure_project_requirement(company_id: str, employment_status_id: Optional[str],
+                                      business_category: Optional[str], placement: Dict[str, Any]) -> None:
+    """Status Kepegawaian bertanda requires_project wajib punya Project/Site, kecuali karyawan Standby."""
+    requires = await asg.employment_status_requires_project(company_id, employment_status_id)
+    if not requires:
+        return
+    if business_category == "STANDBY" or asg.has_placement(placement):
+        return
+    raise HTTPException(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        f"Status kepegawaian '{requires.get('name')}' mewajibkan Project/Site aktif. Pilih Project atau "
+        "Lokasi kerja; bila karyawan belum ditempatkan, gunakan Status Karyawan berkategori Standby.",
+    )
+
+
 @router.get("/catalog")
 async def catalog(ctx: AuthContext = Depends(require_permission("employee", "view"))):
     """Semua pilihan dropdown yang dibutuhkan form karyawan - satu panggilan saja."""
@@ -249,11 +273,43 @@ async def stats(ctx: AuthContext = Depends(require_permission("employee", "view"
     )
     without_contract = 0
     with_contract = {c["employee_id"] for c in contracts}
-    active_ids = [
-        e["id"]
-        for e in await db.employees.find(dscope.with_scope({"company_id": cid, "status": "active"}, scope), {"id": 1}).to_list(5000)
-    ]
+    active_rows = await db.employees.find(
+        dscope.with_scope({"company_id": cid, "status": "active"}, scope),
+        {"id": 1, "project_id": 1, "work_location_id": 1},
+    ).to_list(20000)
+    active_ids = [e["id"] for e in active_rows]
     without_contract = len([i for i in active_ids if i not in with_contract])
+
+    # Core HR output: headcount per Project/Site (mengikuti cakupan data).
+    project_counts: Dict[str, int] = {}
+    location_counts: Dict[str, int] = {}
+    for row in active_rows:
+        pid = row.get("project_id")
+        lid = row.get("work_location_id")
+        if pid:
+            project_counts[pid] = project_counts.get(pid, 0) + 1
+        if lid:
+            location_counts[lid] = location_counts.get(lid, 0) + 1
+
+    async def _headcount(coll: str, counts: Dict[str, int]) -> List[Dict[str, Any]]:
+        if not counts:
+            return []
+        rows = await db[coll].find(
+            {"company_id": cid, "id": {"$in": list(counts)}}, {"id": 1, "code": 1, "name": 1}
+        ).to_list(2000)
+        items = [
+            {"id": r["id"], "code": r.get("code"), "name": r.get("name"), "count": counts.get(r["id"], 0)}
+            for r in rows
+        ]
+        items.sort(key=lambda x: (-x["count"], (x["name"] or "").lower()))
+        return items[:100]
+
+    headcount = {
+        "by_project": await _headcount("projects", project_counts),
+        "by_work_location": await _headcount("work_locations", location_counts),
+        "without_project": len(active_ids) - sum(project_counts.values()),
+        "without_work_location": len(active_ids) - sum(location_counts.values()),
+    }
     return {
         "total": total,
         "active": active,
@@ -265,6 +321,7 @@ async def stats(ctx: AuthContext = Depends(require_permission("employee", "view"
         "certifications_attention": cert_expiring,
         "without_contract": without_contract,
         "horizon_days": horizon,
+        "headcount": headcount,
     }
 
 
@@ -272,6 +329,7 @@ async def stats(ctx: AuthContext = Depends(require_permission("employee", "view"
 async def list_employees(
     q: Optional[str] = None,
     department_id: Optional[str] = None,
+    division_id: Optional[str] = None,
     position_id: Optional[str] = None,
     branch_id: Optional[str] = None,
     project_id: Optional[str] = None,
@@ -286,6 +344,7 @@ async def list_employees(
     filters: Dict[str, Any] = {}
     for key, value in (
         ("department_id", department_id),
+        ("division_id", division_id),
         ("position_id", position_id),
         ("branch_id", branch_id),
         ("project_id", project_id),
@@ -352,6 +411,9 @@ async def create_employee(
 
     # Upgrade 01B: karyawan baru otomatis mendapat status bisnis default tenant
     status_row = await emp_status.prepare_new_employee(ctx.company_id, data)
+    await _ensure_project_requirement(
+        ctx.company_id, data.get("employment_status_id"), (status_row or {}).get("system_category"), data
+    )
     created = await repo.create(data, ctx.user_id)
     await emp_status.record_initial_history(
         ctx.company_id, created, status_row, "SYSTEM", ctx.user_id,
@@ -505,6 +567,11 @@ async def update_employee(
         data.pop("project_id")
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tidak ada perubahan yang dikirim.")
+    # Core HR: status kepegawaian yang mewajibkan Project/Site tidak boleh dipakai tanpa penempatan.
+    if data.get("employment_status_id") and data["employment_status_id"] != current.get("employment_status_id"):
+        await _ensure_project_requirement(
+            ctx.company_id, data["employment_status_id"], await _business_status_category(ctx, current), current
+        )
     if data.get("employee_number"):
         await repo.ensure_unique(
             "employee_number", data["employee_number"], exclude_id=employee_id, label="NIK karyawan"
