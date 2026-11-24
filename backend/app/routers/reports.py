@@ -137,6 +137,9 @@ EMPLOYEE_COLUMNS = [
 
 
 async def _report_employees(ctx: AuthContext, f: Dict[str, Any]) -> Dict[str, Any]:
+    if not ctx.has_module("employee_core"):
+        return {"items": [], "total": 0, "summary": {"total": 0, "active": 0, "inactive": 0},
+                "note": "Modul Data Karyawan belum diaktifkan untuk perusahaan ini."}
     db = get_db()
     scope = await dscope.get_scope(ctx)
     flt: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}
@@ -196,6 +199,9 @@ COMPLIANCE_COLUMNS = [
 
 
 async def _report_compliance(ctx: AuthContext, f: Dict[str, Any]) -> Dict[str, Any]:
+    if not ctx.has_module("employee_core"):
+        return {"items": [], "total": 0, "summary": {"total": 0, "expired": 0, "due_soon": 0},
+                "note": "Modul Data Karyawan belum diaktifkan untuk perusahaan ini."}
     db = get_db()
     today = _today()
     raw_horizon = f.get("horizon_days")
@@ -274,6 +280,9 @@ ROSTER_COLUMNS = [
 
 
 async def _report_roster(ctx: AuthContext, f: Dict[str, Any]) -> Dict[str, Any]:
+    if not ctx.has_module("mobilization"):
+        return {"items": [], "total": 0, "summary": {"total": 0, "confirmed": 0, "pending_approval": 0},
+                "note": "Modul Roster & Mobilisasi belum diaktifkan untuk perusahaan ini."}
     db = get_db()
     scope = await dscope.get_scope(ctx)
     flt: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}
@@ -434,6 +443,10 @@ EXIT_COLUMNS = [
 
 
 async def _report_exit(ctx: AuthContext, f: Dict[str, Any]) -> Dict[str, Any]:
+    if not ctx.has_module("employee_core"):
+        return {"items": [], "total": 0,
+                "summary": {"total": 0, "open": 0, "completed": 0, "outstanding_assets": 0},
+                "note": "Modul Data Karyawan belum diaktifkan untuk perusahaan ini."}
     db = get_db()
     scope = await dscope.get_scope(ctx)
     flt: Dict[str, Any] = {"company_id": ctx.company_id, "status": {"$ne": "deleted"}}

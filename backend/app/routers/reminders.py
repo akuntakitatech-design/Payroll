@@ -43,7 +43,7 @@ async def expiry_calendar(
         allowed_kinds.append("contract")
     if ctx.has_permission("certification", "view") and ctx.has_module("employee_core"):
         allowed_kinds.append("certification")
-    if ctx.has_permission("document", "view"):
+    if ctx.has_permission("document", "view") and ctx.has_module("employee_core"):
         allowed_kinds.append("document")
 
     wanted = [k for k in allowed_kinds if not kind or k == kind]

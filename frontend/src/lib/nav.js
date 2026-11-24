@@ -329,3 +329,30 @@ export const filterNav = ({ can, hasModule, isPlatformAdmin = false }) =>
         hasModule(item.module)
     ),
   })).filter((group) => group.items.length > 0);
+
+const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
+const KNOWN_MODULES = new Set(NAV_ITEMS.map((item) => item.module).filter(Boolean));
+
+/**
+ * Modul pemilik sebuah URL, atau null bila halaman bukan milik modul tertentu.
+ *
+ * Menu hanya MENYEMBUNYIKAN tautan; guard route memakai fungsi ini agar URL
+ * langsung (bookmark, tautan lama) juga ditolak saat modulnya tidak aktif.
+ */
+export const matchNavModule = (pathname = "") => {
+  const path = String(pathname).split("?")[0].split("#")[0].replace(/\/+$/, "") || "/";
+
+  // /modules/<key>/... -> modul sesuai segmen (termasuk /modules/asset yang tanpa index route).
+  const direct = path.match(/^\/modules\/([^/]+)/);
+  if (direct && KNOWN_MODULES.has(direct[1])) return direct[1];
+
+  let best = null;
+  NAV_ITEMS.forEach((item) => {
+    if (!item.module || !item.to) return;
+    const base = item.to.replace(/\/+$/, "");
+    if (path === base || path.startsWith(`${base}/`)) {
+      if (!best || base.length > best.base.length) best = { base, module: item.module };
+    }
+  });
+  return best ? best.module : null;
+};

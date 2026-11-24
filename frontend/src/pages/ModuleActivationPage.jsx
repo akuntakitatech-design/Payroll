@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
  * sehingga menu yang tampil di tenant selalu mengikuti modul yang diambil tenant.
  */
 const ModuleActivationPage = () => {
-  const { can, company } = useAuth();
+  const { can, company, hasModule } = useAuth();
   const mode = useSystemMode();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +71,9 @@ const ModuleActivationPage = () => {
           const Icon = info?.icon || ShieldCheck;
           const readiness = moduleReadiness(mod);
           const nav = NAV_GROUPS.flatMap((group) => group.items).find((item) => item.module === mod.key && !item.hidden);
-          const canOpen = mod.is_active && nav && (!nav.resource || can(nav.resource, nav.action || "view"));
+          // Modul bisa "aktif" di katalog tetapi terkunci karena prasyaratnya mati.
+          const blocked = Boolean(mod.blocked_by) || (mod.is_active && !hasModule(mod.key));
+          const canOpen = mod.is_active && !blocked && nav && (!nav.resource || can(nav.resource, nav.action || "view"));
           return <Card key={mod.key} className="border-border bg-card p-4 transition-colors hover:border-primary/30" data-testid={`module-card-${mod.key}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground"><Icon className="h-4 w-4" /></span>
@@ -79,6 +81,7 @@ const ModuleActivationPage = () => {
                   <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{mod.key === "attendance" ? "Struktur kehadiran, GPS, jadwal kerja, dan koreksi HR." : mod.description}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5"><Badge variant="outline" className="text-[10px] font-normal" data-testid={`module-audit-badge-${mod.key}`}>{moduleAuditGroup(mod)}</Badge><span className="text-[11px] font-medium text-primary" data-testid={`module-readiness-${mod.key}`}>{readiness.label}</span></div>
                   <p className="mt-1 text-[11px] text-muted-foreground">{readiness.description}</p>
+                  {blocked && <p className="mt-1 text-[11px] font-medium text-warning" data-testid={`module-blocked-${mod.key}`}>Menunggu modul {mod.blocked_by || "prasyarat"} diaktifkan.</p>}
                   {mod.is_active && mod.activated_at && <p className="mt-1 text-[10px] text-muted-foreground">Aktif sejak {formatDateTime(mod.activated_at)}</p>}
                 </div>
               </div>

@@ -60,7 +60,7 @@ export const AssetModuleTabs = ({ items }) => {
 };
 
 const AssetModuleLayout = () => {
-  const { can, hasModule } = useAuth();
+  const { can } = useAuth();
   const location = useLocation();
 
   useEffect(() => {
@@ -68,20 +68,17 @@ const AssetModuleLayout = () => {
   }, []);
 
   const tabs = assetTabs(can);
-  const moduleOn = hasModule("asset");
 
-  if (!moduleOn || !tabs.length) {
+  // Modul nonaktif ditangani satu kali oleh ModuleGate di AppShell; di sini hanya
+  // kasus tidak punya satu pun tab yang diizinkan.
+  if (!tabs.length) {
     return (
       <>
         <PageHeader title="Manajemen Aset" />
         <EmptyState
           testId="asset-module-unavailable"
-          title={moduleOn ? "Anda belum memiliki akses Manajemen Aset" : "Modul Manajemen Aset belum aktif"}
-          description={
-            moduleOn
-              ? "Minta administrator menambahkan hak akses aset pada peran Anda."
-              : "Modul Manajemen Aset belum diaktifkan untuk perusahaan ini. Hubungi Platform Admin untuk mengaktifkannya."
-          }
+          title="Anda belum memiliki akses Manajemen Aset"
+          description="Minta administrator menambahkan hak akses aset pada peran Anda."
         />
       </>
     );
