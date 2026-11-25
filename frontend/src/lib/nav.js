@@ -92,7 +92,7 @@ export const NAV_GROUPS = [
       { key: "contract-types", label: "Tipe Kontrak", to: "/setup/contract-types", icon: FileSignature, resource: "contract_type", action: "view" },
       { key: "certification-types", label: "Tipe Sertifikasi", to: "/setup/certification-types", icon: Award, resource: "certification_type", action: "view" },
       { key: "document-types", label: "Tipe Dokumen", to: "/setup/document-types", icon: FileText, resource: "document_type", action: "view" },
-      { key: "roster-patterns", label: "Pola Roster", to: "/setup/roster-patterns", icon: CalendarRange, resource: "roster_pattern", action: "view" },
+      { key: "roster-patterns", label: "Pola Roster", to: "/setup/roster-patterns", icon: CalendarRange, resource: "roster_pattern", action: "view", module: "mobilization" },
     ],
   },
   {

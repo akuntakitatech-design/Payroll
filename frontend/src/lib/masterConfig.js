@@ -178,6 +178,21 @@ export const MASTER_CONFIG = {
     currencyFields: ["contract_value"],
     dateFields: ["start_date", "end_date"],
   },
+  "roster-patterns": {
+    resource: "roster_pattern",
+    label: "Pola Roster",
+    singular: "Pola Roster",
+    subtitle:
+      "Siklus hari kerja dan hari off untuk roster project. Pola ini dipakai menghitung kalender roster dan rencana cuti project (H-30/H-10).",
+    columns: ["code", "name", "work_days", "off_days"],
+    fields: [
+      { name: "code", label: "Kode Pola", required: true, placeholder: "R28-14", hint: "Huruf besar, unik per perusahaan." },
+      { name: "name", label: "Nama Pola", required: true, placeholder: "28 hari kerja / 14 hari off" },
+      { name: "work_days", label: "Hari Kerja per Siklus", type: "number", required: true, hint: "Minimal 1 hari." },
+      { name: "off_days", label: "Hari Off per Siklus", type: "number", required: true, hint: "Minimal 1 hari." },
+      { name: "description", label: "Deskripsi", type: "textarea", colSpan: 2 },
+    ],
+  },
   "employment-statuses": {
     resource: "employment_status",
     label: "Status Kepegawaian",
@@ -387,6 +402,9 @@ export const COLUMN_LABELS = {
   duration_months: "Durasi (bln)",
   is_extendable: "Perpanjangan",
   max_extension: "Maks Perpanjangan",
+  work_days: "Hari Kerja",
+  off_days: "Hari Off",
+  description: "Deskripsi",
   issuing_body: "Penerbit",
   validity_months: "Masa Berlaku (bln)",
   is_mandatory: "Wajib",
