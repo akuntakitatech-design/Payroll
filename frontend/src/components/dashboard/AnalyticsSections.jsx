@@ -7,8 +7,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChartCard, DonutChart, BarList, TrendChart, PeriodBars } from "./charts";
+import { ChartCard, ChoicePills, DonutChart, BarList, TrendChart, PeriodBars, Sparkline, RatioBar } from "./charts";
 import { formatMoney, formatMinutes, formatNumber, formatPct } from "@/lib/dashboardAnalytics";
 
 const KPI_ICONS = {
@@ -39,22 +38,68 @@ const formatKpiValue = (kpi) => {
   return formatNumber(kpi.value);
 };
 
-const KpiTile = ({ kpi }) => {
+const KpiVisual = ({ kpi, total, series }) => {
+  const headcount = series?.headcount || [];
+  const joined = series?.joined || [];
+  const exited = series?.exited || [];
+  const share = total ? Math.round((Number(kpi.value || 0) / total) * 100) : 0;
+
+  if (kpi.key === "total_employees" && headcount.length > 1) {
+    return <Sparkline values={headcount} color="#102D40" testId="kpi-spark-total" ariaLabel="Tren headcount 6 bulan" />;
+  }
+  if (kpi.key === "joined" && joined.length > 1) {
+    return <Sparkline values={joined} color="#087E70" testId="kpi-spark-joined" ariaLabel="Tren karyawan masuk 6 bulan" />;
+  }
+  if (kpi.key === "exited" && exited.length > 1) {
+    return <Sparkline values={exited} color="#B45309" testId="kpi-spark-exited" ariaLabel="Tren karyawan keluar 6 bulan" />;
+  }
+  if (kpi.key === "active_employees" && total) {
+    return <RatioBar value={kpi.value} max={total} caption={`${share}% dari total karyawan`} testId="kpi-ratio-active" />;
+  }
+  if (kpi.key === "inactive_employees" && total) {
+    return <RatioBar value={kpi.value} max={total} tone="danger" caption={`${share}% dari total karyawan`} testId="kpi-ratio-inactive" />;
+  }
+  if (kpi.key === "turnover") {
+    const prev = Number(kpi.prev || 0);
+    const max = Math.max(Number(kpi.value || 0), prev, 5);
+    return (
+      <RatioBar
+        value={kpi.value}
+        max={max}
+        tone={Number(kpi.value || 0) > prev ? "warning" : "primary"}
+        caption={`Skala 0–${max}% · sebelumnya ${prev}%`}
+        testId="kpi-ratio-turnover"
+      />
+    );
+  }
+  if (kpi.key === "retention") {
+    return <RatioBar value={kpi.value || 0} max={100} caption="dari 100%" testId="kpi-ratio-retention" />;
+  }
+  return null;
+};
+
+const KpiTile = ({ kpi, total, series }) => {
   const Icon = KPI_ICONS[kpi.key] || Gauge;
   const delta = kpi.delta_pct;
   const neutral = delta === null || delta === undefined || delta === 0;
   const good = neutral ? null : kpi.good_when === "down" ? delta < 0 : delta > 0;
   const DeltaIcon = neutral || delta === 0 ? Info : delta > 0 ? ArrowUpRight : ArrowDownRight;
+  const visual = <KpiVisual kpi={kpi} total={total} series={series} />;
+
   const body = (
     <>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-[12.5px] font-semibold uppercase tracking-[0.04em] text-ink-3">{kpi.label}</p>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-border bg-[linear-gradient(180deg,hsl(var(--primary-soft))_0%,#FFFFFF_100%)] text-primary shadow-[var(--shadow-raised)]">
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgba(8,126,112,0.10),transparent_70%)]"
+      />
+      <div className="relative flex items-start justify-between gap-3">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.05em] text-ink-3">{kpi.label}</p>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary-border bg-[linear-gradient(180deg,#FFFFFF_0%,hsl(var(--primary-soft))_100%)] text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_3px_8px_-3px_rgba(8,126,112,0.45)]">
           <Icon className="h-4 w-4" strokeWidth={1.9} />
         </span>
       </div>
-      <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-[26px] font-bold leading-[1.1] tracking-[-0.02em] text-ink-1 tabular-nums">
+      <div className="relative mt-1.5 flex items-baseline gap-2">
+        <span className="text-[30px] font-bold leading-none tracking-[-0.02em] text-ink-1 tabular-nums">
           {formatKpiValue(kpi)}
         </span>
         {!neutral && (
@@ -65,7 +110,8 @@ const KpiTile = ({ kpi }) => {
           </span>
         )}
       </div>
-      <p className="mt-1 line-clamp-2 text-[11.5px] leading-relaxed text-ink-3">
+      {visual && <div className="relative mt-2.5">{visual}</div>}
+      <p className="relative mt-1.5 line-clamp-2 text-[11.5px] leading-relaxed text-ink-3">
         {kpi.note || (kpi.prev !== null && kpi.prev !== undefined
           ? `Sebelumnya ${formatKpiValue({ ...kpi, value: kpi.prev })}`
           : kpi.tooltip || "")}
@@ -73,27 +119,27 @@ const KpiTile = ({ kpi }) => {
     </>
   );
 
-  const className = "flex flex-col rounded-card border border-border bg-card p-4 shadow-card transition-[box-shadow,border-color] duration-150";
+  const base = "group relative flex flex-col overflow-hidden rounded-xl border border-border bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFC_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_4px_rgba(15,23,42,0.05),0_14px_30px_-18px_rgba(15,23,42,0.28)] transition-[transform,box-shadow,border-color] duration-150";
+  const interactive = "hover:-translate-y-0.5 hover:border-primary-border hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_10px_rgba(15,23,42,0.07),0_22px_40px_-20px_rgba(8,126,112,0.35)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
   if (!kpi.link) {
-    return <div className={className} title={kpi.tooltip} data-testid={`kpi-${kpi.key}-card`}>{body}</div>;
+    return <div className={base} title={kpi.tooltip} data-testid={`kpi-${kpi.key}-card`}>{body}</div>;
   }
   return (
-    <Link
-      to={kpi.link}
-      title={kpi.tooltip}
-      className={cn(className, "group hover:border-primary-border hover:shadow-float focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
-      data-testid={`kpi-${kpi.key}-card`}
-    >
+    <Link to={kpi.link} title={kpi.tooltip} className={cn(base, interactive)} data-testid={`kpi-${kpi.key}-card`}>
       {body}
     </Link>
   );
 };
 
-export const KpiGrid = ({ kpis = [], testId = "dashboard-kpi-grid" }) => (
-  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" data-testid={testId}>
-    {kpis.map((kpi) => <KpiTile key={kpi.key} kpi={kpi} />)}
-  </div>
-);
+export const KpiGrid = ({ kpis = [], series, testId = "dashboard-kpi-grid" }) => {
+  const total = kpis.find((k) => k.key === "total_employees")?.value || 0;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" data-testid={testId}>
+      {kpis.map((kpi) => <KpiTile key={kpi.key} kpi={kpi} total={total} series={series} />)}
+    </div>
+  );
+};
 
 const Metric = ({ label, value, hint, tone }) => (
   <div className="rounded-lg border border-border bg-secondary/60 px-3 py-2.5">
@@ -207,17 +253,16 @@ export const DemographyWidget = ({ demography, filters = {}, onCrossFilter, char
           <span>Tanpa pendidikan: <strong className="text-ink-1">{formatNumber(missing.education || 0)}</strong></span>
         </div>
       }
-      actions={
-        <Select value={tab} onValueChange={setTab}>
-          <SelectTrigger className="h-8 w-[190px] text-[12px]" data-testid="demography-selector">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DEMO_TABS.map((t) => <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      }
+      actions={null}
     >
+      <ChoicePills
+        options={DEMO_TABS.map((t) => ({ key: t.key, label: t.label, testId: `demography-tab-${t.key}` }))}
+        value={tab}
+        onChange={setTab}
+        testId="demography-tabs"
+        ariaLabel="Jenis analisis demografi"
+        className="mb-3"
+      />
       {mode === "donut" ? (
         <DonutChart
           items={items}
@@ -276,17 +321,16 @@ export const OrganizationWidget = ({ organization, filters = {}, onFilter }) => 
           <span>Belum ditempatkan: <strong className="text-ink-1">{formatNumber(coverage.unassigned || 0)}</strong></span>
         </div>
       }
-      actions={
-        <Select value={dim} onValueChange={setDim}>
-          <SelectTrigger className="h-8 w-[190px] text-[12px]" data-testid="organization-dimension">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ORG_DIMENSIONS.map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      }
+      actions={null}
     >
+      <ChoicePills
+        options={ORG_DIMENSIONS.map(([key, label]) => ({ key, label, testId: `organization-tab-${key}` }))}
+        value={dim}
+        onChange={setDim}
+        testId="organization-tabs"
+        ariaLabel="Dimensi distribusi tenaga kerja"
+        className="mb-3"
+      />
       {block.state === "not_supported" ? (
         <p className="py-6 text-[12.5px] leading-relaxed text-ink-3">{block.note}</p>
       ) : (

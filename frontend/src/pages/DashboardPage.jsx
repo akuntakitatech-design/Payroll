@@ -14,8 +14,8 @@ import { Label } from "@/components/ui/label";
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger,
 } from "@/components/ui/sheet";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
+import { ChoicePills } from "@/components/dashboard/charts";
 import {
   ActionCenter, AdministrationWidget, AttendanceWidget, CompetencyWidget, DemographyWidget,
   InsightList, KpiGrid, MovementWidget, OrganizationWidget, PayrollWidget, RecruitmentWidget,
@@ -48,17 +48,10 @@ const WIDGET_META = {
   insights: { label: "Executive Insight" },
 };
 
-const ChartTypeSelect = ({ value, onChange, testId }) => (
-  <Select value={value} onValueChange={onChange}>
-    <SelectTrigger className="h-7 w-[104px] text-[11.5px]" data-testid={testId}>
-      <SelectValue />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="donut">Donut</SelectItem>
-      <SelectItem value="bars">Batang</SelectItem>
-    </SelectContent>
-  </Select>
-);
+const CHART_TYPE_OPTIONS = [
+  { key: "donut", label: "Donut" },
+  { key: "bars", label: "Batang" },
+];
 
 const DashboardPage = () => {
   const { session, can, hasModule } = useAuth();
@@ -190,10 +183,19 @@ const DashboardPage = () => {
   const data = state.data;
   const kpis = data?.kpis || [];
   const chartType = prefs.chartTypes?.demography || "donut";
+  // Deret 6 bulan dari backend dipakai untuk sparkline di kartu KPI.
+  const series = useMemo(() => {
+    const trailing = data?.movement?.trailing || [];
+    return {
+      headcount: trailing.map((p) => p.headcount),
+      joined: trailing.map((p) => p.joined),
+      exited: trailing.map((p) => p.exited),
+    };
+  }, [data]);
 
   const renderSummary = () => {
     const blocks = {
-      kpi: <KpiGrid kpis={kpis} />,
+      kpi: <KpiGrid kpis={kpis} series={series} />,
       action_center: <ActionCenter items={data?.action_center || []} />,
       demography: (
         <DemographyWidget
@@ -224,13 +226,15 @@ const DashboardPage = () => {
     if (tab === "summary") return renderSummary();
     return (
       <div className="grid gap-4">
-        {canPeople && <KpiGrid kpis={kpis} testId="dashboard-kpi-grid-secondary" />}
+        {canPeople && <KpiGrid kpis={kpis} series={series} testId="dashboard-kpi-grid-secondary" />}
         {tab === "demography" && (
-          <div className="flex justify-end">
-            <ChartTypeSelect
+          <div className="flex flex-wrap items-center justify-end gap-2" data-testid="dashboard-chart-type">
+            <span className="text-[11.5px] font-medium text-ink-3">Tipe grafik</span>
+            <ChoicePills
+              options={CHART_TYPE_OPTIONS}
               value={chartType}
               onChange={(value) => updatePrefs({ ...prefs, chartTypes: { ...(prefs.chartTypes || {}), demography: value } })}
-              testId="dashboard-chart-type"
+              ariaLabel="Tipe grafik demografi"
             />
           </div>
         )}

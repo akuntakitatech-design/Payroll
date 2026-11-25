@@ -329,6 +329,10 @@ check(out["headcount"] == {"start": 3, "end": 3, "average": 3.0}, "headcount awa
 check(kpis["turnover"]["value"] == 33.33, "turnover = 33.33% (1/3)", kpis["turnover"]["value"])
 check(out["movement"]["net_growth"] == 0, "net growth = 0", out["movement"]["net_growth"])
 check(out["movement"]["mutations"] == 1, "mutasi penempatan = 1", out["movement"]["mutations"])
+check(len(out["movement"]["trailing"]) == 6, "deret 6 bulan untuk sparkline tersedia",
+      len(out["movement"]["trailing"]))
+check(out["movement"]["trailing"][-1]["headcount"] == out["headcount"]["end"],
+      "headcount deret terakhir = headcount akhir periode", out["movement"]["trailing"][-1])
 
 print("== 2. Demografi ==")
 demo = out["demography"]
