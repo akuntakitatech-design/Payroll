@@ -42,7 +42,7 @@ const SECTIONS = [
       { to: "/setup/contract-types", label: "Tipe Kontrak", icon: FileSignature, resource: "contract_type", desc: "Durasi dan perpanjangan kontrak" },
       { to: "/setup/certification-types", label: "Tipe Sertifikasi", icon: Award, resource: "certification_type", desc: "Sertifikat wajib dan masa berlaku" },
       { to: "/setup/document-types", label: "Tipe Dokumen", icon: FileText, resource: "document_type", desc: "CV, KTP, ijazah, kontrak, kwitansi" },
-      { to: "/setup/roster-patterns", label: "Pola Roster", icon: CalendarRange, resource: "roster_pattern", desc: "Pola kerja/off untuk roster project" },
+      { to: "/setup/roster-patterns", label: "Pola Roster", icon: CalendarRange, resource: "roster_pattern", module: "mobilization", desc: "Pola kerja/off untuk roster project" },
     ],
   },
   {
@@ -67,7 +67,7 @@ const SECTIONS = [
 ];
 
 const SetupHubPage = () => {
-  const { can } = useAuth();
+  const { can, hasModule } = useAuth();
 
   useEffect(() => {
     document.title = "Pusat Setup · HRIS Suite";
@@ -81,7 +81,7 @@ const SetupHubPage = () => {
       />
       <PageBody>
         {SECTIONS.map((section) => {
-          const items = section.items.filter((i) => can(i.resource, "view"));
+          const items = section.items.filter((i) => can(i.resource, "view") && hasModule(i.module));
           if (!items.length) return null;
           return (
             <section key={section.key} className="space-y-3" data-testid={`setup-section-${section.key}`}>

@@ -10,6 +10,7 @@ import DataTable, { FilterBar, FilterSelect, Pagination, TableCard } from "@/com
 import FormDialog from "@/components/common/FormDialog";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import StatusBadge from "@/components/common/StatusBadge";
+import EmptyState from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -117,7 +118,22 @@ const MasterDataPage = ({ resourcePath, embedded = false }) => {
     loadOptions();
   }, [loadOptions]);
 
-  if (!config) return null;
+  // Jangan pernah render kosong: master tanpa konfigurasi tampil sebagai halaman kosong
+  // yang membingungkan (pernah terjadi pada Pola Roster sebelum konfigurasinya ditambahkan).
+  if (!config) {
+    return (
+      <>
+        <PageHeader title="Master Data" subtitle="Konfigurasi halaman master belum tersedia." />
+        <PageBody>
+          <EmptyState
+            testId="master-config-missing"
+            title="Halaman master belum dikonfigurasi"
+            description={`Tidak ada definisi kolom dan formulir untuk "${resourcePath}". Hubungi pengembang agar konfigurasi master ditambahkan.`}
+          />
+        </PageBody>
+      </>
+    );
+  }
 
   const fieldsWithOptions = config.fields.map((f) =>
     f.relation
