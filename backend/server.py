@@ -28,6 +28,7 @@ from app.routers import (
     completeness,
     contracts,
     dashboard,
+    dashboard_analytics,
     documents,
     employee_assignment,
     employee_import,
@@ -145,6 +146,7 @@ api.include_router(reminders.router)
 api.include_router(policies.router)
 api.include_router(audit_logs.router)
 api.include_router(dashboard.router)
+api.include_router(dashboard_analytics.router)
 api.include_router(payroll.router)
 api.include_router(recruitment.router)
 api.include_router(recruitment_pipeline.router)
