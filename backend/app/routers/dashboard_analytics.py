@@ -615,6 +615,26 @@ async def analytics(
         e = sum(1 for d in exit_map.values() if d.isoformat()[:7] == m)
         trend.append({"month": m, "joined": j, "exited": e, "net": j - e})
 
+    # Deret 6 bulan terakhir (selalu 6, tidak bergantung preset) untuk sparkline KPI.
+    def _month_last(month: str) -> date:
+        year, mon = int(month[:4]), int(month[5:7])
+        return (date(year + 1, 1, 1) if mon == 12 else date(year, mon + 1, 1)) - timedelta(days=1)
+
+    anchor = end.replace(day=1)
+    trail_start = anchor
+    for _ in range(5):
+        trail_start = (trail_start - timedelta(days=1)).replace(day=1)
+    trailing = []
+    for month in _months_between(trail_start, end):
+        last_day = min(_month_last(month), today)
+        trailing.append({
+            "month": month,
+            "headcount": _headcount(last_day),
+            "joined": sum(1 for r in employees
+                          if (jd := _pdate(r.get("join_date"))) and jd.isoformat()[:7] == month),
+            "exited": sum(1 for d in exit_map.values() if d.isoformat()[:7] == month),
+        })
+
     exit_types = _grouped([ex.get("exit_type") for ex in exits
                            if (ex.get("case_state") or "").upper() in EXIT_STATES_CLOSED
                            and start <= (_pdate(ex.get("last_working_date")) or date.min) <= end], {}, None)
@@ -630,6 +650,7 @@ async def analytics(
     result["movement"] = {
         "period_months": months,
         "trend": trend,
+        "trailing": trailing,
         "joined": joined,
         "exited": exited,
         "net_growth": joined - exited,

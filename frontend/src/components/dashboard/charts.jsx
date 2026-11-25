@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useId } from "react";
 import { cn } from "@/lib/utils";
 
 /** Palet terbatas untuk kategori data. Status memakai warna semantik terpisah. */
@@ -66,6 +66,97 @@ const LegendRows = ({ items, onSelect, activeKey, valueSuffix = "" }) => (
       );
     })}
   </ul>
+);
+
+/** Sparkline mini untuk tren 6 bulan di kartu KPI. */
+export const Sparkline = ({ values = [], color = "#087E70", height = 38, testId, ariaLabel }) => {
+  const rawId = useId();
+  const gradientId = `spark-${rawId.replace(/[^a-zA-Z0-9]/g, "")}`;
+  const points = values.map((v) => Number(v || 0));
+  if (points.length < 2) return null;
+  const width = 180;
+  const pad = 5;
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const span = max - min || 1;
+  const px = (index) => pad + (index * (width - pad * 2)) / (points.length - 1);
+  const py = (value) => height - pad - ((value - min) / span) * (height - pad * 2);
+  const line = points.map((v, i) => `${px(i)},${py(v)}`).join(" ");
+  const area = `${pad},${height - pad} ${line} ${width - pad},${height - pad}`;
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-[38px] w-full"
+      role="img"
+      aria-label={ariaLabel || "Tren"}
+      data-testid={testId}
+      preserveAspectRatio="none"
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={area} fill={`url(#${gradientId})`} />
+      <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {points.map((value, index) => (
+        <circle key={index} cx={px(index)} cy={py(value)} r="2" fill="#FFFFFF" stroke={color} strokeWidth="1.6">
+          <title>{`${value}`}</title>
+        </circle>
+      ))}
+    </svg>
+  );
+};
+
+/** Bar rasio (mis. porsi karyawan aktif terhadap total). */
+export const RatioBar = ({ value = 0, max = 100, tone = "primary", caption, testId }) => {
+  const pct = max > 0 ? Math.min(100, Math.round((Number(value || 0) / max) * 1000) / 10) : 0;
+  const color = tone === "danger" ? "#B91C1C" : tone === "warning" ? "#B45309" : tone === "neutral" ? "#94A3B8" : "#087E70";
+  return (
+    <div data-testid={testId}>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-[#E2E8F0] shadow-[inset_0_1px_2px_rgba(15,23,42,0.12)]">
+        <div
+          className="h-full rounded-full transition-[width] duration-500"
+          style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: color }}
+        />
+      </div>
+      {caption && <p className="mt-1 text-[10.5px] text-ink-3">{caption}</p>}
+    </div>
+  );
+};
+
+/** Deret tombol pilihan (soft 3D) sebagai pengganti dropdown navigasi. */
+export const ChoicePills = ({ options = [], value, onChange, testId, ariaLabel, className }) => (
+  <div
+    role="tablist"
+    aria-label={ariaLabel}
+    className={cn("flex flex-wrap gap-1.5", className)}
+    data-testid={testId}
+  >
+    {options.map((opt) => {
+      const active = opt.key === value;
+      return (
+        <button
+          key={opt.key}
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => onChange?.(opt.key)}
+          className={cn(
+            "shrink-0 rounded-lg border px-2.5 py-1 text-[12px] font-semibold transition-[box-shadow,border-color,transform] duration-150",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            active
+              ? "border-[#065F50] bg-[linear-gradient(180deg,#087E70_0%,#065F50_100%)] text-white shadow-[0_2px_0_#043F36,inset_0_1px_0_rgba(255,255,255,0.18)]"
+              : "border-border bg-[linear-gradient(180deg,#FFFFFF_0%,#F1F5F9_100%)] text-ink-2 shadow-[0_1px_0_#CBD5E1] hover:border-primary-border hover:text-ink-1 active:translate-y-px"
+          )}
+          data-testid={opt.testId}
+        >
+          {opt.label}
+        </button>
+      );
+    })}
+  </div>
 );
 
 /** Donut komposisi + legenda. Klik legenda/segmen dipakai untuk cross-filter. */
